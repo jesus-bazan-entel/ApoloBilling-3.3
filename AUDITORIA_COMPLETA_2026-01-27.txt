@@ -1,0 +1,237 @@
+═══════════════════════════════════════════════════════════════════════════════
+  ✅ AUDITORÍA COMPLETA IMPLEMENTADA - ACCOUNTS, PLANS Y RATE CARDS
+═══════════════════════════════════════════════════════════════════════════════
+
+📅 Fecha: 27 de Enero de 2026
+👤 Usuario: admin
+🎯 Objetivo: Auditoría completa con tracking de cambios old/new
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1️⃣  AUDITORÍA DE RATE CARDS (Tarifas)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ create_rate_card
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: destination_prefix, destination_name, rate_per_minute, billing_increment
+
+✅ update_rate_card
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: destination_prefix, changes (old/new de cada campo modificado)
+   └─ Ejemplo:
+      • destination_name: "Uruguay Móvil" → "Uruguay Móvil - Promoción"
+      • rate_per_minute: 0.25 → 0.20
+
+✅ delete_rate_card
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: destination_prefix, destination_name, deleted_at
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2️⃣  AUDITORÍA DE ACCOUNTS (Cuentas)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ create_account
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: account_number, account_type, balance, credit_limit, plan_id
+
+✅ update_account (MEJORADO con old/new)
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: account_number, changes (old/new de cada campo modificado)
+   └─ Ejemplo registrado:
+      • status: "Active" → "Suspended"
+      • credit_limit: 0 → 50
+      • max_concurrent_calls: 5 → 10
+
+✅ topup_account
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: account_number, amount, previous_balance, new_balance, reason
+
+✅ delete_account
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: account_number, account_type
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3️⃣  AUDITORÍA DE PLANS (Planes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ create_plan
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: plan_name, plan_code, account_type, initial_balance, credit_limit, max_concurrent_calls
+
+✅ update_plan (MEJORADO con old/new)
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: plan_code, changes (old/new de cada campo modificado)
+   └─ Ejemplo registrado:
+      • plan_name: "Prepago Básico" → "Prepago Básico - Actualizado"
+      • initial_balance: 10.0000 → 15
+      • max_concurrent_calls: 5 → 8
+      • enabled: true → false
+
+✅ delete_plan
+   └─ Se registra: usuario, entity_id
+   └─ Detalles: plan_name, plan_code
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4️⃣  OTRAS OPERACIONES AUDITADAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ create_zone / delete_zone
+✅ create_prefix / delete_prefix
+✅ create_tariff / delete_tariff
+✅ login / logout
+✅ alter_table_remove_constraint (operaciones DDL manuales)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5️⃣  ARCHIVOS MODIFICADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 Rate Cards (Implementado en sesión anterior):
+   └─ /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/rate_card.rs
+      • create_rate_card() - Auditoría completa
+      • update_rate_card() - Auditoría con old/new
+      • delete_rate_card() - Auditoría completa
+
+📁 Accounts (MEJORADO en esta sesión):
+   └─ /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/account.rs
+      • create_account() - ✓ Ya tenía auditoría
+      • update_account() - ✅ MEJORADO con old/new
+      • topup_account() - ✓ Ya tenía auditoría
+      • delete_account() - ✓ Ya tenía auditoría
+
+📁 Plans (MEJORADO en esta sesión):
+   └─ /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/plan.rs
+      • create_plan() - ✓ Ya tenía auditoría
+      • update_plan() - ✅ MEJORADO con old/new
+      • delete_plan() - ✓ Ya tenía auditoría
+
+📁 Filtrado de operaciones postgres/DDL:
+   └─ /opt/ApoloBilling/rust-backend/crates/apolo-db/src/repositories/audit_repo.rs
+      • find_with_filters() - Filtrado automático
+      • count_with_filters() - Filtrado automático
+
+   └─ /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/audit.rs
+      • top_actions query - Filtrado automático
+      • top_users query - Filtrado automático
+      • total_logs query - Filtrado automático
+      • logs_last_24h query - Filtrado automático
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6️⃣  PRUEBAS REALIZADAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Rate Cards:
+   • CREATE: Tarifa "598 - Uruguay Móvil" @ $0.25/min
+   • UPDATE: Modificar a "Uruguay Móvil - Promoción" @ $0.20/min
+   • DELETE: Eliminar tarifa
+   └─ Resultado: ✅ Todas las operaciones auditadas correctamente
+
+✅ Accounts:
+   • UPDATE: Account #100001
+     - status: "Active" → "Suspended"
+     - credit_limit: 0 → 50
+     - max_concurrent_calls: 5 → 10
+   └─ Resultado: ✅ Cambios old/new capturados correctamente
+
+✅ Plans:
+   • UPDATE: Plan "PRE-BAS"
+     - plan_name: "Prepago Básico" → "Prepago Básico - Actualizado"
+     - initial_balance: 10 → 15
+     - max_concurrent_calls: 5 → 8
+     - enabled: true → false
+   └─ Resultado: ✅ Cambios old/new capturados correctamente
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7️⃣  RESUMEN DE OPERACIONES AUDITADAS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Acción                         | Total
+──────────────────────────────┼───────
+login                          |   13
+create_rate_card               |    1
+update_rate_card               |    1
+delete_rate_card               |    1
+create_account                 |    1
+update_account                 |    1
+topup_account                  |   ?
+delete_account                 |   ?
+create_plan                    |    1
+update_plan                    |    1
+delete_plan                    |    0
+create_zone                    |    1
+delete_zone                    |    1
+create_prefix                  |    1
+delete_prefix                  |    1
+create_tariff                  |    1
+delete_tariff                  |    1
+logout                         |    1
+alter_table_remove_constraint  |    1
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8️⃣  CONSULTAS SQL ÚTILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- Ver todas las operaciones de una entidad específica
+SELECT id, username, action, entity_id, created_at
+FROM audit_logs
+WHERE entity_type = 'account' AND entity_id = '1'
+ORDER BY created_at DESC;
+
+-- Ver cambios con old/new de una operación específica
+SELECT 
+    id, username, action, entity_type, entity_id,
+    jsonb_pretty(details) as detalles,
+    created_at
+FROM audit_logs
+WHERE id = 43;
+
+-- Ver todas las modificaciones en las últimas 24 horas
+SELECT 
+    id, username, action, entity_type,
+    details->>'account_number' as account,
+    details->>'plan_code' as plan,
+    details->>'destination_prefix' as prefix,
+    created_at
+FROM audit_logs
+WHERE created_at >= NOW() - INTERVAL '24 hours'
+  AND action LIKE '%update%'
+ORDER BY created_at DESC;
+
+-- Ver historial completo de cambios de una cuenta
+SELECT 
+    id,
+    action,
+    details->'changes' as cambios,
+    created_at
+FROM audit_logs
+WHERE entity_type = 'account' 
+  AND entity_id = '1'
+  AND action = 'update_account'
+ORDER BY created_at DESC;
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+9️⃣  ESTADO DEL SISTEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Backend compilado: OK (2m 24s)
+✅ Servicio apolo-backend: Activo y funcionando
+✅ Health check: OK
+✅ Auditoría Rate Cards: Completa con old/new
+✅ Auditoría Accounts: Completa con old/new
+✅ Auditoría Plans: Completa con old/new
+✅ Filtros postgres/DDL: Activos
+✅ Sistema: Listo para producción
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔟  BENEFICIOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Trazabilidad completa de todas las operaciones críticas
+✅ Valores OLD y NEW para análisis de cambios
+✅ Identificación de usuario que realizó cada acción
+✅ Timestamps precisos para auditorías
+✅ Interfaz limpia sin operaciones técnicas
+✅ Cumplimiento de normativas de auditoría
+✅ Facilita investigación de incidentes
+✅ Permite revertir cambios si es necesario
+
+═══════════════════════════════════════════════════════════════════════════════
+
