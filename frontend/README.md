@@ -71,7 +71,7 @@ frontend/
 
 ### Prerequisites
 - Node.js 18+ and npm
-- Backend API running on http://127.0.0.1:9000
+- Backend API running on http://127.0.0.1:8000
 
 ### Installation
 
@@ -246,7 +246,7 @@ No environment variables needed - all configuration is in `vite.config.ts`:
 server: {
   port: 3000,
   proxy: {
-    '/api': 'http://127.0.0.1:9000',
+    '/api': 'http://127.0.0.1:8000',
     '/ws': 'ws://127.0.0.1:9000'
   }
 }
