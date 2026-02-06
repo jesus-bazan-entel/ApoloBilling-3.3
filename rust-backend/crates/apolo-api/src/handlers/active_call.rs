@@ -34,7 +34,7 @@ pub async fn list_active_calls(
             id, call_id as call_uuid, calling_number, called_number,
             direction, start_time, current_duration, current_cost,
             connection_id as server_id, last_updated as updated_at, server,
-            client_id, answer_time, status, zone
+            client_id, answer_time, status, rate_per_minute
         FROM active_calls
         ORDER BY start_time DESC
         "#,
@@ -72,8 +72,8 @@ pub async fn list_active_calls(
                 current_cost: row
                     .get::<Option<Decimal>, _>("current_cost")
                     .unwrap_or(Decimal::ZERO),
-                zone_name: row.get::<Option<String>, _>("zone"),
-                rate_per_minute: None,
+                zone_name: None,
+                rate_per_minute: row.get::<Option<Decimal>, _>("rate_per_minute"),
                 account_id: row.get::<Option<i32>, _>("client_id"),
                 max_duration: None,
                 remaining_duration: None,

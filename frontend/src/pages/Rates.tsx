@@ -354,9 +354,42 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
     })
   }
 
+  const [validationError, setValidationError] = useState<string | null>(null)
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit(formData)
+    setValidationError(null)
+
+    // Validate dates: effective_end must be >= effective_start
+    if (formData.effective_end && formData.effective_start) {
+      const startDate = new Date(formData.effective_start)
+      const endDate = new Date(formData.effective_end)
+      if (endDate < startDate) {
+        setValidationError('La fecha de fin no puede ser anterior a la fecha de inicio')
+        return
+      }
+    }
+
+    // For update, only send fields the backend accepts
+    if (rate) {
+      const updateData: Partial<RateCard> = {
+        destination_name: formData.destination_name,
+        rate_per_minute: formData.rate_per_minute,
+        billing_increment: formData.billing_increment,
+        connection_fee: formData.connection_fee,
+        priority: formData.priority,
+        effective_end: formData.effective_end ? new Date(formData.effective_end).toISOString() : null,
+      }
+      onSubmit(updateData)
+    } else {
+      // For create, send all fields
+      const createData = {
+        ...formData,
+        effective_start: formData.effective_start ? new Date(formData.effective_start).toISOString() : new Date().toISOString(),
+        effective_end: formData.effective_end ? new Date(formData.effective_end).toISOString() : null,
+      }
+      onSubmit(createData)
+    }
   }
 
   return (
@@ -375,9 +408,9 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
+          {(error || validationError) && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-              {error}
+              {validationError || error}
             </div>
           )}
 

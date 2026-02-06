@@ -130,7 +130,7 @@ impl ReservationManager {
             .execute(
                 "INSERT INTO balance_reservations
                 (id, account_id, call_uuid, reserved_amount, consumed_amount, released_amount,
-                status, reservation_type, destination_prefix, rate_per_minute, reserved_minutes,
+                status, type, destination_prefix, rate_per_minute, reserved_minutes,
                 expires_at, created_by)
                 VALUES ($1, $2, $3, $4, $5, $6, 'active', 'initial',
                         $7, $8, $9, $10, 'system')",
@@ -396,7 +396,7 @@ impl ReservationManager {
         transaction
             .execute(
                 "INSERT INTO balance_transactions
-                 (account_id, amount, previous_balance, new_balance, transaction_type, reason, call_uuid)
+                 (account_id, amount, previous_balance, new_balance, type, reason, call_uuid)
                  SELECT $1, $2, balance + $2, balance, 'reservation_consume', $3, $4
                  FROM accounts WHERE id = $1",
                 &[
@@ -469,7 +469,7 @@ impl ReservationManager {
         transaction
             .execute(
                 "INSERT INTO balance_transactions
-                 (account_id, amount, previous_balance, new_balance, transaction_type, reason, call_uuid)
+                 (account_id, amount, previous_balance, new_balance, type, reason, call_uuid)
                  VALUES ($1, $2, $3, $4, 'reservation_consume', $5, $6)",
                 &[
                     &account_id_i32,
@@ -486,7 +486,7 @@ impl ReservationManager {
         let _ = transaction
             .execute(
                 "INSERT INTO balance_transactions
-                 (account_id, amount, previous_balance, new_balance, transaction_type, reason, call_uuid)
+                 (account_id, amount, previous_balance, new_balance, type, reason, call_uuid)
                  VALUES ($1, $2, $3, $4, 'deficit_incurred', $5, $6)",
                 &[
                     &account_id_i32,
@@ -532,7 +532,7 @@ impl ReservationManager {
                 let _ = transaction
                     .execute(
                         "INSERT INTO balance_transactions
-                         (account_id, amount, previous_balance, new_balance, transaction_type, reason, call_uuid)
+                         (account_id, amount, previous_balance, new_balance, type, reason, call_uuid)
                          VALUES ($1, 0, $2, $2, 'account_suspended', $3, $4)",
                         &[
                             &account_id_i32,
@@ -601,7 +601,7 @@ impl ReservationManager {
             .query(
                 "SELECT amount, reason, call_uuid, created_at
                  FROM balance_transactions
-                 WHERE account_id = $1 AND transaction_type = 'deficit_incurred'
+                 WHERE account_id = $1 AND type = 'deficit_incurred'
                  ORDER BY created_at DESC
                  LIMIT 100",
                 &[&account_id_i32],
@@ -711,7 +711,7 @@ impl ReservationManager {
             .execute(
                 "INSERT INTO balance_reservations
                 (id, account_id, call_uuid, reserved_amount, consumed_amount, released_amount,
-                status, reservation_type, destination_prefix, rate_per_minute, reserved_minutes,
+                status, type, destination_prefix, rate_per_minute, reserved_minutes,
                 expires_at, created_by)
                 VALUES ($1, $2, $3, $4, $5, $6, 'active', 'extension',
                         $7, $8, $9, $10, 'system_extension')",

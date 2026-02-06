@@ -8,7 +8,8 @@ export function getAccountDisplayInfo(account: Account): AccountDisplayInfo {
   const isPrepaid = account.account_type?.toLowerCase() === 'prepaid'
   const balance = Number(account.balance) || 0
   const creditLimit = Number(account.credit_limit) || 0
-  const availableBalance = Number(account.available_balance) || 0
+  // availableBalance del backend se usa solo para prepago
+  // Para postpago calculamos localmente: creditLimit - consumedCredit
 
   if (isPrepaid) {
     // PREPAGO: solo mostrar saldo disponible (siempre positivo)
@@ -23,12 +24,18 @@ export function getAccountDisplayInfo(account: Account): AccountDisplayInfo {
     }
   } else {
     // POSTPAGO: mostrar consumido/límite/disponible
-    // Si backend ya envió consumed_credit y utilization_percent, usar esos valores
+    // El balance empieza en credit_limit y se va restando con cada llamada
+    // consumido = lo que se ha gastado = credit_limit - balance
+    // disponible = lo que queda por gastar = balance
+
+    // Si backend ya envió consumed_credit, usar ese valor
+    // Sino, calcular: consumido = credit_limit - balance (si balance <= credit_limit)
     const consumedCredit = account.consumed_credit !== undefined
       ? Number(account.consumed_credit)
-      : Math.abs(Math.min(0, balance))  // Fallback: calcular desde balance
+      : (balance <= creditLimit ? Math.max(0, creditLimit - balance) : 0)
 
-    const availableCredit = Math.max(0, availableBalance)
+    // Disponible = el balance actual (lo que queda)
+    const availableCredit = Math.max(0, Math.min(balance, creditLimit))
 
     const utilization = account.utilization_percent !== undefined
       ? Number(account.utilization_percent)

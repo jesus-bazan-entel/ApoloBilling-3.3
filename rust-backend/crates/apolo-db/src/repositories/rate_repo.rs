@@ -40,6 +40,7 @@ impl Repository<RateCard, i32> for PgRateRepository {
                 effective_start, effective_end, priority,
                 created_at, updated_at
             FROM rate_cards
+            WHERE (effective_end IS NULL OR effective_end > NOW())
             WHERE id = $1
             "#,
         )
@@ -69,6 +70,7 @@ impl Repository<RateCard, i32> for PgRateRepository {
                 effective_start, effective_end, priority,
                 created_at, updated_at
             FROM rate_cards
+            WHERE (effective_end IS NULL OR effective_end > NOW())
             ORDER BY priority DESC, destination_prefix
             LIMIT $1 OFFSET $2
             "#,
@@ -87,7 +89,7 @@ impl Repository<RateCard, i32> for PgRateRepository {
 
     #[instrument(skip(self))]
     async fn count(&self) -> AppResult<i64> {
-        let result: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rate_cards")
+        let result: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM rate_cards WHERE (effective_end IS NULL OR effective_end > NOW())")
             .fetch_one(&self.pool)
             .await
             .map_err(|e| {
@@ -240,6 +242,7 @@ impl RateRepository for PgRateRepository {
                 effective_start, effective_end, priority,
                 created_at, updated_at
             FROM rate_cards
+            WHERE (effective_end IS NULL OR effective_end > NOW())
             WHERE destination_prefix = ANY($1)
                 AND effective_start <= NOW()
                 AND (effective_end IS NULL OR effective_end > NOW())
@@ -289,11 +292,12 @@ impl RateRepository for PgRateRepository {
                 effective_start, effective_end, priority,
                 created_at, updated_at
             FROM rate_cards
+            WHERE (effective_end IS NULL OR effective_end > NOW())
             WHERE 1=1
             "#,
         );
 
-        let mut count_query = String::from("SELECT COUNT(*) FROM rate_cards WHERE 1=1");
+        let mut count_query = String::from("SELECT COUNT(*) FROM rate_cards WHERE (effective_end IS NULL OR effective_end > NOW()) WHERE 1=1");
 
         if let Some(p) = prefix {
             let pattern = format!(" AND destination_prefix LIKE '{}%'", p.replace('\'', "''"));
