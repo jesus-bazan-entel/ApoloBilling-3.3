@@ -17,6 +17,7 @@ import {
   Shield,
   UserCog,
   FileSearch,
+  Network,
 } from 'lucide-react'
 
 const baseNavigation = [
@@ -33,6 +34,7 @@ const baseNavigation = [
 const superadminNavigation = [
   { name: 'Gestión de Usuarios', href: '/users', icon: UserCog },
   { name: 'Auditoría de Acciones', href: '/audit-logs', icon: FileSearch },
+  { name: 'Dialplan FreeSWITCH', href: '/dialplan', icon: Network },
 ]
 
 interface LayoutProps {

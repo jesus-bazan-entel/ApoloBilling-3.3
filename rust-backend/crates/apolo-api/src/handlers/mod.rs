@@ -6,6 +6,7 @@ pub mod audit;
 pub mod auth;
 pub mod cdr;
 pub mod dashboard;
+pub mod dialplan;
 pub mod management;
 pub mod plan;
 pub mod rate;
@@ -16,6 +17,7 @@ pub mod user;
 pub mod ws;
 
 pub use account::configure as configure_accounts;
+pub use dialplan::configure as configure_dialplan;
 pub use active_call::configure as configure_active_calls;
 pub use active_call::create_cdr;
 pub use audit::configure as configure_audit;

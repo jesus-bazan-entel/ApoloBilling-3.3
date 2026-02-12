@@ -7,9 +7,9 @@ use actix_cors::Cors;
 use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
-    configure_dashboard, configure_management, configure_plans, configure_rate_cards,
-    configure_rates, configure_reservations, configure_stats, configure_users, create_cdr,
-    ws_handler,
+    configure_dashboard, configure_dialplan, configure_management, configure_plans,
+    configure_rate_cards, configure_rates, configure_reservations, configure_stats,
+    configure_users, create_cdr, ws_handler,
 };
 use apolo_auth::{JwtService, PasswordService};
 use apolo_db::create_pool;
@@ -57,6 +57,8 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_reservations)
             // Zone/Prefix/Tariff management endpoints
             .configure(configure_management)
+            // Dialplan FreeSWITCH management (superadmin only)
+            .configure(configure_dialplan)
             // CDR endpoints - high-volume operations
             .service(
                 web::scope("/cdrs")

@@ -10,6 +10,7 @@ import type {
   DashboardStats,
   PaginatedResponse,
   CDRFilters,
+  DialplanRoute,
 } from '../types'
 
 const api = axios.create({
@@ -554,6 +555,32 @@ export const fetchAuditLogs = async (filters: AuditLogFilters) => {
 
 export const fetchAuditStats = async () => {
   const { data } = await api.get('/audit-logs/stats')
+  return data.data || data
+}
+
+// ============== DIALPLAN (FreeSWITCH Configuration) ==============
+
+export const fetchDialplanRoutes = async (context: string): Promise<DialplanRoute[]> => {
+  const { data } = await api.get(`/dialplan/${context}`)
+  return data.data || data
+}
+
+export const createDialplanRoute = async (context: string, route: Partial<DialplanRoute>): Promise<DialplanRoute> => {
+  const { data } = await api.post(`/dialplan/${context}`, route)
+  return data.data || data
+}
+
+export const updateDialplanRoute = async (context: string, id: string, route: Partial<DialplanRoute>): Promise<DialplanRoute> => {
+  const { data } = await api.put(`/dialplan/${context}/${id}`, route)
+  return data.data || data
+}
+
+export const deleteDialplanRoute = async (context: string, id: string): Promise<void> => {
+  await api.delete(`/dialplan/${context}/${id}`)
+}
+
+export const reloadDialplan = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/dialplan/reload')
   return data.data || data
 }
 

@@ -11,6 +11,7 @@ import Rates from './pages/Rates'
 import Plans from './pages/Plans'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
+import Dialplan from './pages/Dialplan'
 import Login from './pages/Login'
 import { getCurrentUser } from './api/client'
 import type { UserRole } from './types'
@@ -111,6 +112,14 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute requiredRole="superadmin">
                       <AuditLogs />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/dialplan"
+                  element={
+                    <ProtectedRoute requiredRole="superadmin">
+                      <Dialplan />
                     </ProtectedRoute>
                   }
                 />

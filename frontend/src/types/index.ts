@@ -261,3 +261,27 @@ export interface CDRFilters {
   max_duration?: number
   hangup_cause?: string
 }
+
+// Dialplan Route for FreeSWITCH configuration
+export interface BridgeDestination {
+  ip: string
+  port: number
+}
+
+export interface DialplanRoute {
+  id: string
+  name: string
+  priority: number
+  prefix_pattern: string
+  destination_ip: string
+  destination_port: number
+  sip_profile: string
+  bypass_media: boolean
+  inherit_codec: boolean
+  enable_100rel: boolean
+  ignore_early_media: boolean
+  call_timeout?: number
+  source_ip_filter?: string
+  failover_destinations: BridgeDestination[]
+  enabled: boolean
+}
