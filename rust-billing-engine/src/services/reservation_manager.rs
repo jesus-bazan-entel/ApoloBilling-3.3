@@ -16,7 +16,7 @@ const RESERVATION_BUFFER_PERCENT: i32 = 8;
 const MIN_RESERVATION_AMOUNT: f64 = 0.30;
 const MAX_RESERVATION_AMOUNT: f64 = 30.00;
 const RESERVATION_TTL: i64 = 2700; // 45 minutes
-const MAX_CONCURRENT_CALLS: i32 = 5;
+const DEFAULT_MAX_CONCURRENT_CALLS: i32 = 5;
 
 // Deficit management constants
 const MAX_DEFICIT_AMOUNT: f64 = 10.00;       // Maximum allowed negative balance
@@ -72,6 +72,7 @@ impl ReservationManager {
         call_uuid: &str,
         destination: &str,
         rate_per_minute: Decimal,
+        max_concurrent_calls: Option<i32>,
     ) -> Result<ReservationResult, BillingError> {
         // Calculate amount to reserve
         let base_amount = rate_per_minute * Decimal::from(INITIAL_RESERVATION_MINUTES);
@@ -104,8 +105,9 @@ impl ReservationManager {
             });
         }
 
-        // Check concurrent limits
-        if !self.check_concurrent_limits(account_id, total_reservation).await? {
+        // Check concurrent limits using account-specific limit
+        let limit = max_concurrent_calls.unwrap_or(DEFAULT_MAX_CONCURRENT_CALLS);
+        if !self.check_concurrent_limits(account_id, limit).await? {
             return Ok(ReservationResult {
                 success: false,
                 reason: "concurrent_limit_exceeded".to_string(),
@@ -333,13 +335,18 @@ impl ReservationManager {
     async fn check_concurrent_limits(
         &self,
         account_id: i64,
-        _new_reservation: Decimal,
+        max_concurrent_calls: i32,
     ) -> Result<bool, BillingError> {
         let active_count = self.redis
             .scard(&CacheKeys::active_reservations(account_id))
             .await?;
 
-        Ok(active_count < MAX_CONCURRENT_CALLS)
+        info!(
+            "Concurrent calls check: account {} has {} active, limit {}",
+            account_id, active_count, max_concurrent_calls
+        );
+
+        Ok(active_count < max_concurrent_calls)
     }
 
     /// Consume reservations within a transaction (normal case)

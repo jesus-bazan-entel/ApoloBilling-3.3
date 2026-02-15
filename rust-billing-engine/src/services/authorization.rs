@@ -220,13 +220,14 @@ impl AuthorizationService {
             });
         }
 
-        // 5. Create new reservation
+        // 5. Create new reservation (pass account's concurrent call limit)
         let reservation_result = self.reservation_mgr
             .create_reservation(
                 account.id.into(),
                 &call_uuid,
                 &req.callee,
                 rate.rate_per_minute,
+                account.max_concurrent_calls,
             )
             .await?;
 
