@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Cuentas (FreeSWITCH){% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Gestión de Cuentas</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li>
+        <li class="breadcrumb-item active">Cuentas</li>
+    </ol>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-users me-1"></i>
+                Listado de Cuentas
+            </div>
+            <div>
+                <button class="btn btn-primary btn-sm me-2" data-bs-toggle="modal" data-bs-target="#modalNuevaCuenta">
+                    <i class="fas fa-plus me-1"></i> Nueva Cuenta
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover" id="accountsTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Número de Cuenta</th>
+                            <th>Teléfono Cliente</th>
+                            <th>Tipo</th>
+                            <th class="text-end">Saldo</th>
+                            <th class="text-end">Crédito Límite</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for account in accounts %}
+                        <tr>
+                            <td>{{ account.id }}</td>
+                            <td>{{ account.account_number }}</td>
+                            <td>{{ account.customer_phone or '-' }}</td>
+                            <td>
+                                <span
+                                    class="badge {% if account.account_type.value == 'prepaid' %}bg-success{% else %}bg-info{% endif %}">
+                                    {{ account.account_type.value|upper }}
+                                </span>
+                            </td>
+                            <td class="text-end">{{ "%.4f"|format(account.balance) }} {{ account.currency }}</td>
+                            <td class="text-end">{{ "%.4f"|format(account.credit_limit) }} {{ account.currency }}</td>
+                            <td>
+                                {% if account.status.value == 'active' %}
+                                <span class="badge bg-success">ACTIVA</span>
+                                {% elif account.status.value == 'suspended' %}
+                                <span class="badge bg-warning text-dark">SUSPENDIDA</span>
+                                {% else %}
+                                <span class="badge bg-danger">CERRADA</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-sm btn-primary btn-topup" data-id="{{ account.id }}"
+                                    title="Recargar">
+                                    <i class="fas fa-money-bill-wave"></i>
+                                </button>
+                                <button class="btn btn-sm btn-secondary btn-edit" data-id="{{ account.id }}"
+                                    title="Editar">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nueva Cuenta -->
+<div class="modal fade" id="modalNuevaCuenta" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nueva Cuenta</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formNuevaCuenta">
+                    <div class="mb-3">
+                        <label class="form-label">Número de Cuenta / SIP User</label>
+                        <input type="text" class="form-control" name="account_number" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Teléfono Cliente (Opcional)</label>
+                        <input type="text" class="form-control" name="customer_phone">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Tipo de Cuenta</label>
+                        <select class="form-select" name="account_type">
+                            <option value="prepaid">Prepago</option>
+                            <option value="postpaid">Postpago</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Límite de Crédito</label>
+                        <input type="number" class="form-control" name="credit_limit" value="0.00" step="0.01">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Canales Concurrentes Máx.</label>
+                        <input type="number" class="form-control" name="max_concurrent_calls" value="1">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarCuenta">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Recarga -->
+<div class="modal fade" id="modalTopup" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Recargar Saldo</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formTopup">
+                    <input type="hidden" id="topup_account_id">
+                    <div class="mb-3">
+                        <label class="form-label">Monto a Recargar</label>
+                        <input type="number" class="form-control" id="topup_amount" step="0.01" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-success" id="btnProcesarRecarga">Recargar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Save New Account
+        document.getElementById('btnGuardarCuenta').addEventListener('click', function () {
+            const form = document.getElementById('formNuevaCuenta');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            fetch('/api/accounts/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.id) {
+                        location.reload();
+                    } else {
+                        alert('Error al crear cuenta');
+                    }
+                });
+        });
+
+        // Topup Handler
+        document.querySelectorAll('.btn-topup').forEach(btn => {
+            btn.addEventListener('click', function () {
+                document.getElementById('topup_account_id').value = this.dataset.id;
+                new bootstrap.Modal(document.getElementById('modalTopup')).show();
+            });
+        });
+
+        document.getElementById('btnProcesarRecarga').addEventListener('click', function () {
+            const accountId = document.getElementById('topup_account_id').value;
+            const amount = document.getElementById('topup_amount').value;
+
+            fetch(`/api/accounts/${accountId}/topup?amount=${amount}`, {
+                method: 'POST'
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        location.reload();
+                    } else {
+                        alert('Error en recarga');
+                    }
+                });
+        });
+    });
+</script>
+{% endblock %}

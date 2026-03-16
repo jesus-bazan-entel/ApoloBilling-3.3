@@ -1,0 +1,728 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Abonados{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Gestión de Abonados</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/saldo">Dashboard</a></li>
+        <li class="breadcrumb-item active">Abonados</li>
+    </ol>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-phone me-1"></i>
+                Listado de Números
+            </div>
+            <div>
+                <a href="#" class="btn btn-primary btn-sm me-2" data-bs-toggle="modal"
+                    data-bs-target="#modalNuevoAnexo">
+                    <i class="fas fa-plus me-1"></i> Nuevo
+                </a>
+                <a href="/dashboard/anexos/carga_masiva" class="btn btn-success btn-sm me-2">
+                    <i class="fas fa-file-import me-1"></i> Carga Masiva
+                </a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <form action="/dashboard/lineas" method="get">
+                        <div class="input-group">
+                            <input type="text" class="form-control" placeholder="Buscar número, usuario o área..."
+                                name="buscar" value="{{ buscar }}">
+                            <select class="form-select" name="tipo_filtro" style="max-width: 150px;">
+                                <option value="">Todos los tipos</option>
+                                <option value="anexo" {% if tipo_filtro=='anexo' %}selected{% endif %}>Anexos</option>
+                                <option value="extension" {% if tipo_filtro=='extension' %}selected{% endif %}>
+                                    Extensiones</option>
+                                <option value="linea" {% if tipo_filtro=='linea' %}selected{% endif %}>Líneas Carrier
+                                </option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            {% if buscar or tipo_filtro %}
+                            <a href="/dashboard/lineas" class="btn btn-outline-danger">
+                                <i class="fas fa-times"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="text-muted">Total: {{ total_records }} registros</span>
+                </div>
+            </div>
+
+            <div class="table-responsive shadow-sm rounded">
+                <table class="table table-hover align-middle mb-0 bg-white">
+                    <thead class="bg-light text-secondary">
+                        <tr>
+                            <th class="py-3 ps-3">Número</th>
+                            <th class="py-3">Tipo</th>
+                            <th class="py-3">Usuario</th>
+                            <th class="py-3">Plan Comercial</th>
+                            <th class="py-3">Ciclo Facturación</th>
+                            <th class="py-3">Documento ID</th>
+                            <th class="py-3 text-end">Saldo</th>
+                            <th class="py-3">Estado</th>
+                            <th class="py-3 text-center pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td class="ps-3 fw-bold">{{ row.numero }}</td>
+                            <td>
+                                {% if row.tipo == 'anexo' %}
+                                <span
+                                    class="badge bg-primary bg-opacity-10 text-primary px-3 py-2 rounded-pill">Anexo</span>
+                                {% elif row.tipo == 'extension' %}
+                                <span
+                                    class="badge bg-info bg-opacity-10 text-info px-3 py-2 rounded-pill">Extensión</span>
+                                {% else %}
+                                <span
+                                    class="badge bg-secondary bg-opacity-10 text-secondary px-3 py-2 rounded-pill">Línea</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="avatar-initials bg-light text-dark rounded-circle me-2 d-flex align-items-center justify-content-center"
+                                        style="width: 32px; height: 32px;">
+                                        {{ row.usuario[:1] }}
+                                    </div>
+                                    {{ row.usuario }}
+                                </div>
+                            </td>
+                            <td><span class="text-dark fw-medium">{{ row.area_nivel1 }}</span></td>
+                            <td><span class="text-muted small">{{ row.area_nivel2 or "-" }}</span></td>
+                            <td><span class="text-dark small fw-bold">{{ row.documento_id or "-" }}</span></td>
+                            <td class="text-end fw-bold {{ 'text-danger' if row.saldo < 0 else 'text-success' }}">
+                                S/{{ "%.2f"|format(row.saldo or 0) }}
+                            </td>
+                            <td>
+                                {% if row.activo %}
+                                <span class="badge bg-success bg-opacity-10 text-success rounded-pill">Activo</span>
+                                {% else %}
+                                <span class="badge bg-danger bg-opacity-10 text-danger rounded-pill">Inactivo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center pe-3">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-primary btn-sm btn-editar shadow-sm"
+                                        data-id="{{ row.id }}" title="Editar">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+
+                                    {% if row.activo %}
+                                    <button type="button"
+                                        class="btn btn-warning btn-sm btn-cambiar-estado shadow-sm text-white"
+                                        data-id="{{ row.id }}" data-estado="true" title="Bloquear">
+                                        <i class="fas fa-lock"></i>
+                                    </button>
+                                    {% else %}
+                                    <button type="button" class="btn btn-success btn-sm btn-cambiar-estado shadow-sm"
+                                        data-id="{{ row.id }}" data-estado="false" title="Desbloquear">
+                                        <i class="fas fa-lock-open"></i>
+                                    </button>
+                                    {% endif %}
+
+                                    <button type="button" class="btn btn-danger btn-sm btn-eliminar shadow-sm"
+                                        data-id="{{ row.id }}" data-numero="{{ row.numero }}"
+                                        title="Eliminar Definitivamente">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="10" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                                No hay registros encontrados
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Paginación -->
+            {% if total_pages > 1 %}
+            <nav aria-label="Paginación">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page=1{% if buscar %}&buscar={{ buscar }}{% endif %}{% if tipo_filtro %}&tipo_filtro={{ tipo_filtro }}{% endif %}"
+                            aria-label="Primera">
+                            <span aria-hidden="true">&laquo;&laquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ page - 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if tipo_filtro %}&tipo_filtro={{ tipo_filtro }}{% endif %}"
+                            aria-label="Anterior">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+
+                    {% set start_page = [page - 2, 1]|max %}
+                    {% set end_page = [start_page + 4, total_pages]|min %}
+                    {% set start_page = [end_page - 4, 1]|max %}
+
+                    {% for p in range(start_page, end_page + 1) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ p }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if tipo_filtro %}&tipo_filtro={{ tipo_filtro }}{% endif %}">{{
+                            p }}</a>
+                    </li>
+                    {% endfor %}
+
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ page + 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if tipo_filtro %}&tipo_filtro={{ tipo_filtro }}{% endif %}"
+                            aria-label="Siguiente">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ total_pages }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if tipo_filtro %}&tipo_filtro={{ tipo_filtro }}{% endif %}"
+                            aria-label="Última">
+                            <span aria-hidden="true">&raquo;&raquo;</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuevo Registro -->
+<div class="modal fade" id="modalNuevoAnexo" tabindex="-1" aria-labelledby="modalNuevoAnexoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalNuevoAnexoLabel">Nuevo Registro</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formNuevoAnexo">
+                    <div class="mb-3">
+                        <label for="numero" class="form-label">Número*</label>
+                        <input type="text" class="form-control" id="numero" name="numero" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tipo" class="form-label">Tipo*</label>
+                        <select class="form-select" id="tipo" name="tipo" required>
+                            <option value="anexo">Anexo (Cisco/Interno)</option>
+                            <option value="extension">Extensión (SIP/Genérica)</option>
+                            <option value="linea">Línea Carrier (Externa)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="usuario" class="form-label">Usuario / Responsable*</label>
+                        <input type="text" class="form-control" id="usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="area_nivel1" class="form-label">Plan Comercial*</label>
+                        <select class="form-select" id="area_nivel1" name="area_nivel1" required>
+                            <option value="">Seleccione un Plan...</option>
+                            {% for plan in planes %}
+                            <option value="{{ plan.nombre }}" data-modo="{{ plan.modo }}">{{ plan.nombre }} ({{
+                                plan.modo|capitalize }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="area_nivel2" class="form-label">Área Nivel 2</label>
+                        <input type="text" class="form-control" id="area_nivel2" name="area_nivel2" list="areas_nivel2">
+                        <datalist id="areas_nivel2">
+                            {% for area in areas_nivel2 %}
+                            <option value="{{ area }}">
+                                {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label for="documento_id" class="form-label">Documento de Identidad (DNI/RUC/Pasaporte)</label>
+                        <input type="text" class="form-control" id="documento_id" name="documento_id">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarAnexo">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Editar Registro -->
+<div class="modal fade" id="modalEditarAnexo" tabindex="-1" aria-labelledby="modalEditarAnexoLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalEditarAnexoLabel">Editar Registro</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditarAnexo">
+                    <input type="hidden" id="edit_id" name="id">
+                    <div class="mb-3">
+                        <label for="edit_numero" class="form-label">Número*</label>
+                        <input type="text" class="form-control" id="edit_numero" name="numero" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_tipo" class="form-label">Tipo*</label>
+                        <select class="form-select" id="edit_tipo" name="tipo" required>
+                            <option value="anexo">Anexo (Cisco/Interno)</option>
+                            <option value="extension">Extensión (SIP/Genérica)</option>
+                            <option value="linea">Línea Carrier (Externa)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_usuario" class="form-label">Usuario / Responsable*</label>
+                        <input type="text" class="form-control" id="edit_usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_area_nivel1" class="form-label">Plan Comercial*</label>
+                        <select class="form-select" id="edit_area_nivel1" name="area_nivel1" required>
+                            <option value="">Seleccione un Plan...</option>
+                            {% for plan in planes %}
+                            <option value="{{ plan.nombre }}">{{ plan.nombre }} ({{ plan.modo|capitalize }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_area_nivel2" class="form-label">Área Nivel 2</label>
+                        <input type="text" class="form-control" id="edit_area_nivel2" name="area_nivel2"
+                            list="areas_nivel2">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_documento_id" class="form-label">Documento de Identidad</label>
+                        <input type="text" class="form-control" id="edit_documento_id" name="documento_id">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit_activo" name="activo" checked>
+                        <label class="form-check-label" for="edit_activo">Activo</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnActualizarAnexo">Actualizar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Configuración PIN -->
+<div class="modal fade" id="modalConfiguracionPin" tabindex="-1" aria-labelledby="modalConfiguracionPinLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalConfiguracionPinLabel">Configuración de PIN</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formConfiguracionPin">
+                    <div class="mb-3">
+                        <label for="pin_length" class="form-label">Longitud de PIN</label>
+                        <input type="number" class="form-control" id="pin_length" name="pin_length" min="4" max="10"
+                            value="{{ pin_length }}">
+                        <div class="form-text">La longitud debe estar entre 4 y 10 dígitos</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarConfiguracionPin">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Confirmación Eliminar -->
+<div class="modal fade" id="modalConfirmarEliminar" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirmar Eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro de que desea eliminar el registro <span id="anexo_a_eliminar"></span>?</p>
+                <p class="text-danger">Esta acción puede afectar la operación del sistema.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" id="btnConfirmarEliminar">Eliminar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Mostrar PIN -->
+<div class="modal fade" id="modalMostrarPin" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">PIN Generado</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-success">
+                    <p>El registro ha sido creado exitosamente.</p>
+                    <p>Número: <strong id="nuevo_anexo"></strong></p>
+                    <p>PIN: <strong id="nuevo_pin"></strong></p>
+                </div>
+                <p class="text-warning">Guarde este PIN, no podrá verlo nuevamente.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="toast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong class="me-auto" id="toast-title">Notificación</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-body">
+            Operación realizada con éxito.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Toggle PIN visibility
+
+
+        // Guardar nuevo registro
+        document.getElementById('btnGuardarAnexo').addEventListener('click', function () {
+            const form = document.getElementById('formNuevoAnexo');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const formData = new FormData(form);
+            const anexoData = {
+                numero: formData.get('numero'),
+                tipo: formData.get('tipo'),
+                usuario: formData.get('usuario'),
+                area_nivel1: formData.get('area_nivel1'),
+                area_nivel2: formData.get('area_nivel2') || null,
+                documento_id: formData.get('documento_id') || null,
+                activo: true
+            };
+
+            fetch('/linea', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(anexoData)
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.detail || 'Error al crear registro');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('nuevo_anexo').textContent = anexoData.numero;
+
+                    const modalNuevoAnexo = bootstrap.Modal.getInstance(document.getElementById('modalNuevoAnexo'));
+                    modalNuevoAnexo.hide();
+
+                    const modalMostrarPin = new bootstrap.Modal(document.getElementById('modalMostrarPin'));
+                    modalMostrarPin.show();
+
+                    form.reset();
+
+                    document.getElementById('modalMostrarPin').addEventListener('hidden.bs.modal', function () {
+                        window.location.reload();
+                    });
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        });
+
+        // Cargar datos para editar
+        document.querySelectorAll('.btn-editar').forEach(button => {
+            button.addEventListener('click', function () {
+                const id = this.getAttribute('data-id');
+
+                fetch(`/linea/${id}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Error al cargar datos');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        document.getElementById('edit_id').value = data.id;
+                        document.getElementById('edit_numero').value = data.numero;
+                        document.getElementById('edit_tipo').value = data.tipo || 'anexo';
+                        document.getElementById('edit_usuario').value = data.usuario;
+                        document.getElementById('edit_area_nivel1').value = data.area_nivel1;
+                        document.getElementById('edit_area_nivel2').value = data.area_nivel2 || '';
+                        document.getElementById('edit_documento_id').value = data.documento_id || '';
+                        document.getElementById('edit_activo').checked = data.activo;
+
+                        const modalEditarAnexo = new bootstrap.Modal(document.getElementById('modalEditarAnexo'));
+                        modalEditarAnexo.show();
+                    })
+                    .catch(error => {
+                        showToast('Error', error.message, 'danger');
+                    });
+            });
+        });
+
+        // Actualizar registro
+        document.getElementById('btnActualizarAnexo').addEventListener('click', function () {
+            const form = document.getElementById('formEditarAnexo');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const formData = new FormData(form);
+            const id = formData.get('id');
+            const anexoData = {
+                numero: formData.get('numero'),
+                tipo: formData.get('tipo'),
+                usuario: formData.get('usuario'),
+                area_nivel1: formData.get('area_nivel1'),
+                area_nivel2: formData.get('area_nivel2') || null,
+                documento_id: formData.get('documento_id') || null,
+                saldo: 0,
+                activo: formData.get('activo') === 'on'
+            };
+
+            fetch(`/linea/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(anexoData)
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.detail || 'Error al actualizar');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modalEditarAnexo = bootstrap.Modal.getInstance(document.getElementById('modalEditarAnexo'));
+                    modalEditarAnexo.hide();
+
+                    showToast('Éxito', 'Registro actualizado correctamente', 'success');
+
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        });
+
+        // Preparar eliminación
+        document.querySelectorAll('.btn-eliminar').forEach(button => {
+            button.addEventListener('click', function () {
+                const id = this.getAttribute('data-id');
+                const numero = this.getAttribute('data-numero');
+
+                document.getElementById('anexo_a_eliminar').textContent = numero;
+
+                const modalConfirmarEliminar = new bootstrap.Modal(document.getElementById('modalConfirmarEliminar'));
+                modalConfirmarEliminar.show();
+
+                document.getElementById('btnConfirmarEliminar').onclick = function () {
+                    eliminarAnexo(id);
+                };
+            });
+        });
+
+        // Cambiar Estado (Bloquear/Desbloquear)
+        document.querySelectorAll('.btn-cambiar-estado').forEach(button => {
+            button.addEventListener('click', function () {
+                const id = this.getAttribute('data-id');
+                const estadoActual = this.getAttribute('data-estado') === 'true';
+                const nuevoEstado = !estadoActual;
+
+                cambiarEstadoAnexo(id, nuevoEstado);
+            });
+        });
+
+        function cambiarEstadoAnexo(id, nuevoEstado) {
+            fetch(`/linea/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ activo: nuevoEstado })
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Error al actualizar estado');
+                    return response.json();
+                })
+                .then(data => {
+                    showToast('Éxito', `Abonado ${nuevoEstado ? 'desbloqueado' : 'bloqueado'} con éxito`, 'success');
+                    setTimeout(() => window.location.reload(), 500);
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        }
+
+        // Eliminar
+        function eliminarAnexo(id) {
+            fetch(`/linea/${id}`, {
+                method: 'DELETE'
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.detail || 'Error al eliminar');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modalConfirmarEliminar = bootstrap.Modal.getInstance(document.getElementById('modalConfirmarEliminar'));
+                    modalConfirmarEliminar.hide();
+
+                    showToast('Éxito', 'Registro desactivado correctamente', 'success');
+
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        }
+
+        // Guardar configuración de PIN
+        document.getElementById('btnGuardarConfiguracionPin').addEventListener('click', function () {
+            const form = document.getElementById('formConfiguracionPin');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const formData = new FormData(form);
+
+            fetch('/configuracion/pin_length', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: `pin_length=${formData.get('pin_length')}`
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.detail || 'Error al actualizar configuración');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const modalConfiguracionPin = bootstrap.Modal.getInstance(document.getElementById('modalConfiguracionPin'));
+                    modalConfiguracionPin.hide();
+
+                    showToast('Éxito', data.mensaje, 'success');
+
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        });
+
+        // Generar PINes masivamente
+        document.getElementById('btnGenerarPines').addEventListener('click', function () {
+            if (!confirm('¿Está seguro de que desea generar nuevos PINes para todos los registros activos? Esta acción no se puede deshacer.')) {
+                return;
+            }
+
+            fetch('/anexos/generar_pines', {
+                method: 'POST'
+            })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error al generar PINes');
+                    }
+
+                    const contentDisposition = response.headers.get('Content-Disposition');
+                    const filename = contentDisposition ? contentDisposition.split('filename=')[1].replace(/["']/g, '') : 'pines_anexos.csv';
+
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                    });
+                })
+                .then(() => {
+                    showToast('Éxito', 'PINes generados correctamente. Se ha iniciado la descarga del archivo CSV.', 'success');
+                })
+                .catch(error => {
+                    showToast('Error', error.message, 'danger');
+                });
+        });
+
+        function showToast(title, message, type) {
+            const toast = document.getElementById('toast');
+            const toastTitle = document.getElementById('toast-title');
+            const toastBody = document.getElementById('toast-body');
+
+            toast.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'bg-info');
+
+            if (type === 'success') {
+                toast.classList.add('bg-success', 'text-white');
+            } else if (type === 'danger') {
+                toast.classList.add('bg-danger', 'text-white');
+            } else if (type === 'warning') {
+                toast.classList.add('bg-warning');
+            } else {
+                toast.classList.add('bg-info');
+            }
+
+            toastTitle.textContent = title;
+            toastBody.textContent = message;
+
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+    });
+</script>
+{% endblock %}

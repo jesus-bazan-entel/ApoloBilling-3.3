@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Pines{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Gestión de Pines</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/cdr">Dashboard</a></li>
+        <li class="breadcrumb-item active">Pines</li>
+    </ol>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-key me-1"></i>
+                Listado de Pines
+            </div>
+            <div>
+                <a href="#" class="btn btn-primary btn-sm me-2" data-bs-toggle="modal" data-bs-target="#modalNuevoPin">
+                    <i class="fas fa-plus me-1"></i> Nuevo
+                </a>
+                <a href="#" class="btn btn-success btn-sm me-2">
+                    <i class="fas fa-file-import me-1"></i> Carga Masiva
+                </a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <form action="/dashboard/pines" method="get">
+                        <div class="input-group">
+                            <input type="text" class="form-control" placeholder="Buscar pin, usuario o descripción..."
+                                name="buscar" value="{{ buscar }}">
+                            <select class="form-select" name="plataforma_filtro" style="max-width: 150px;">
+                                <option value="">Todas</option>
+                                <option value="cisco" {% if plataforma_filtro=='cisco' %}selected{% endif %}>Cisco
+                                </option>
+                                <option value="asterisk" {% if plataforma_filtro=='asterisk' %}selected{% endif %}>
+                                    Asterisk</option>
+                                <option value="freeswitch" {% if plataforma_filtro=='freeswitch' %}selected{% endif %}>
+                                    Freeswitch</option>
+                            </select>
+                            <button class="btn btn-outline-secondary" type="submit">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            {% if buscar or plataforma_filtro %}
+                            <a href="/dashboard/pines" class="btn btn-outline-danger">
+                                <i class="fas fa-times"></i>
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span class="text-muted">Total: {{ total_records }} pines</span>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-bordered table-hover table-striped">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Código/PIN</th>
+                            <th>Usuario/Nombre</th>
+                            <th>Nivel/Permiso</th>
+                            <th>Plataforma</th>
+                            <th>Descripción</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                        <tr>
+                            <td>{{ row.codigo }}</td>
+                            <td>{{ row.usuario }}</td>
+                            <td>{{ row.nivel or '-' }}</td>
+                            <td>
+                                {% if row.plataforma == 'cisco' %}
+                                <span class="badge bg-primary">Cisco</span>
+                                {% elif row.plataforma == 'asterisk' %}
+                                <span class="badge bg-warning text-dark">Asterisk</span>
+                                {% elif row.plataforma == 'freeswitch' %}
+                                <span class="badge bg-info text-dark">Freeswitch</span>
+                                {% else %}
+                                <span class="badge bg-secondary">{{ row.plataforma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ row.descripcion }}</td>
+                            <td>
+                                {% if row.activo %}
+                                <span class="badge bg-success">Activo</span>
+                                {% else %}
+                                <span class="badge bg-danger">Inactivo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <button type="button" class="btn btn-info btn-sm me-1 btn-editar"
+                                    data-id="{{ row.id }}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                {% if row.activo %}
+                                <button type="button" class="btn btn-danger btn-sm btn-eliminar" data-id="{{ row.id }}"
+                                    data-codigo="{{ row.codigo }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                                {% else %}
+                                <button type="button" class="btn btn-success btn-sm btn-activar" data-id="{{ row.id }}"
+                                    data-codigo="{{ row.codigo }}">
+                                    <i class="fas fa-check"></i>
+                                </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center">No hay registros encontrados</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Paginación -->
+            {% if total_pages > 1 %}
+            <nav aria-label="Paginación">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page=1{% if buscar %}&buscar={{ buscar }}{% endif %}{% if plataforma_filtro %}&plataforma_filtro={{ plataforma_filtro }}{% endif %}"
+                            aria-label="Primera">
+                            <span aria-hidden="true">&laquo;&laquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == 1 %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ page - 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if plataforma_filtro %}&plataforma_filtro={{ plataforma_filtro }}{% endif %}"
+                            aria-label="Anterior">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+
+                    {% set start_page = [page - 2, 1]|max %}
+                    {% set end_page = [start_page + 4, total_pages]|min %}
+                    {% set start_page = [end_page - 4, 1]|max %}
+
+                    {% for p in range(start_page, end_page + 1) %}
+                    <li class="page-item {% if p == page %}active{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ p }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if plataforma_filtro %}&plataforma_filtro={{ plataforma_filtro }}{% endif %}">{{
+                            p }}</a>
+                    </li>
+                    {% endfor %}
+
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ page + 1 }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if plataforma_filtro %}&plataforma_filtro={{ plataforma_filtro }}{% endif %}"
+                            aria-label="Siguiente">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                    <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+                        <a class="page-link"
+                            href="?page={{ total_pages }}{% if buscar %}&buscar={{ buscar }}{% endif %}{% if plataforma_filtro %}&plataforma_filtro={{ plataforma_filtro }}{% endif %}"
+                            aria-label="Última">
+                            <span aria-hidden="true">&raquo;&raquo;</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuevo Pin -->
+<div class="modal fade" id="modalNuevoPin" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nuevo PIN</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formNuevoPin">
+                    <div class="mb-3">
+                        <label for="codigo" class="form-label">Código/PIN*</label>
+                        <input type="text" class="form-control" id="codigo" name="codigo" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="usuario" class="form-label">Usuario/Nombre*</label>
+                        <input type="text" class="form-control" id="usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="plataforma" class="form-label">Plataforma*</label>
+                        <select class="form-select" id="plataforma" name="plataforma" required>
+                            <option value="cisco">Cisco (FAC)</option>
+                            <option value="asterisk">Asterisk</option>
+                            <option value="freeswitch">Freeswitch</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="nivel" class="form-label">Nivel/Permiso</label>
+                        <input type="number" class="form-control" id="nivel" name="nivel" min="0" max="100">
+                        <div class="form-text">Solo para Cisco FAC (0-something)</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="descripcion" class="form-label">Descripción</label>
+                        <textarea class="form-control" id="descripcion" name="descripcion" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarPin">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Editar Pin -->
+<div class="modal fade" id="modalEditarPin" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Editar PIN</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formEditarPin">
+                    <input type="hidden" id="edit_id" name="id">
+                    <div class="mb-3">
+                        <label for="edit_codigo" class="form-label">Código/PIN*</label>
+                        <input type="text" class="form-control" id="edit_codigo" name="codigo" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_usuario" class="form-label">Usuario/Nombre*</label>
+                        <input type="text" class="form-control" id="edit_usuario" name="usuario" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_plataforma" class="form-label">Plataforma*</label>
+                        <select class="form-select" id="edit_plataforma" name="plataforma" required>
+                            <option value="cisco">Cisco (FAC)</option>
+                            <option value="asterisk">Asterisk</option>
+                            <option value="freeswitch">Freeswitch</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_nivel" class="form-label">Nivel/Permiso</label>
+                        <input type="number" class="form-control" id="edit_nivel" name="nivel" min="0" max="100">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit_descripcion" class="form-label">Descripción</label>
+                        <textarea class="form-control" id="edit_descripcion" name="descripcion" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit_activo" name="activo">
+                        <label class="form-check-label" for="edit_activo">Activo</label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnActualizarPin">Actualizar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 11">
+    <div id="toast" class="toast hide" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong class="me-auto" id="toast-title">Notificación</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+        <div class="toast-body" id="toast-body">
+            Operación realizada con éxito.
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Mock ID counter
+        let mockIdCounter = 1000;
+
+        // Guardar nuevo pin (Mock)
+        document.getElementById('btnGuardarPin').addEventListener('click', function () {
+            const form = document.getElementById('formNuevoPin');
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            // In real app, fetch POST
+            showToast('Éxito', 'PIN creado exitosamente (Simulado)', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('modalNuevoPin')).hide();
+            setTimeout(() => window.location.reload(), 1000);
+        });
+
+        // Cargar editar (Mock)
+        document.querySelectorAll('.btn-editar').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const id = this.getAttribute('data-id');
+                // Mock fetch data logic - ideally this fetches from backend
+                // For now we assume we can grab some data from row or just defaults
+                // Since this view is mock-backed, we'll just open the modal with dummy data
+                const row = this.closest('tr');
+                const codigo = row.cells[0].innerText;
+                const usuario = row.cells[1].innerText;
+                const nivel = row.cells[2].innerText === '-' ? '' : row.cells[2].innerText;
+                const plataformaText = row.cells[3].innerText.toLowerCase();
+                let plataforma = 'cisco';
+                if (plataformaText.includes('asterisk')) plataforma = 'asterisk';
+                if (plataformaText.includes('freeswitch')) plataforma = 'freeswitch';
+
+                document.getElementById('edit_id').value = id;
+                document.getElementById('edit_codigo').value = codigo;
+                document.getElementById('edit_usuario').value = usuario;
+                document.getElementById('edit_nivel').value = nivel;
+                document.getElementById('edit_plataforma').value = plataforma;
+                document.getElementById('edit_activo').checked = true; // assume active
+
+                new bootstrap.Modal(document.getElementById('modalEditarPin')).show();
+            });
+        });
+
+        // Actualizar Pin (Mock)
+        document.getElementById('btnActualizarPin').addEventListener('click', function () {
+            const form = document.getElementById('formEditarPin');
+            if (!form.checkValidity()) { form.reportValidity(); return; }
+
+            // In real app, fetch PUT
+            showToast('Éxito', 'PIN actualizado exitosamente (Simulado)', 'success');
+            bootstrap.Modal.getInstance(document.getElementById('modalEditarPin')).hide();
+            setTimeout(() => window.location.reload(), 1000);
+        });
+
+        // Eliminar/Toggle (Mock)
+        document.querySelectorAll('.btn-eliminar, .btn-activar').forEach(btn => {
+            btn.addEventListener('click', function () {
+                if (confirm('¿Está seguro de cambiar el estado de este registro?')) {
+                    showToast('Éxito', 'Estado actualizado correctamente (Simulado)', 'success');
+                    setTimeout(() => window.location.reload(), 1000);
+                }
+            });
+        });
+
+
+        function showToast(title, message, type) {
+            const toast = document.getElementById('toast');
+            const toastTitle = document.getElementById('toast-title');
+            const toastBody = document.getElementById('toast-body');
+
+            toast.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'bg-info');
+
+            if (type === 'success') {
+                toast.classList.add('bg-success', 'text-white');
+            } else if (type === 'danger') {
+                toast.classList.add('bg-danger', 'text-white');
+            } else if (type === 'warning') {
+                toast.classList.add('bg-warning');
+            } else {
+                toast.classList.add('bg-info');
+            }
+
+            toastTitle.textContent = title;
+            toastBody.textContent = message;
+
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+    });
+</script>
+{% endblock %}

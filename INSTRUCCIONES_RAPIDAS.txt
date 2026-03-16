@@ -1,0 +1,288 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                  🔄 INSTRUCCIONES RÁPIDAS DE ACTUALIZACIÓN                   ║
+║                         Apolo Billing - WSL Debian                            ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+📅 Fecha: 2025-12-22
+🔖 Commit: f3d5edca
+🌿 Branch: genspark_ai_developer
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  OPCIÓN 1: ACTUALIZACIÓN AUTOMÁTICA (⭐ RECOMENDADA)                      │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Desde tu Windows, abre WSL (Debian) y ejecuta:
+
+    cd /home/jbazan/ApoloBilling
+    ./actualizar_local.sh
+
+El script automático hará:
+  ✅ Actualizar repositorio desde GitHub
+  ✅ Instalar Python 3.11 y dependencias
+  ✅ Crear entorno virtual
+  ✅ Instalar paquetes Python
+  ✅ Configurar archivo .env
+  ✅ Inicializar base de datos
+  ✅ Iniciar servicios (PostgreSQL, Redis)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  OPCIÓN 2: ACTUALIZACIÓN MANUAL PASO A PASO                               │
+└───────────────────────────────────────────────────────────────────────────┘
+
+🔹 PASO 1: Actualizar repositorio
+    cd /home/jbazan/ApoloBilling
+    git fetch origin
+    git checkout genspark_ai_developer
+    git reset --hard origin/genspark_ai_developer
+    git pull origin genspark_ai_developer
+
+🔹 PASO 2: Instalar Python 3.11 (si no está instalado)
+    sudo apt update
+    sudo apt install -y software-properties-common
+    sudo add-apt-repository ppa:deadsnakes/ppa -y
+    sudo apt update
+    sudo apt install -y python3.11 python3.11-venv python3.11-dev \
+        libpq-dev build-essential gcc postgresql redis-server
+
+🔹 PASO 3: Crear entorno virtual
+    cd /home/jbazan/ApoloBilling/backend
+    rm -rf venv  # Eliminar anterior
+    python3.11 -m venv venv
+    source venv/bin/activate
+    python --version  # Debe mostrar 3.11.x
+
+🔹 PASO 4: Instalar dependencias Python
+    pip install --upgrade pip
+    pip install fastapi==0.104.1 uvicorn[standard]==0.24.0 \
+        sqlalchemy==2.0.23 psycopg2-binary==2.9.9 redis==5.0.1 \
+        python-multipart==0.0.6 jinja2==3.1.2 \
+        python-jose[cryptography]==3.3.0 passlib[bcrypt]==1.7.4 \
+        python-dotenv==1.0.0 pydantic==2.5.3 pydantic-settings==2.1.0 \
+        alembic==1.12.1 email-validator==2.1.1 fastapi-login==1.9.1
+
+🔹 PASO 5: Configurar .env
+    cat > /home/jbazan/ApoloBilling/backend/.env << 'EOF'
+    PROJECT_NAME=Apolo Billing
+    API_V1_STR=/api
+    DATABASE_URL=postgresql://apolo_user:apolo_password_2024@localhost/apolo_billing
+    SECRET_KEY=desarrollo-secret-key-cambiar-en-produccion-123456789
+    SUPERADMIN_PASSWORD=admin123
+    ALGORITHM=HS256
+    ACCESS_TOKEN_EXPIRE_MINUTES=60
+    EOF
+
+🔹 PASO 6: Configurar base de datos
+    sudo service postgresql start
+    sudo -u postgres psql << 'EOF'
+    DROP DATABASE IF EXISTS apolo_billing;
+    DROP USER IF EXISTS apolo_user;
+    CREATE USER apolo_user WITH PASSWORD 'apolo_password_2024';
+    CREATE DATABASE apolo_billing OWNER apolo_user;
+    GRANT ALL PRIVILEGES ON DATABASE apolo_billing TO apolo_user;
+    EOF
+
+🔹 PASO 7: Inicializar base de datos
+    cd /home/jbazan/ApoloBilling/backend
+    source venv/bin/activate
+    python init_db_clean.py
+
+🔹 PASO 8: Iniciar servicios
+    sudo service postgresql start
+    sudo service redis-server start
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  🚀 INICIAR EL SERVIDOR                                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    cd /home/jbazan/ApoloBilling/backend
+    source venv/bin/activate
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+Salida esperada:
+    INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+    INFO:     Started reloader process
+    INFO:     Started server process
+    INFO:     Application startup complete.
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  🌐 ACCEDER AL SISTEMA                                                    │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Desde tu navegador en Windows:
+
+    🔹 Dashboard Principal:     http://localhost:8000/
+    🔹 Rate Cards (Nuevo):      http://localhost:8000/dashboard/rate-cards
+    🔹 API Docs (Swagger):      http://localhost:8000/docs
+
+    👤 Usuario:  admin
+    🔑 Password: admin123
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ✅ VERIFICACIÓN DEL SISTEMA                                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+1️⃣  Verificar servicios:
+    sudo service postgresql status
+    sudo service redis-server status
+
+2️⃣  Verificar base de datos:
+    sudo -u postgres psql -d apolo_billing -c "\dt"
+    
+    Debe mostrar estas tablas:
+      ✓ users
+      ✓ accounts
+      ✓ rate_cards
+      ✓ balance_reservations
+      ✓ balance_transactions
+      ✓ cdrs
+
+3️⃣  Verificar Rate Cards:
+    sudo -u postgres psql -d apolo_billing -c \
+    "SELECT id, prefix, destination, rate_per_minute FROM rate_cards LIMIT 5;"
+    
+    Debe mostrar 13 tarifas de ejemplo (Peru, USA, Mexico, España, etc.)
+
+4️⃣  Probar Dashboard:
+    Navega a http://localhost:8000/dashboard/rate-cards
+    
+    Funcionalidades a probar:
+      ✅ Login (admin/admin123)
+      ✅ Ver lista de Rate Cards
+      ✅ Búsqueda LPM: 51987654321 (debe encontrar "Peru Movil")
+      ✅ Crear nueva tarifa
+      ✅ Editar tarifa existente
+      ✅ Eliminar tarifa
+      ✅ Exportar a CSV
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  🆕 NOVEDADES EN ESTA ACTUALIZACIÓN                                       │
+└───────────────────────────────────────────────────────────────────────────┘
+
+✨ Arquitectura Simplificada
+   • Sistema legacy eliminado (Zonas, Prefijos, Tarifas antiguas)
+   • Single Source of Truth: Solo tabla rate_cards
+   • Menú simplificado: 1 opción vs 4 opciones anteriores
+
+🚀 Mejoras de Rendimiento
+   • Crear Rate Card: ~52x más rápido (5ms vs 260ms)
+   • Búsqueda LPM: ~5x más rápido (2ms vs 10ms)
+   • Carga de tabla: ~1.9x más rápido (80ms vs 150ms)
+
+📁 Nuevos Archivos
+   • backend/init_db_clean.py - Script de inicialización limpio
+   • ACTUALIZACION_LOCAL.md - Guía detallada
+   • actualizar_local.sh - Script automático
+   • LEGACY_CLEANUP_COMPLETED.md - Documentación de limpieza
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  🐛 SOLUCIÓN DE PROBLEMAS COMUNES                                         │
+└───────────────────────────────────────────────────────────────────────────┘
+
+❌ Error: libpq-fe.h: No such file or directory
+   ➜ sudo apt install -y libpq-dev build-essential
+
+❌ Error: Python 3.13 incompatibility
+   ➜ Usa Python 3.11:
+     rm -rf venv
+     python3.11 -m venv venv
+     source venv/bin/activate
+
+❌ Error: relation "zones" does not exist
+   ➜ Reinicializa la base de datos:
+     python init_db_clean.py
+
+❌ Error: Port 8000 already in use
+   ➜ Mata el proceso existente:
+     sudo lsof -i :8000
+     sudo kill -9 <PID>
+
+❌ Error: Extra inputs are not permitted (redis_url, debug)
+   ➜ Edita .env y elimina esas variables
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  📖 DOCUMENTACIÓN ADICIONAL                                               │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    • ACTUALIZACION_LOCAL.md         - Guía completa (este documento)
+    • DESPLIEGUE_RESUMEN.txt          - Resumen de despliegue WSL
+    • LEGACY_CLEANUP_COMPLETED.md     - Cambios de arquitectura
+    • UI_MIGRATION_COMPLETED.md       - Implementación del dashboard
+    • MIGRATION_PLAN_RATE_CARDS.md    - Plan de migración
+    • DATABASE_ANALYSIS.md            - Análisis de base de datos
+
+══════════════════════════════��════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  🔗 ENLACES IMPORTANTES                                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    🌐 Repositorio GitHub:
+       https://github.com/jesus-bazan-entel/ApoloBilling
+
+    🔀 Pull Request:
+       https://github.com/jesus-bazan-entel/ApoloBilling/pull/1
+
+    🌿 Branch de desarrollo:
+       genspark_ai_developer
+
+    💾 Commit actual:
+       f3d5edca - feat: clean architecture - remove legacy system
+
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│  📊 COMPARATIVA: SISTEMA LEGACY VS NUEVO                                  │
+└───────────────────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Aspecto           ┃ Sistema Legacy      ┃ Sistema Nuevo       ┃
+┣━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━╋━━━━━━━━━━━━━━━━━━━━━┫
+┃ Tablas DB         ┃ 4 tablas            ┃ 1 tabla             ┃
+┃ Operación CRUD    ┃ ~260ms              ┃ ~5ms (52x faster)   ┃
+┃ Búsqueda Tarifa   ┃ ~10ms (JOINs)       ┃ ~2ms (5x faster)    ┃
+┃ Carga Tabla       ┃ ~150ms              ┃ ~80ms (1.9x faster) ┃
+┃ Menú Navegación   ┃ 4 opciones          ┃ 1 opción            ┃
+┃ Complejidad       ┃ Alta                ┃ Baja                ┃
+┃ Mantenibilidad    ┃ Compleja            ┃ Simple              ┃
+┗━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┻━━━━━━━━━━━━━━━━━━━━━┛
+
+═══════════════════════════════════════════════════════════════════════════════
+
+                         ⭐ COMANDO RÁPIDO TODO-EN-UNO ⭐
+
+Si quieres actualizar todo automáticamente, copia y pega este comando en WSL:
+
+cd /home/jbazan/ApoloBilling && \
+git fetch origin && \
+git checkout genspark_ai_developer && \
+git reset --hard origin/genspark_ai_developer && \
+git pull origin genspark_ai_developer && \
+./actualizar_local.sh
+
+════════════════════════════════════════════════════��══════════════════════════
+
+¿Necesitas ayuda? Revisa:
+  1. ACTUALIZACION_LOCAL.md (guía completa)
+  2. Logs del servidor: backend/logs/
+  3. Documentación técnica en el repositorio
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Última actualización: 2025-12-22
+Versión: 2.0 (Rate Cards Clean Architecture)

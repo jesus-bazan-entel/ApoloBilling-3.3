@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Tarifas{% endblock %}
+
+{% block header %}Gestión de Tarifas {% if zona_actual %} - Zona: {{ zona_actual[1] }}{% endif %}{% endblock %}
+
+{% block header_buttons %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTarifaModal">
+    <i class="bi bi-plus-circle"></i> Nueva Tarifa
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">Filtrar por Zona</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <select class="form-select" id="filterZona" onchange="filterByZona()">
+                    <option value="">Todas las Zonas</option>
+                    {% for zona in zonas %}
+                    <option value="{{ zona[0] }}" {% if zona_actual and zona[0]==zona_actual[0] %}selected{% endif %}>
+                        {{ zona[1] }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Zona</th>
+                        <th>Tarifa por Segundo</th>
+                        <th>Tarifa por Minuto</th>
+                        <th>Fecha de Inicio</th>
+                        <th>Estado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tarifa in tarifas %}
+                    <tr class="{% if tarifa[4] %}table-success{% endif %}">
+                        <td>{{ tarifa[0] }}</td>
+                        <td>{{ tarifa[5] }}</td>
+                        <td>${{ "%.5f"|format(tarifa[2]) }}</td>
+                        <td>${{ "%.3f"|format(tarifa[2] * 60) }}</td>
+                        <td>{{ tarifa[3].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>
+                            {% if tarifa[4] %}
+                            <span class="badge bg-success">Activa</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inactiva</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                    onclick="editTarifa({{ tarifa[0] }}, {{ tarifa[2] }})">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                {% if not tarifa[4] %}
+                                <button type="button" class="btn btn-sm btn-outline-success"
+                                    onclick="activarTarifa({{ tarifa[0] }})">
+                                    <i class="bi bi-check-circle"></i> Activar
+                                </button>
+                                {% endif %}
+                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                    onclick="confirmDeleteTarifa({{ tarifa[0] }}, {{ tarifa[4] }})">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para crear tarifa -->
+<div class="modal fade" id="createTarifaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nueva Tarifa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createTarifaForm">
+                    <div class="mb-3">
+                        <label for="createZonaId" class="form-label">Zona</label>
+                        <select class="form-select" id="createZonaId" required>
+                            {% for zona in zonas %}
+                            <option value="{{ zona[0] }}" {% if zona_actual and zona[0]==zona_actual[0] %}selected{%
+                                endif %}>
+                                {{ zona[1] }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="createTarifaMinutoInput" class="form-label">Tarifa por Minuto</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" class="form-control" id="createTarifaMinutoInput" min="0"
+                                step="0.00001" required>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="createTarifa()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para editar tarifa -->
+<div class="modal fade" id="editTarifaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Editar Tarifa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTarifaForm">
+                    <input type="hidden" id="editTarifaId">
+                    <div class="mb-3">
+                        <label for="editTarifaMinutoInput" class="form-label">Tarifa por Minuto</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" class="form-control" id="editTarifaMinutoInput" min="0" step="0.00001"
+                                required>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="updateTarifa()">Guardar Cambios</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para confirmar eliminación -->
+<div class="modal fade" id="deleteTarifaModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirmar Eliminación</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>¿Está seguro que desea eliminar esta tarifa?</p>
+                <div id="tarifaActivaWarning" class="alert alert-danger d-none">
+                    <strong>¡Advertencia!</strong> Esta tarifa está actualmente activa.
+                    Eliminarla podría afectar la tarificación de llamadas si no hay otra tarifa disponible.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger" onclick="deleteTarifa()">Eliminar</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    let tarifaIdToDelete = null;
+
+    // Calcular tarifa por minuto
+    document.getElementById('createTarifaSegundo').addEventListener('input', function () {
+        const tarifaSegundo = parseFloat(this.value) || 0;
+        document.getElementById('createTarifaMinuto').value = (tarifaSegundo * 60).toFixed(5);
+    });
+
+    // Filtrar por zona
+    function filterByZona() {
+        const zonaId = document.getElementById('filterZona').value;
+        if (zonaId) {
+            window.location.href = `/dashboard/tarifas?zona_id=${zonaId}`;
+        } else {
+            window.location.href = '/dashboard/tarifas';
+        }
+    }
+
+    // Función para crear una nueva tarifa
+    function createTarifa() {
+        const zonaId = parseInt(document.getElementById('createZonaId').value);
+        const tarifaSegundo = parseFloat(document.getElementById('createTarifaSegundo').value);
+
+        if (isNaN(tarifaSegundo) || tarifaSegundo < 0) {
+            alert('La tarifa por segundo debe ser un número válido mayor o igual a cero');
+            return;
+        }
+
+        // Endpoint management.py espera `tarifa` como rate_per_minute si modificamos,
+        // pero aquí estamos enviando `tarifa_segundo` que NO está en el schema de management.py.
+        // Management.py Schema: TariffCreate(zona_id, tarifa). 'tarifa' es rate_per_minute.
+        // Debemos convertir aquí.
+
+        const tarifaMinuto = tarifaSegundo * 60;
+
+        fetch('/api/tarifas', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                zona_id: zonaId,
+                tarifa: tarifaMinuto
+            }),
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al crear la tarifa');
+                }
+                return response.json();
+            })
+            .then(data => {
+                bootstrap.Modal.getInstance(document.getElementById('createTarifaModal')).hide();
+                window.location.reload();
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            });
+    }
+
+    // Función para abrir modal de edición
+    function editTarifa(id, tarifaPorSegundo) {
+        document.getElementById('editTarifaId').value = id;
+        // La tabla muestra tarifa por segundo en indice 2.
+        // Pero el modal de edición pide Tarifa por Minuto.
+        // Convertimos:
+        const tarifaMinuto = (tarifaPorSegundo * 60).toFixed(5);
+        document.getElementById('editTarifaMinutoInput').value = tarifaMinuto;
+
+        const modal = new bootstrap.Modal(document.getElementById('editTarifaModal'));
+        modal.show();
+    }
+
+    // Función para actualizar tarifa
+    function updateTarifa() {
+        const id = document.getElementById('editTarifaId').value;
+        const tarifaMinuto = parseFloat(document.getElementById('editTarifaMinutoInput').value);
+
+        if (isNaN(tarifaMinuto) || tarifaMinuto < 0) {
+            alert('La tarifa debe ser válida');
+            return;
+        }
+
+        fetch(`/api/tarifas/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                rate: tarifaMinuto
+            }),
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error al actualizar la tarifa');
+                }
+                return response.json();
+            })
+            .then(data => {
+                bootstrap.Modal.getInstance(document.getElementById('editTarifaModal')).hide();
+                window.location.reload();
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            });
+    }
+
+    // Función para activar una tarifa
+    function activarTarifa(id) {
+        // Warning: This endpoint likely implies updating 'enabled=True' via generic update or specific.
+        // management.py doesn't show specific activation endpoint yet.
+        // Alert user or implement generic enable.
+        alert("Función pendiente de implementación en backend (management.py)");
+    }
+
+    // Función para confirmar eliminación
+    function confirmDeleteTarifa(id, activa) {
+        tarifaIdToDelete = id;
+
+        if (activa) {
+            document.getElementById('tarifaActivaWarning').classList.remove('d-none');
+        } else {
+            document.getElementById('tarifaActivaWarning').classList.add('d-none');
+        }
+
+        const modal = new bootstrap.Modal(document.getElementById('deleteTarifaModal'));
+        modal.show();
+    }
+
+    // Función para eliminar una tarifa
+    function deleteTarifa() {
+        if (!tarifaIdToDelete) return;
+
+        fetch(`/api/tarifas/${tarifaIdToDelete}`, {
+            method: 'DELETE',
+        })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || 'Error al eliminar la tarifa') });
+                }
+                return response.json();
+            })
+            .then(data => {
+                bootstrap.Modal.getInstance(document.getElementById('deleteTarifaModal')).hide();
+                window.location.reload();
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+                bootstrap.Modal.getInstance(document.getElementById('deleteTarifaModal')).hide();
+            });
+    }
+</script>
+{% endblock %}

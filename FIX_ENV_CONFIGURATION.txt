@@ -1,0 +1,170 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║        🔧 SOLUCIÓN: Configurar .env para Modo Testing (ESL Server)          ║
+║                     Apolo Billing Engine v2.0.5                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📌 PROBLEMA IDENTIFICADO:
+
+   El motor Rust está intentando CONECTARSE a FreeSWITCH (modo cliente)
+   en lugar de INICIAR un servidor ESL (modo testing).
+
+   Causa: rust-billing-engine/.env tiene configurado:
+   ❌ FREESWITCH_SERVERS=127.0.0.1:8021:ClueCon
+
+   Esto activa el MODO CLIENTE ESL → Connection refused (os error 111)
+
+💡 SOLUCIÓN:
+
+   Cambiar .env para activar MODO SERVIDOR ESL (testing sin FreeSWITCH)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🚀 PASOS PARA CORREGIR:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PASO 1: Actualizar Repositorio                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+cd /home/jbazan/ApoloBilling
+git pull origin genspark_ai_developer
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PASO 2: Verificar/Crear .env Correcto                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+cd /home/jbazan/ApoloBilling/rust-billing-engine
+
+# Opción A: Usar el .env actualizado del repositorio (RECOMENDADO)
+cat .env
+
+# Debe mostrar:
+# FREESWITCH_SERVERS=
+# (vacío o comentado)
+
+# Opción B: Editar manualmente si es necesario
+nano .env
+
+# Cambiar esta línea:
+# FREESWITCH_SERVERS=127.0.0.1:8021:ClueCon
+#
+# Por esta (vacía):
+# FREESWITCH_SERVERS=
+
+# Guardar: Ctrl+O, Enter, Ctrl+X
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PASO 3: Reiniciar Motor Rust (Terminal 1)                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+cd /home/jbazan/ApoloBilling/rust-billing-engine
+RUST_LOG=info cargo run
+
+✅ AHORA DEBE MOSTRAR:
+
+{"message":"⚠️  No FreeSWITCH servers configured - starting ESL server for testing"}
+{"message":"✅ ESL Server started on 0.0.0.0:8021 (server mode for testing)"}
+{"message":"🎧 ESL Server listening on 0.0.0.0:8021"}
+
+❌ NO DEBE MOSTRAR:
+{"message":"Connecting to FreeSWITCH ESL: 127.0.0.1:8021"}
+{"message":"Connection refused (os error 111)"}
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ PASO 4: Ejecutar Simulador (Terminal 2)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+cd /home/jbazan/ApoloBilling
+./tools/esl_simulator.py --duration 30
+
+✅ Output esperado:
+🔌 Conectando a ESL...
+✅ Conectado exitosamente
+📞 Llamada 1/1: test-call-xxxxxxxx
+🎉 Prueba completada exitosamente
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 CONTENIDO CORRECTO DEL .env (MODO TESTING):
+
+# Apolo Billing Engine - Configuration
+ENVIRONMENT=development
+HOST=127.0.0.1
+PORT=9000
+
+# Database Configuration
+DATABASE_URL=postgres://apolo_user:apolo_password_2024@localhost:5432/apolo_billing
+
+# Redis Configuration
+REDIS_URL=redis://127.0.0.1:6379
+
+# FreeSWITCH Servers (leave empty for testing mode)
+FREESWITCH_SERVERS=
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🔄 MODOS DE OPERACIÓN:
+
+┌──────────────────────────┬──────────────────────────────────────────────────┐
+│ Modo                     │ Configuración .env                               │
+├──────────────────────────┼──────────────────────────────────────────────────┤
+│ TESTING (ESL Server)     │ FREESWITCH_SERVERS=                              │
+│                          │ (vacío o comentado)                              │
+│                          │                                                  │
+│                          │ ✅ Inicia servidor ESL en puerto 8021            │
+│                          │ ✅ Acepta conexiones del simulador               │
+│                          │ ✅ No requiere FreeSWITCH instalado              │
+├──────────────────────────┼──────────────────────────────────────────────────┤
+│ PRODUCTION (ESL Client)  │ FREESWITCH_SERVERS=192.168.1.10:8021:ClueCon    │
+│                          │                                                  │
+│                          │ ✅ Se conecta a FreeSWITCH real como cliente     │
+│                          │ ✅ Procesa llamadas reales                       │
+│                          │ ✅ Requiere FreeSWITCH instalado y configurado   │
+└──────────────────────────┴──────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠️  TROUBLESHOOTING:
+
+1. Si aún muestra "Connection refused":
+   - Verifica que .env tenga: FREESWITCH_SERVERS=
+   - Reinicia el motor Rust (Ctrl+C y cargo run nuevamente)
+   - Verifica que no haya otra variable de entorno: echo $FREESWITCH_SERVERS
+
+2. Si DATABASE_URL falla:
+   - Verifica PostgreSQL: sudo service postgresql status
+   - Verifica base de datos: sudo -u postgres psql -d apolo_billing -c "\dt"
+   - Si no existe: cd /home/jbazan/ApoloBilling/backend && python init_db_clean.py
+
+3. Si REDIS_URL falla:
+   - Verifica Redis: sudo service redis-server status
+   - Inicia Redis: sudo service redis-server start
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📚 ARCHIVOS ACTUALIZADOS:
+
+   - rust-billing-engine/.env (FREESWITCH_SERVERS vacío)
+   - rust-billing-engine/.env.example (documentación actualizada)
+
+🔗 COMMIT:
+
+   El próximo commit incluirá estos archivos .env corregidos
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🎉 RESULTADO ESPERADO:
+
+   ✅ Motor Rust inicia en modo servidor ESL
+   ✅ Escucha en puerto 8021
+   ✅ No intenta conectarse a FreeSWITCH
+   ✅ Simulador conecta exitosamente
+   ✅ CDRs generados correctamente
+
+🚀 EJECUTA: 
+   1. cd /home/jbazan/ApoloBilling
+   2. git pull origin genspark_ai_developer
+   3. cd rust-billing-engine
+   4. cat .env  (verificar FREESWITCH_SERVERS=)
+   5. RUST_LOG=info cargo run
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}Métricas del Sistema{% endblock %}
+
+{% block header %}Dashboard de Métricas (Prometheus/Grafana){% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <!-- Status Cards -->
+    <div class="row mb-4">
+        <div class="col-xl-3 col-md-6">
+            <div class="card bg-primary text-white mb-4 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-uppercase mb-1 small opacity-75">Llamadas Activas</h6>
+                        <h3 class="display-6 fw-bold">124</h3>
+                    </div>
+                    <i class="bi bi-telephone-forward fs-1 opacity-50"></i>
+                </div>
+                <div class="card-footer d-flex align-items-center justify-content-between small">
+                    <span class="text-white-50"><i class="bi bi-arrow-up-short"></i> 5% vs última hora</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card bg-success text-white mb-4 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-uppercase mb-1 small opacity-75">ASR (Answer Seizure Ratio)</h6>
+                        <h3 class="display-6 fw-bold">68.5%</h3>
+                    </div>
+                    <i class="bi bi-check-circle fs-1 opacity-50"></i>
+                </div>
+                <div class="card-footer d-flex align-items-center justify-content-between small">
+                    <span class="text-white-50">Objetivo: >60%</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card bg-warning text-dark mb-4 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-uppercase mb-1 small opacity-75">ACD (Avg Call Duration)</h6>
+                        <h3 class="display-6 fw-bold">3m 12s</h3>
+                    </div>
+                    <i class="bi bi-hourglass-split fs-1 opacity-50"></i>
+                </div>
+                <div class="card-footer d-flex align-items-center justify-content-between small">
+                    <span class="text-dark-50">Estable</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-3 col-md-6">
+            <div class="card bg-danger text-white mb-4 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-uppercase mb-1 small opacity-75">Errores SIP (5xx)</h6>
+                        <h3 class="display-6 fw-bold">2</h3>
+                    </div>
+                    <i class="bi bi-exclamation-triangle fs-1 opacity-50"></i>
+                </div>
+                <div class="card-footer d-flex align-items-center justify-content-between small">
+                    <span class="text-white-50">Últimos 15 min</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Integrations Status -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body d-flex justify-content-between align-items-center bg-light rounded">
+                    <div>
+                        <h5 class="mb-0"><i class="bi bi-hdd-network me-2 text-primary"></i>Estado de Integraciones</h5>
+                        <small class="text-muted">Monitoreo de servicios externos</small>
+                    </div>
+                    <div class="d-flex gap-3">
+                        <span class="badge bg-success bg-opacity-10 text-success p-2"><i
+                                class="bi bi-activity me-1"></i> Prometheus: CONNECTED</span>
+                        <span class="badge bg-success bg-opacity-10 text-success p-2"><i
+                                class="bi bi-graph-up me-1"></i> Grafana: CONNECTED</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary p-2"><i class="bi bi-server me-1"></i>
+                            CDR Collector: ACTIVE (TCP:2748)</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Charts -->
+    <div class="row">
+        <!-- Traffic Chart -->
+        <div class="col-xl-8">
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <i class="fas fa-chart-area me-1"></i>
+                    Tráfico de Llamadas (Simultáneas vs Completadas)
+                </div>
+                <div class="card-body"><canvas id="myAreaChart" width="100%" height="40"></canvas></div>
+            </div>
+        </div>
+        <!-- Protocol/Codec Dist -->
+        <div class="col-xl-4">
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-white py-3">
+                    <i class="fas fa-chart-pie me-1"></i>
+                    Distribución de Codecs
+                </div>
+                <div class="card-body"><canvas id="myPieChart" width="100%" height="40"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js" crossorigin="anonymous"></script>
+<script>
+    // Set new default font family and font color to mimic Bootstrap's default styling
+    Chart.defaults.global.defaultFontFamily = '-apple-system,system-ui,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif';
+    Chart.defaults.global.defaultFontColor = '#292b2c';
+
+    // Area Chart Example (Traffic)
+    var ctx = document.getElementById("myAreaChart");
+    var myLineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
+            datasets: [{
+                label: "Simultáneas",
+                lineTension: 0.3,
+                backgroundColor: "rgba(2,117,216,0.2)",
+                borderColor: "rgba(2,117,216,1)",
+                pointRadius: 5,
+                pointBackgroundColor: "rgba(2,117,216,1)",
+                pointBorderColor: "rgba(255,255,255,0.8)",
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: "rgba(2,117,216,1)",
+                pointHitRadius: 50,
+                pointBorderWidth: 2,
+                data: [15, 30, 85, 120, 95, 60],
+            },
+            {
+                label: "Completadas (x10)",
+                lineTension: 0.3,
+                backgroundColor: "rgba(92,184,92,0.1)",
+                borderColor: "rgba(92,184,92,1)",
+                pointRadius: 5,
+                pointBackgroundColor: "rgba(92,184,92,1)",
+                pointBorderColor: "rgba(255,255,255,0.8)",
+                pointHoverRadius: 5,
+                pointHitRadius: 50,
+                pointBorderWidth: 2,
+                data: [100, 250, 800, 1100, 900, 550],
+            }],
+        },
+        options: {
+            scales: {
+                xAxes: [{
+                    time: { unit: 'date' },
+                    gridLines: { display: false },
+                    ticks: { maxTicksLimit: 7 }
+                }],
+                yAxes: [{
+                    ticks: { min: 0, max: 1200, maxTicksLimit: 5 },
+                    gridLines: { color: "rgba(0, 0, 0, .125)" }
+                }],
+            },
+            legend: { display: true }
+        }
+    });
+
+    // Pie Chart Example (Codecs)
+    var ctx = document.getElementById("myPieChart");
+    var myPieChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ["G.711", "G.729", "Opus", "G.722"],
+            datasets: [{
+                data: [55, 30, 10, 5],
+                backgroundColor: ['#007bff', '#dc3545', '#ffc107', '#28a745'],
+            }],
+        },
+    });
+</script>
+{% endblock %}

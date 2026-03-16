@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración Central{% endblock %}
+{% block header %}Configuración de CDR Collector{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        {% if success %}
+        <div class="alert alert-success" role="alert">
+            <h4 class="alert-heading"><i class="bi bi-check-circle"></i> Configuración Guardada</h4>
+            <p>La configuración de la central ha sido actualizada correctamente.</p>
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-telephone-plus"></i> Parámetros de Conexión</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" action="/config/pbx">
+                    <!-- Selector de Tipo -->
+                    <div class="mb-4">
+                        <label for="pbx_type" class="form-label fw-bold">Tipo de Central</label>
+                        <select class="form-select" id="pbx_type" name="pbx_type" onchange="toggleFields()">
+                            <option value="cisco" {% if config.type=='cisco' %}selected{% endif %}>Cisco CUCM</option>
+                            <option value="asterisk" {% if config.type=='asterisk' %}selected{% endif %}>Asterisk
+                            </option>
+                            <option value="freeswitch" {% if config.type=='freeswitch' %}selected{% endif %}>Freeswitch
+                            </option>
+                        </select>
+                    </div>
+
+                    <hr>
+
+                    <!-- Campos Comunes -->
+                    <div class="mb-3">
+                        <label for="host" class="form-label">Dirección IP / Host</label>
+                        <input type="text" class="form-control" id="host" name="host" value="{{ config.host }}"
+                            required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="port" class="form-label">Puerto de Gestión</label>
+                        <input type="number" class="form-control" id="port" name="port" value="{{ config.port }}"
+                            required>
+                        <div class="form-text" id="port-help">Puerto por defecto: 2748 (Cisco), 5038 (Asterisk), 8021
+                            (Freeswitch)</div>
+                    </div>
+
+                    <!-- Campos Cisco -->
+                    <div id="cisco-fields" class="pbx-group">
+                        <div class="mb-3">
+                            <label for="jtapi_user" class="form-label">Usuario JTAPI</label>
+                            <input type="text" class="form-control" id="jtapi_user" name="jtapi_user"
+                                value="{{ config.jtapi_user }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="jtapi_password" class="form-label">Contraseña JTAPI</label>
+                            <input type="password" class="form-control" id="jtapi_password" name="jtapi_password"
+                                value="{{ config.jtapi_password }}">
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="secure_conn" name="secure_conn" {% if
+                                config.secure_conn %}checked{% endif %}>
+                            <label class="form-check-label" for="secure_conn">Conexión Segura (CSTA)</label>
+                        </div>
+                    </div>
+
+                    <!-- Campos Asterisk -->
+                    <div id="asterisk-fields" class="pbx-group" style="display:none;">
+                        <div class="mb-3">
+                            <label for="ami_user" class="form-label">Usuario AMI</label>
+                            <input type="text" class="form-control" id="ami_user" name="ami_user"
+                                value="{{ config.ami_user }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="ami_secret" class="form-label">Secreto AMI</label>
+                            <input type="password" class="form-control" id="ami_secret" name="ami_secret"
+                                value="{{ config.ami_secret }}">
+                        </div>
+                    </div>
+
+                    <!-- Campos Freeswitch -->
+                    <div id="freeswitch-fields" class="pbx-group" style="display:none;">
+                        <div class="mb-3">
+                            <label for="esl_password" class="form-label">Contraseña ESL (ClueCon)</label>
+                            <input type="password" class="form-control" id="esl_password" name="esl_password"
+                                value="{{ config.esl_password }}">
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Guardar Configuración
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-info-circle"></i> Estado de Conexión</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-secondary">
+                    <h5>Estado Actual: <span class="badge bg-secondary">Desconectado</span></h5>
+                    <p class="mb-0 small">Simulación de estado no implementada.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    function toggleFields() {
+        const type = document.getElementById('pbx_type').value;
+        const portInput = document.getElementById('port');
+
+        // Hide all
+        document.querySelectorAll('.pbx-group').forEach(el => el.style.display = 'none');
+
+        // Show selected
+        document.getElementById(type + '-fields').style.display = 'block';
+
+        // Update default port hint (simple UX)
+        if (type === 'cisco') {
+            document.getElementById('port-help').innerText = 'Puerto sugerido: 2748 (JTAPI)';
+        } else if (type === 'asterisk') {
+            document.getElementById('port-help').innerText = 'Puerto sugerido: 5038 (AMI)';
+        } else if (type === 'freeswitch') {
+            document.getElementById('port-help').innerText = 'Puerto sugerido: 8021 (ESL)';
+        }
+    }
+
+    // Run on load
+    document.addEventListener('DOMContentLoaded', toggleFields);
+</script>
+{% endblock %}

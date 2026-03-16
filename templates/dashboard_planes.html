@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Planes Comerciales{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Planes Comerciales</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard/cdr">Dashboard</a></li>
+        <li class="breadcrumb-item active">Planes</li>
+    </ol>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-list-alt me-1"></i>
+                Listado de Planes
+            </div>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalPlan">
+                <i class="fas fa-plus me-1"></i> Nuevo Plan
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-bordered table-striped">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Nombre del Plan</th>
+                            <th>Modo Facturación</th>
+                            <th>Cargo Fijo (Mensual)</th>
+                            <th>Minutos Libres</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for plan in planes %}
+                        <tr>
+                            <td>{{ plan.nombre }}</td>
+                            <td>
+                                {% if plan.modo == 'postpago' %}
+                                <span class="badge bg-primary">Postpago</span>
+                                {% else %}
+                                <span class="badge bg-warning text-dark">Prepago</span>
+                                {% endif %}
+                            </td>
+                            <td>${{ "%.2f"|format(plan.cargo_fijo) }}</td>
+                            <td>{{ plan.minutos }}</td>
+                            <td>
+                                {% if plan.activo %}
+                                <span class="badge bg-success">Activo</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Inactivo</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <button class="btn btn-sm btn-info btn-editar" data-id="{{ plan.id }}"
+                                    data-nombre="{{ plan.nombre }}" data-modo="{{ plan.modo }}"
+                                    data-cargo="{{ plan.cargo_fijo }}" data-minutos="{{ plan.minutos }}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center">No hay planes definidos</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuevo/Editar Plan -->
+<div class="modal fade" id="modalPlan" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle">Nuevo Plan Comercial</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formPlan">
+                    <input type="hidden" id="plan_id">
+                    <div class="mb-3">
+                        <label for="nombre" class="form-label">Nombre del Plan</label>
+                        <input type="text" class="form-control" id="nombre" name="nombre" required
+                            placeholder="Ej. Plan Ilimitado 50">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modo" class="form-label">Modo de Facturación</label>
+                        <select class="form-select" id="modo" name="modo">
+                            <option value="postpago">Postpago (Control)</option>
+                            <option value="prepago">Prepago (Recargas)</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="cargo_fijo" class="form-label">Cargo Fijo ($)</label>
+                            <input type="number" step="0.01" class="form-control" id="cargo_fijo" name="cargo_fijo"
+                                value="0.00">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="minutos" class="form-label">Minutos Incluidos</label>
+                            <input type="number" class="form-control" id="minutos" name="minutos" value="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarPlan">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const modalEl = document.getElementById('modalPlan');
+        const modal = new bootstrap.Modal(modalEl);
+
+        // Reset form on open
+        modalEl.addEventListener('show.bs.modal', function () {
+            document.getElementById('formPlan').reset();
+            document.getElementById('plan_id').value = '';
+            document.getElementById('modalTitle').innerText = 'Nuevo Plan Comercial';
+        });
+
+        // Edit
+        document.querySelectorAll('.btn-editar').forEach(btn => {
+            btn.addEventListener('click', function () {
+                const data = this.dataset;
+                document.getElementById('plan_id').value = data.id;
+                document.getElementById('nombre').value = data.nombre;
+                document.getElementById('modo').value = data.modo;
+                document.getElementById('cargo_fijo').value = data.cargo;
+                document.getElementById('minutos').value = data.minutos;
+
+                document.getElementById('modalTitle').innerText = 'Editar Plan';
+                modal.show();
+            });
+        });
+
+        // Save (Mock)
+        document.getElementById('btnGuardarPlan').addEventListener('click', function () {
+            // Here we would call fetch()
+            alert('Configuración guardada (Simulación)');
+            modal.hide();
+            location.reload();
+        });
+    });
+</script>
+{% endblock %}

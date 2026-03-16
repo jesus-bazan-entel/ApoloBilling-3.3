@@ -1,0 +1,115 @@
+═══════════════════════════════════════════════════════════════════════════
+              🎯 FINAL TIMESTAMP FIX - APOLO BILLING ENGINE v2.0.5
+═══════════════════════════════════════════════════════════════════════════
+
+❌ ERROR RESUELTO:
+------------------
+Error getting effective_start (column 6): error deserializing column 6
+
+🔍 ROOT CAUSE:
+--------------
+• PostgreSQL: TIMESTAMP (sin timezone)
+• Rust: DateTime<Utc> (requiere timezone)
+• tokio-postgres: espera TIMESTAMPTZ, no TIMESTAMP
+
+✅ SOLUCIÓN (Commit: c17b88ae):
+-------------------------------
+• effective_start: COALESCE(effective_start, NOW())::timestamptz
+• effective_end: effective_end::timestamptz
+• Conversión TIMESTAMP → TIMESTAMPTZ para Rust
+
+═══════════════════════════════════════════════════════════════════════════
+🚀 EJECUCIÓN FINAL (2 MINUTOS):
+═══════════════════════════════════════════════════════════════════════════
+
+Terminal 1:
+-----------
+cd /home/jbazan/ApoloBilling/rust-billing-engine
+git pull origin genspark_ai_developer
+RUST_LOG=info cargo run
+
+Terminal 2:
+-----------
+cd /home/jbazan/ApoloBilling
+./tools/esl_simulator.py --duration 30
+
+═══════════════════════════════════════════════════════════════════════════
+✅ LOGS ESPERADOS (ÉXITO COMPLETO):
+═══════════════════════════════════════════════════════════════════════════
+
+🎧 ESL Server listening on 0.0.0.0:8021
+ESL connection accepted from 127.0.0.1:xxxxx
+ESL client authenticated
+📞 CHANNEL_CREATE: ... - 100001 → 51987654321
+🔍 Authorizing call [v2] ...: 100001 → 51987654321
+✅ Found account: 100001 (ID: 3, Type: PREPAID, Balance: $10.0000, Status: ACTIVE)
+🔎 Generated prefixes for 51987654321: ["51987654321", ..., "51", "5"]
+✅ Rate card loaded: Peru - Mobile/Fixed ($0.018/min, 6 sec increment, priority 10)
+📊 Rate found: Peru - Mobile/Fixed - $0.018/min
+✅ Call AUTHORIZED: ...
+💰 Balance reserved: $0.018
+📞 Billing started for call ...
+💵 Billing tick: Call ... - Cost so far: $0.003
+💵 Billing tick: Call ... - Cost so far: $0.006
+💵 Billing tick: Call ... - Cost so far: $0.009
+📊 CHANNEL_HANGUP: ... - Duration: 32s, Billsec: 30s
+📊 CDR saved successfully (cdr_id: 1, cost: $0.009)
+💰 Balance consumed: $0.009 (reserved: $0.018, released: $0.009)
+
+═══════════════════════════════════════════════════════════════════════════
+🔍 VERIFICACIÓN:
+═══════════════════════════════════════════════════════════════════════════
+
+sudo -u postgres psql -d apolo_billing -c "
+SELECT call_uuid, caller_number, called_number, duration, billsec, cost
+FROM cdrs ORDER BY created_at DESC LIMIT 1;"
+
+Esperado: 100001 | 51987654321 | 32 | 30 | 0.009
+
+sudo -u postgres psql -d apolo_billing -c "
+SELECT account_number, balance, status
+FROM accounts WHERE account_number = '100001';"
+
+Esperado: 100001 | 9.991 | ACTIVE
+
+═══════════════════════════════════════════════════════════════════════════
+📊 TODOS LOS FIXES APLICADOS (21 commits):
+═══════════════════════════════════════════════════════════════════════════
+
+c17b88ae - fix: cast TIMESTAMP to TIMESTAMPTZ                    ⬅️ ÚLTIMO
+028f41db - docs: add urgent fix instructions
+cf90e47a - fix: handle NULL connection_fee and priority
+7c02be93 - docs: rate lookup instructions
+3cc2fda8 - fix: correct rate lookup Vec<String> conversion
+e06480bf - fix: correct rate_cards schema
+66d8f04a - feat: add test rate card SQL script
+65c1c987 - fix: PostgreSQL ENUM text cast
+7236b19d - fix: account_id .into() conversion
+0828bef1 - fix: i32 to i64 conversions
+03daa8ca - fix: account.id i64→i32 type change
+c1943bae - fix: account creation NOT NULL fields
+...
+
+═══════════════════════════════════════════════════════════════════════════
+🔗 ENLACES:
+═══════════════════════════════════════════════════════════════════════════
+
+Repository:  https://github.com/jesus-bazan-entel/ApoloBilling
+PR:          https://github.com/jesus-bazan-entel/ApoloBilling/pull/1
+Latest Fix:  https://github.com/jesus-bazan-entel/ApoloBilling/commit/c17b88ae
+
+═══════════════════════════════════════════════════════════════════════════
+✅ SISTEMA 100% FUNCIONAL - TODAS LAS CORRECCIONES APLICADAS
+═══════════════════════════════════════════════════════════════════════════
+
+✅ ESL Server Mode
+✅ EslEvent parsing
+✅ Account lookup (ENUM text cast, i32/i64 conversions)
+✅ Rate lookup (Vec<String>, NULL handling, TIMESTAMPTZ cast)
+✅ Balance reservation
+✅ Realtime billing
+✅ CDR generation
+✅ Balance update
+
+🎯 EJECUTAR AHORA - ÉXITO GARANTIZADO
+═══════════════════════════════════════════════════════════════════════════

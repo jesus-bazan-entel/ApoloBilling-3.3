@@ -1,0 +1,167 @@
+═══════════════════════════════════════════════════════════════════════════════
+  ✅ IMPLEMENTACIÓN COMPLETA - SISTEMA DE AUDITORÍA RATE CARDS
+═══════════════════════════════════════════════════════════════════════════════
+
+📅 Fecha: 27 de Enero de 2026
+👤 Usuario: admin
+🎯 Objetivo: Auditoría completa de operaciones de tarifas + Filtrado de postgres
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1️⃣  PROBLEMAS RESUELTOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ PROBLEMA 1: Operaciones del usuario 'postgres' llenaban la auditoría
+   └─ Solución: Filtrado automático a nivel de repositorio y estadísticas
+   └─ Resultado: Ya NO aparecen operaciones técnicas en la interfaz
+
+✅ PROBLEMA 2: Operaciones CRUD de Rate Cards no se auditaban
+   └─ Solución: Auditoría implementada en CREATE, UPDATE, DELETE
+   └─ Resultado: Todas las operaciones se registran con detalles completos
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2️⃣  ARCHIVOS MODIFICADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📁 /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/rate_card.rs
+   ├─ Agregado: import AuditLogBuilder, serde_json::json
+   ├─ Modificado: create_rate_card() - Auditoría al crear
+   ├─ Modificado: update_rate_card() - Auditoría al modificar (old/new)
+   └─ Modificado: delete_rate_card() - Auditoría al eliminar
+
+📁 /opt/ApoloBilling/rust-backend/crates/apolo-db/src/repositories/audit_repo.rs
+   ├─ Modificado: find_with_filters() - Filtrado postgres + DDL
+   └─ Modificado: count_with_filters() - Filtrado postgres + DDL
+
+📁 /opt/ApoloBilling/rust-backend/crates/apolo-api/src/handlers/audit.rs
+   ├─ Modificado: top_actions query - Filtrado postgres + DDL
+   ├─ Modificado: top_users query - Filtrado postgres + DDL
+   ├─ Modificado: total_logs query - Filtrado postgres + DDL
+   └─ Modificado: logs_last_24h query - Filtrado postgres + DDL
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3️⃣  NUEVAS ACCIONES DE AUDITORÍA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+create_rate_card
+├─ Se registra: username, entity_id (rate_card_id)
+└─ Detalles JSON:
+   ├─ destination_prefix
+   ├─ destination_name
+   ├─ rate_per_minute
+   └─ billing_increment
+
+update_rate_card
+├─ Se registra: username, entity_id (rate_card_id)
+└─ Detalles JSON:
+   ├─ destination_prefix
+   └─ changes:
+      ├─ destination_name: {old, new}
+      ├─ rate_per_minute: {old, new}
+      ├─ billing_increment: {old, new}
+      └─ ... (otros campos modificados)
+
+delete_rate_card
+├─ Se registra: username, entity_id (rate_card_id)
+└─ Detalles JSON:
+   ├─ destination_prefix
+   ├─ destination_name
+   └─ deleted_at (timestamp)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4️⃣  PRUEBA REALIZADA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CREATE: Tarifa "598 - Uruguay Móvil" @ $0.25/min
+        └─ ✅ Registrado en audit_logs (ID: 34)
+
+UPDATE: Modificar a "Uruguay Móvil - Promoción" @ $0.20/min
+        └─ ✅ Registrado en audit_logs (ID: 35)
+        └─ ✅ Valores old/new capturados correctamente
+
+DELETE: Eliminar tarifa (soft delete)
+        └─ ✅ Registrado en audit_logs (ID: 36)
+        └─ ✅ Timestamp de eliminación incluido
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5️⃣  VERIFICACIÓN EN FRONTEND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para verificar que funciona correctamente:
+
+1. Accede al frontend: http://localhost:3000
+
+2. Ve a la sección "Auditoría de Acciones"
+
+3. Deberías ver SOLO operaciones relevantes:
+   ✅ Logins/logouts de usuarios
+   ✅ Operaciones de rate cards
+   ✅ Operaciones de zones, prefixes, tariffs
+   ❌ NO operaciones del usuario 'postgres'
+   ❌ NO operaciones DDL técnicas
+
+4. Prueba crear, modificar o eliminar una tarifa:
+   └─ Ve a "Tarifas" → Crear nueva tarifa
+   └─ Luego revisa "Auditoría" → Verás la acción registrada
+
+5. Al ver detalles de una acción "update_rate_card":
+   └─ Verás los valores ANTERIORES y NUEVOS de cada campo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6️⃣  CONSULTAS SQL ÚTILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+-- Ver últimas operaciones de rate cards
+SELECT id, username, action, entity_id, created_at
+FROM audit_logs
+WHERE action LIKE '%rate_card%'
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- Ver detalles de una operación específica
+SELECT 
+    id, username, action, entity_type, entity_id,
+    jsonb_pretty(details) as detalles,
+    created_at
+FROM audit_logs
+WHERE id = 35;
+
+-- Ver todas las modificaciones de una tarifa específica
+SELECT id, username, action, 
+       details->>'destination_prefix' as prefix,
+       created_at
+FROM audit_logs
+WHERE entity_type = 'rate_card'
+  AND entity_id = '19'
+ORDER BY created_at;
+
+-- Ver cambios en la última hora
+SELECT id, username, action, entity_type, created_at
+FROM audit_logs
+WHERE created_at >= NOW() - INTERVAL '1 hour'
+  AND username != 'postgres'
+ORDER BY created_at DESC;
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7️⃣  ESTADO DEL SISTEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Backend compilado: OK
+✅ Servicio apolo-backend: Activo y funcionando
+✅ Health check: OK
+✅ Auditoría: Funcional
+✅ Filtros: Activos
+✅ Sistema: Listo para producción
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8️⃣  PRÓXIMOS PASOS RECOMENDADOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] Agregar auditoría a bulk_create_rate_cards()
+[ ] Agregar auditoría a operaciones de Accounts (topup, create, update, delete)
+[ ] Agregar auditoría a operaciones de Plans
+[ ] Considerar agregar alertas para operaciones críticas
+[ ] Implementar exportación de logs de auditoría (CSV/JSON)
+[ ] Agregar filtros avanzados en el frontend (por fecha, usuario, acción)
+
+═══════════════════════════════════════════════════════════════════════════════
+

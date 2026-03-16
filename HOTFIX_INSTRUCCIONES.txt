@@ -1,0 +1,231 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    🔧 CORRECCIÓN CRÍTICA APLICADA                             ║
+║                      Apolo Billing v2.0.1 (Hotfix)                            ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+📅 Fecha: 2025-12-22
+🔖 Commit: 84289962
+🌿 Branch: genspark_ai_developer
+🚨 Prioridad: CRÍTICA - Actualización Inmediata Requerida
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📋 RESUMEN DE CORRECCIONES
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ PROBLEMA #1: Error de Configuración .env
+   ❌ Antes: pydantic_core.ValidationError - Extra inputs not permitted
+   ✅ Ahora: .env con SOLO 5 variables soportadas
+
+✅ PROBLEMA #2: Error de Inicialización de Base de Datos
+   ❌ Antes: relation "rate_cards" does not exist
+   ✅ Ahora: Ejecución secuencial correcta de SQL
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🚀 CÓMO APLICAR LA CORRECCIÓN (ACTUALIZACIÓN INMEDIATA)
+═══════════════════════════════════════════════════════════════════════════════
+
+Opción 1: ACTUALIZACIÓN RÁPIDA (Solo necesitas actualizar el .env)
+─────────────────────────────────────────────────────────────────────────────
+
+Si ya corriste el script y obtuviste errores, haz esto:
+
+1️⃣  Actualizar repositorio:
+    cd /home/jbazan/ApoloBilling
+    git pull origin genspark_ai_developer
+
+2️⃣  Corregir archivo .env:
+    cd /home/jbazan/ApoloBilling/backend
+    cat > .env << 'EOF'
+    PROJECT_NAME=Apolo Billing
+    API_V1_STR=/api
+    DATABASE_URL=postgresql://apolo_user:apolo_password_2024@localhost/apolo_billing
+    SECRET_KEY=desarrollo-secret-key-cambiar-en-produccion-123456789
+    SUPERADMIN_PASSWORD=admin123
+    EOF
+
+3️⃣  Reinicializar base de datos:
+    source venv/bin/activate
+    python init_db_clean.py
+
+4️⃣  Iniciar servidor:
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+5️⃣  Acceder:
+    http://localhost:8000/dashboard/rate-cards
+    Usuario: admin
+    Password: admin123
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Opción 2: TODO-EN-UNO (Actualización completa desde cero)
+─────────────────────────────────────────────────────────────────────────────
+
+Si quieres empezar desde cero con todo corregido:
+
+cd /home/jbazan/ApoloBilling && \
+git fetch origin && \
+git checkout genspark_ai_developer && \
+git reset --hard origin/genspark_ai_developer && \
+git pull origin genspark_ai_developer && \
+./actualizar_local.sh
+
+Luego inicia el servidor:
+
+cd /home/jbazan/ApoloBilling/backend && \
+source venv/bin/activate && \
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📝 ARCHIVO .env CORRECTO (COPIAR TAL CUAL)
+═══════════════════════════════════════════════════════════════════════════════
+
+PROJECT_NAME=Apolo Billing
+API_V1_STR=/api
+DATABASE_URL=postgresql://apolo_user:apolo_password_2024@localhost/apolo_billing
+SECRET_KEY=desarrollo-secret-key-cambiar-en-produccion-123456789
+SUPERADMIN_PASSWORD=admin123
+
+⚠️  IMPORTANTE: NO agregar estas líneas (causan el error):
+    ❌ ALGORITHM=HS256
+    ❌ ACCESS_TOKEN_EXPIRE_MINUTES=60
+    ❌ redis_url=...
+    ❌ debug=...
+
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ VERIFICACIÓN POST-CORRECCIÓN
+═══════════════════════════════════════════════════════════════════════════════
+
+1️⃣  Verificar .env (debe tener SOLO 5 líneas):
+    cd /home/jbazan/ApoloBilling/backend
+    wc -l .env    # Debe mostrar: 5 .env
+
+2️⃣  Verificar configuración carga correctamente:
+    cd /home/jbazan/ApoloBilling/backend
+    source venv/bin/activate
+    python -c "from app.core.config import settings; print('✅ OK')"
+    
+    Salida esperada: ✅ OK
+    Si hay error, tu .env tiene variables incorrectas
+
+3️⃣  Verificar base de datos:
+    sudo -u postgres psql -d apolo_billing -c "\dt"
+    
+    Debe mostrar 6 tablas:
+    ✅ users
+    ✅ accounts
+    ✅ rate_cards
+    ✅ balance_reservations
+    ✅ balance_transactions
+    ✅ cdrs
+
+4️⃣  Verificar servidor inicia:
+    cd /home/jbazan/ApoloBilling/backend
+    source venv/bin/activate
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    
+    Debe mostrar:
+    INFO:     Uvicorn running on http://0.0.0.0:8000
+    INFO:     Application startup complete.
+
+5️⃣  Verificar dashboard:
+    Abrir navegador: http://localhost:8000/dashboard/rate-cards
+    Login: admin / admin123
+    Debe mostrar Rate Cards dashboard funcional
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🐛 SOLUCIÓN DE PROBLEMAS
+═══════════════════════════════════════════════════════════════════════════════
+
+❌ Error: "Extra inputs are not permitted"
+✅ Solución: Edita .env y elimina ALGORITHM y ACCESS_TOKEN_EXPIRE_MINUTES
+
+❌ Error: "relation 'rate_cards' does not exist"
+✅ Solución: Ejecuta python init_db_clean.py nuevamente
+
+❌ Error: Servidor no inicia
+✅ Solución: Verifica que .env esté correcto y PostgreSQL esté corriendo
+
+❌ Error: Python 3.13 incompatibility
+✅ Solución: Usa Python 3.11
+   rm -rf venv
+   python3.11 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+
+═══════════════════════════════════════════════════════════════════════════════
+
+📖 DOCUMENTACIÓN ACTUALIZADA
+═══════════════════════════════════════════════════════════════════════════════
+
+📄 CORRECCION_ERRORES.md (NUEVO)
+   → Guía completa de troubleshooting
+   → Explicación detallada de los errores
+   → Soluciones paso a paso
+
+📄 backend/.env.example (NUEVO)
+   → Plantilla correcta del .env
+   → Solo variables soportadas
+
+🔧 actualizar_local.sh (CORREGIDO)
+   → Genera .env correcto automáticamente
+   → Sin variables no soportadas
+
+📄 ACTUALIZACION_LOCAL.md (CORREGIDO)
+   → Ejemplo de .env actualizado
+   → Sin ALGORITHM ni ACCESS_TOKEN
+
+═══════════════════════════════════════════════════════════════════════════════
+
+🔗 ENLACES
+═══════════════════════════════════════════════════════════════════════════════
+
+🌐 Repositorio:
+   https://github.com/jesus-bazan-entel/ApoloBilling
+
+🔀 Pull Request:
+   https://github.com/jesus-bazan-entel/ApoloBilling/pull/1
+
+💾 Commit de Corrección:
+   84289962 - fix: correct .env configuration and database initialization
+
+📊 Historial de Commits:
+   84289962 → Hotfix (v2.0.1) ⭐ ESTE
+   bda2e69a → Local update guides
+   f3d5edca → Clean architecture
+   c1b7e555 → Deployment guides
+   ac15fcdb → Rate Cards UI
+
+═══════════════════════════════════════════════════════════════════════════════
+
+💡 RESUMEN EJECUTIVO
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ Correcciones aplicadas y pusheadas a GitHub
+✅ Script actualizar_local.sh ahora genera .env correcto
+✅ init_db_clean.py maneja errores correctamente
+✅ Documentación actualizada con ejemplos correctos
+✅ .env.example creado como referencia
+
+🚨 ACCIÓN REQUERIDA:
+   Si ya ejecutaste el script anterior y obtuviste errores:
+   
+   1. cd /home/jbazan/ApoloBilling
+   2. git pull origin genspark_ai_developer
+   3. Corrige tu .env (ver arriba)
+   4. Ejecuta: python init_db_clean.py
+   5. Inicia el servidor
+
+⏱️ TIEMPO ESTIMADO: 2-3 minutos para aplicar corrección
+
+═══════════════════════════════════════════════════════════════════════════════
+
+                    ✅ CORRECCIONES COMPLETADAS Y VERIFICADAS
+                         
+            Actualiza tu repositorio local para obtener los fixes
+
+═══════════════════════════════════════════════════════════════════════════════

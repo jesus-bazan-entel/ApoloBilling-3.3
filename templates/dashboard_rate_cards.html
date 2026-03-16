@@ -1,0 +1,376 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Tarifas (Rate Cards){% endblock %}
+
+{% block header %}Gestión de Tarifas{% endblock %}
+
+{% block header_buttons %}
+<button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createRateModal">
+    <i class="bi bi-plus-circle"></i> Nueva Tarifa
+</button>
+<button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#bulkImportModal">
+    <i class="bi bi-upload"></i> Importar CSV
+</button>
+<button type="button" class="btn btn-info" onclick="testRateSearch()">
+    <i class="bi bi-search"></i> Buscar Tarifa
+</button>
+{% endblock %}
+
+{% block content %}
+<style>
+    .rate-card {
+        transition: all 0.2s;
+    }
+    .rate-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .prefix-badge {
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+    }
+</style>
+
+<!-- Filtros -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-funnel"></i> Filtros</h5>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label for="filterPrefix" class="form-label">Prefijo</label>
+                <input type="text" class="form-control" id="filterPrefix" placeholder="Ej: 519" onkeyup="applyFilters()">
+                <small class="text-muted">Busca por prefijo de destino</small>
+            </div>
+            <div class="col-md-4">
+                <label for="filterName" class="form-label">Nombre</label>
+                <input type="text" class="form-control" id="filterName" placeholder="Ej: Perú" onkeyup="applyFilters()">
+                <small class="text-muted">Busca por nombre de destino</small>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Acciones</label>
+                <div>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">
+                        <i class="bi bi-x-circle"></i> Limpiar
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="exportToCSV()">
+                        <i class="bi bi-download"></i> Exportar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Estadísticas -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-primary" id="totalRates">{{ rates|length }}</h3>
+                <small class="text-muted">Total Tarifas Activas</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-success" id="avgRate">$0.00</h3>
+                <small class="text-muted">Tarifa Promedio/min</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-info" id="uniqueDestinations">0</h3>
+                <small class="text-muted">Destinos Únicos</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="text-warning" id="avgIncrement">6s</h3>
+                <small class="text-muted">Incremento Promedio</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabla de Tarifas -->
+<div class="card rate-card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-table"></i> Lista de Tarifas</h5>
+        <span class="badge bg-primary" id="visibleCount">{{ rates|length }} registros</span>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm" id="ratesTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 80px;">ID</th>
+                        <th style="width: 120px;">Prefijo</th>
+                        <th>Destino</th>
+                        <th style="width: 130px;">$/min</th>
+                        <th style="width: 100px;">Incremento</th>
+                        <th style="width: 120px;">Cargo Conex.</th>
+                        <th style="width: 90px;">Prioridad</th>
+                        <th style="width: 180px;">Vigencia Desde</th>
+                        <th style="width: 180px;">Vigencia Hasta</th>
+                        <th style="width: 200px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rate in rates %}
+                    <tr data-prefix="{{ rate.destination_prefix }}" data-name="{{ rate.destination_name }}">
+                        <td><span class="badge bg-secondary">{{ rate.id }}</span></td>
+                        <td><span class="prefix-badge badge bg-info">{{ rate.destination_prefix }}</span></td>
+                        <td>
+                            <strong>{{ rate.destination_name }}</strong>
+                        </td>
+                        <td class="text-end">
+                            <span class="text-primary fw-bold">${{ "%.4f"|format(rate.rate_per_minute) }}</span>
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-light text-dark">{{ rate.billing_increment }}s</span>
+                        </td>
+                        <td class="text-end">
+                            {% if rate.connection_fee > 0 %}
+                            <span class="text-success">${{ "%.4f"|format(rate.connection_fee) }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-{% if rate.priority >= 100 %}success{% else %}secondary{% endif %}">
+                                {{ rate.priority }}
+                            </span>
+                        </td>
+                        <td><small>{{ rate.effective_start.strftime('%Y-%m-%d %H:%M') if rate.effective_start else '-' }}</small></td>
+                        <td>
+                            {% if rate.effective_end %}
+                            <small class="text-danger">{{ rate.effective_end.strftime('%Y-%m-%d %H:%M') }}</small>
+                            {% else %}
+                            <span class="badge bg-success">Activa</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn btn-outline-primary" 
+                                        onclick="editRate({{ rate.id }}, '{{ rate.destination_prefix }}', '{{ rate.destination_name }}', {{ rate.rate_per_minute }}, {{ rate.billing_increment }}, {{ rate.connection_fee }}, {{ rate.priority }})"
+                                        title="Editar">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-info" 
+                                        onclick="viewRateDetails({{ rate.id }})"
+                                        title="Ver Detalles">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                {% if not rate.effective_end %}
+                                <button type="button" class="btn btn-outline-danger" 
+                                        onclick="deactivateRate({{ rate.id }}, '{{ rate.destination_prefix }}')"
+                                        title="Desactivar">
+                                    <i class="bi bi-x-circle"></i>
+                                </button>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Crear Tarifa -->
+<div class="modal fade" id="createRateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> Nueva Tarifa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createRateForm">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="createPrefix" class="form-label">Prefijo de Destino *</label>
+                            <input type="text" class="form-control" id="createPrefix" required>
+                            <small class="text-muted">Ej: 51983 (Perú Móvil)</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createName" class="form-label">Nombre de Destino *</label>
+                            <input type="text" class="form-control" id="createName" required>
+                            <small class="text-muted">Ej: Perú Móvil Claro</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createRate" class="form-label">Tarifa por Minuto ($) *</label>
+                            <input type="number" class="form-control" id="createRate" step="0.0001" min="0" required>
+                            <small class="text-muted">Ej: 0.0850</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createIncrement" class="form-label">Incremento de Facturación (seg) *</label>
+                            <select class="form-select" id="createIncrement">
+                                <option value="1">1 segundo</option>
+                                <option value="6" selected>6 segundos</option>
+                                <option value="30">30 segundos</option>
+                                <option value="60">60 segundos</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createConnectionFee" class="form-label">Cargo de Conexión ($)</label>
+                            <input type="number" class="form-control" id="createConnectionFee" step="0.0001" min="0" value="0">
+                            <small class="text-muted">Cargo único por conectar la llamada</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="createPriority" class="form-label">Prioridad</label>
+                            <input type="number" class="form-control" id="createPriority" min="0" value="0">
+                            <small class="text-muted">Mayor valor = mayor prioridad (para conflictos)</small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="createRate()">
+                    <i class="bi bi-save"></i> Guardar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Editar Tarifa -->
+<div class="modal fade" id="editRateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Editar Tarifa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editRateForm">
+                    <input type="hidden" id="editRateId">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> El prefijo no puede modificarse. Para cambiar el prefijo, cree una nueva tarifa.
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Prefijo de Destino</label>
+                            <input type="text" class="form-control" id="editPrefix" disabled>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editName" class="form-label">Nombre de Destino *</label>
+                            <input type="text" class="form-control" id="editName" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editRate" class="form-label">Tarifa por Minuto ($) *</label>
+                            <input type="number" class="form-control" id="editRate" step="0.0001" min="0" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editIncrement" class="form-label">Incremento de Facturación (seg) *</label>
+                            <select class="form-select" id="editIncrement">
+                                <option value="1">1 segundo</option>
+                                <option value="6">6 segundos</option>
+                                <option value="30">30 segundos</option>
+                                <option value="60">60 segundos</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editConnectionFee" class="form-label">Cargo de Conexión ($)</label>
+                            <input type="number" class="form-control" id="editConnectionFee" step="0.0001" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="editPriority" class="form-label">Prioridad</label>
+                            <input type="number" class="form-control" id="editPriority" min="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="updateRate()">
+                    <i class="bi bi-save"></i> Actualizar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Importar CSV -->
+<div class="modal fade" id="bulkImportModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload"></i> Importar Tarifas desde CSV</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <strong>Formato del CSV:</strong><br>
+                    <code>destination_prefix,destination_name,rate_per_minute,billing_increment,priority</code><br>
+                    <strong>Ejemplo:</strong><br>
+                    <code>51984,Perú Móvil Bitel,0.09,6,150</code>
+                </div>
+                <div class="mb-3">
+                    <label for="csvFile" class="form-label">Seleccionar archivo CSV</label>
+                    <input type="file" class="form-control" id="csvFile" accept=".csv">
+                </div>
+                <div id="importPreview" class="d-none">
+                    <h6>Vista Previa (primeras 5 filas):</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered" id="previewTable"></table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="processImport()">
+                    <i class="bi bi-upload"></i> Importar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Buscar Tarifa -->
+<div class="modal fade" id="searchRateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-search"></i> Buscar Tarifa para Número</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="searchNumber" class="form-label">Número de Teléfono</label>
+                    <input type="text" class="form-control" id="searchNumber" placeholder="Ej: 51984123456">
+                    <small class="text-muted">Ingresa el número completo para buscar la tarifa aplicable</small>
+                </div>
+                <div id="searchResult" class="d-none">
+                    <div class="card">
+                        <div class="card-body">
+                            <h6>Resultado:</h6>
+                            <div id="searchResultContent"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-primary" onclick="searchRate()">
+                    <i class="bi bi-search"></i> Buscar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- Rate Cards Management Script -->
+<script src="/static/js/rate_cards.js"></script>
+
+{% endblock %}

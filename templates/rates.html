@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Tarifas (FreeSWITCH){% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <h1 class="mt-4">Gestión de Tarifas</h1>
+    <ol class="breadcrumb mb-4">
+        <li class="breadcrumb-item"><a href="/dashboard">Dashboard</a></li>
+        <li class="breadcrumb-item active">Tarifas</li>
+    </ol>
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+                <i class="fas fa-tags me-1"></i>
+                Listado de Tarifas
+            </div>
+            <div>
+                <button class="btn btn-primary btn-sm me-2" data-bs-toggle="modal" data-bs-target="#modalNuevaTarifa">
+                    <i class="fas fa-plus me-1"></i> Nueva Tarifa
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Prefijo</th>
+                            <th>Destino</th>
+                            <th class="text-end">Tarifa / Min</th>
+                            <th class="text-end">Costo Conexión</th>
+                            <th>Incremento (s)</th>
+                            <th>Prioridad</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rate in rates %}
+                        <tr>
+                            <td><span class="badge bg-secondary">{{ rate.destination_prefix }}</span></td>
+                            <td>{{ rate.destination_name }}</td>
+                            <td class="text-end">{{ "%.4f"|format(rate.rate_per_minute) }}</td>
+                            <td class="text-end">{{ "%.4f"|format(rate.connection_fee) }}</td>
+                            <td>{{ rate.billing_increment }}</td>
+                            <td>{{ rate.priority }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger btn-delete" data-id="{{ rate.id }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nueva Tarifa -->
+<div class="modal fade" id="modalNuevaTarifa" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nueva Tarifa</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formNuevaTarifa">
+                    <div class="mb-3">
+                        <label class="form-label">Prefijo Destino</label>
+                        <input type="text" class="form-control" name="destination_prefix" required
+                            placeholder="e.g. 521">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nombre Destino</label>
+                        <input type="text" class="form-control" name="destination_name" required
+                            placeholder="e.g. Mexico Mobile">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tarifa por Minuto</label>
+                            <input type="number" class="form-control" name="rate_per_minute" step="0.0001" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Costo Conexión</label>
+                            <input type="number" class="form-control" name="connection_fee" step="0.0001" value="0.0">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Incremento Fact. (seg)</label>
+                            <input type="number" class="form-control" name="billing_increment" value="60">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Prioridad</label>
+                            <input type="number" class="form-control" name="priority" value="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btnGuardarTarifa">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extrajs %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Save Rate
+        document.getElementById('btnGuardarTarifa').addEventListener('click', function () {
+            const form = document.getElementById('formNuevaTarifa');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            fetch('/api/rates/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.id) {
+                        location.reload();
+                    } else {
+                        alert('Error al crear tarifa');
+                    }
+                });
+        });
+
+        // Delete Rate
+        document.querySelectorAll('.btn-delete').forEach(btn => {
+            btn.addEventListener('click', function () {
+                if (confirm('¿Seguro que desea eliminar esta tarifa?')) {
+                    const id = this.dataset.id;
+                    fetch(`/api/rates/${id}`, { method: 'DELETE' })
+                        .then(res => {
+                            if (res.ok) location.reload();
+                        });
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
