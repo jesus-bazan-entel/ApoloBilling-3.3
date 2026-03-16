@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchAccounts, createAccount, updateAccount, deleteAccount, fetchPlans } from '../api/client'
+import { fetchAccounts, createAccount, updateAccount, deleteAccount, fetchPlans, fetchSettings, updateSetting } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import CreditUtilizationBar from '../components/CreditUtilizationBar'
-import { Users, Plus, Edit, X, DollarSign, Trash2, Power, AlertTriangle } from 'lucide-react'
+import { Users, Plus, Edit, X, DollarSign, Trash2, Power, AlertTriangle, Shield, ShieldOff } from 'lucide-react'
 import type { Account, AccountType, AccountStatus, Plan } from '../types'
 import { getAccountDisplayInfo } from '../lib/accountHelpers'
 
@@ -25,6 +25,21 @@ export default function AccountsPage() {
     queryKey: ['plans'],
     queryFn: fetchPlans,
   })
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ['settings'],
+    queryFn: fetchSettings,
+  })
+
+  const updateSettingMutation = useMutation({
+    mutationFn: ({ key, value }: { key: string; value: string }) =>
+      updateSetting(key, value),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+
+  const authRequired = settings.find(s => s.key === 'require_outbound_authorization')?.value !== 'false'
 
   // Helper para obtener nombre del plan
   const getPlanName = (planId?: number) => {
@@ -250,6 +265,51 @@ export default function AccountsPage() {
         >
           <Plus className="w-5 h-5 mr-2" />
           Nueva Cuenta
+        </button>
+      </div>
+
+      {/* Authorization Setting Banner */}
+      <div className={`rounded-lg border p-4 flex items-center justify-between ${
+        authRequired
+          ? 'bg-blue-50 border-blue-200'
+          : 'bg-amber-50 border-amber-200'
+      }`}>
+        <div className="flex items-center gap-3">
+          {authRequired ? (
+            <Shield className="w-5 h-5 text-blue-600" />
+          ) : (
+            <ShieldOff className="w-5 h-5 text-amber-600" />
+          )}
+          <div>
+            <p className={`text-sm font-medium ${authRequired ? 'text-blue-900' : 'text-amber-900'}`}>
+              {authRequired
+                ? 'Control de autorización activo'
+                : 'Control de autorización desactivado'}
+            </p>
+            <p className={`text-xs ${authRequired ? 'text-blue-700' : 'text-amber-700'}`}>
+              {authRequired
+                ? 'Las llamadas salientes requieren cuenta activa con saldo para ser autorizadas'
+                : 'Todas las llamadas salientes se permiten sin verificación de cuenta ni saldo'}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => updateSettingMutation.mutate({
+            key: 'require_outbound_authorization',
+            value: authRequired ? 'false' : 'true'
+          })}
+          disabled={updateSettingMutation.isPending}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            authRequired
+              ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
+              : 'bg-blue-100 text-blue-800 hover:bg-blue-200 border border-blue-300'
+          } disabled:opacity-50`}
+        >
+          {updateSettingMutation.isPending
+            ? 'Cambiando...'
+            : authRequired
+              ? 'Desactivar Control'
+              : 'Activar Control'}
         </button>
       </div>
 

@@ -584,4 +584,23 @@ export const reloadDialplan = async (): Promise<{ message: string }> => {
   return data.data || data
 }
 
+// ============== SYSTEM SETTINGS ==============
+
+export interface SystemSetting {
+  key: string
+  value: string
+  description: string | null
+  updated_at: string | null
+}
+
+export const fetchSettings = async (): Promise<SystemSetting[]> => {
+  const { data } = await api.get('/settings')
+  return data.data || data
+}
+
+export const updateSetting = async (key: string, value: string): Promise<SystemSetting> => {
+  const { data } = await api.put(`/settings/${key}`, { value })
+  return data.data || data
+}
+
 export default api

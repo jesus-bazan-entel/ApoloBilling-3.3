@@ -40,6 +40,28 @@ impl AuthorizationService {
             call_uuid, req.caller, req.callee, direction
         );
 
+        // Check if outbound authorization is required (system setting)
+        if direction == "outbound" {
+            let auth_required = self.is_outbound_auth_required().await;
+            if !auth_required {
+                info!(
+                    "⏭️  Outbound authorization DISABLED (system setting). Allowing call {} without billing.",
+                    call_uuid
+                );
+                return Ok(AuthResponse {
+                    authorized: true,
+                    reason: "authorized_no_auth_required".to_string(),
+                    uuid: call_uuid,
+                    account_id: None,
+                    account_number: None,
+                    reservation_id: None,
+                    reserved_amount: None,
+                    max_duration_seconds: None,
+                    rate_per_minute: None,
+                });
+            }
+        }
+
         // 🔒 Try to acquire authorization lock to prevent duplicate reservations
         let lock_key = format!("auth_lock:{}", call_uuid);
         let lock_acquired = self.redis.setnx_ex(&lock_key, "1", 30).await.unwrap_or(false);
@@ -107,10 +129,14 @@ impl AuthorizationService {
         let account = match account {
             Some(acc) => acc,
             None => {
-                warn!("❌ Account not found for {}: {}", if is_toll_free { "callee (toll-free)" } else { "caller" }, lookup_number);
+                // No account found: authorize without billing
+                info!(
+                    "✅ No account found for {} ({}), authorizing WITHOUT billing",
+                    lookup_number, if is_toll_free { "callee (toll-free)" } else { "caller" }
+                );
                 return Ok(AuthResponse {
-                    authorized: false,
-                    reason: "account_not_found".to_string(),
+                    authorized: true,
+                    reason: "authorized_no_account".to_string(),
                     uuid: call_uuid,
                     account_id: None,
                     account_number: None,
@@ -124,10 +150,10 @@ impl AuthorizationService {
 
         // 2. Check account status
         if account.status != AccountStatus::Active {
-            warn!("❌ Account {} is {:?}", account.account_number, account.status);
+            warn!("⚠️ Account {} is {:?}, authorizing WITHOUT billing", account.account_number, account.status);
             return Ok(AuthResponse {
-                authorized: false,
-                reason: format!("account_{:?}", account.status).to_lowercase(),
+                authorized: true,
+                reason: "authorized_account_inactive".to_string(),
                 uuid: call_uuid,
                 account_id: Some(account.id.into()),
                 account_number: Some(account.account_number),
@@ -170,10 +196,14 @@ impl AuthorizationService {
         let rate = match self.get_rate(&req.callee).await? {
             Some(r) => r,
             None => {
-                warn!("❌ No rate found for destination: {}", req.callee);
+                // No rate found: authorize without billing
+                info!(
+                    "✅ No rate found for destination {}, authorizing WITHOUT billing for account {}",
+                    req.callee, account.account_number
+                );
                 return Ok(AuthResponse {
-                    authorized: false,
-                    reason: "no_rate_found".to_string(),
+                    authorized: true,
+                    reason: "authorized_no_rate".to_string(),
                     uuid: call_uuid,
                     account_id: Some(account.id.into()),
                     account_number: Some(account.account_number),
@@ -323,6 +353,47 @@ impl AuthorizationService {
                 Ok(None)
             }
         }
+    }
+
+    /// Check if outbound authorization is required based on system_settings table.
+    /// Caches the result in Redis for 30 seconds to avoid hitting the DB on every call.
+    async fn is_outbound_auth_required(&self) -> bool {
+        let cache_key = "setting:require_outbound_authorization";
+
+        // Check Redis cache first
+        if let Ok(Some(cached)) = self.redis.get(cache_key).await {
+            return cached != "false";
+        }
+
+        // Query database
+        let result = match self.db_pool.get().await {
+            Ok(client) => {
+                match client.query_opt(
+                    "SELECT value FROM system_settings WHERE key = 'require_outbound_authorization'",
+                    &[],
+                ).await {
+                    Ok(Some(row)) => {
+                        let value: String = row.get(0);
+                        value != "false"
+                    }
+                    Ok(None) => true, // Default: authorization required
+                    Err(e) => {
+                        error!("❌ Error checking system setting: {:?}", e);
+                        true // Default to requiring auth on error
+                    }
+                }
+            }
+            Err(e) => {
+                error!("❌ Error getting DB connection for system setting: {:?}", e);
+                true // Default to requiring auth on error
+            }
+        };
+
+        // Cache the result for 30 seconds
+        let cache_value = if result { "true" } else { "false" };
+        let _ = self.redis.set(cache_key, cache_value, 30).await;
+
+        result
     }
 
     async fn get_rate(&self, destination: &str) -> Result<Option<crate::models::RateCard>, BillingError> {

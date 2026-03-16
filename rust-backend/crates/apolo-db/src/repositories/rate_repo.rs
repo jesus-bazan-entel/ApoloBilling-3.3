@@ -41,7 +41,7 @@ impl Repository<RateCard, i32> for PgRateRepository {
                 created_at, updated_at
             FROM rate_cards
             WHERE (effective_end IS NULL OR effective_end > NOW())
-            WHERE id = $1
+            AND id = $1
             "#,
         )
         .bind(id)
@@ -242,7 +242,6 @@ impl RateRepository for PgRateRepository {
                 effective_start, effective_end, priority,
                 created_at, updated_at
             FROM rate_cards
-            WHERE (effective_end IS NULL OR effective_end > NOW())
             WHERE destination_prefix = ANY($1)
                 AND effective_start <= NOW()
                 AND (effective_end IS NULL OR effective_end > NOW())
@@ -293,11 +292,11 @@ impl RateRepository for PgRateRepository {
                 created_at, updated_at
             FROM rate_cards
             WHERE (effective_end IS NULL OR effective_end > NOW())
-            WHERE 1=1
+            AND 1=1
             "#,
         );
 
-        let mut count_query = String::from("SELECT COUNT(*) FROM rate_cards WHERE (effective_end IS NULL OR effective_end > NOW()) WHERE 1=1");
+        let mut count_query = String::from("SELECT COUNT(*) FROM rate_cards WHERE (effective_end IS NULL OR effective_end > NOW()) AND 1=1");
 
         if let Some(p) = prefix {
             let pattern = format!(" AND destination_prefix LIKE '{}%'", p.replace('\'', "''"));
