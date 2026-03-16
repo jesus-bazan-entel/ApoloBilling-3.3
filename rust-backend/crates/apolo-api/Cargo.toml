@@ -43,17 +43,8 @@ tracing-actix-web = { workspace = true }
 sqlx = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
 tracing-subscriber = "0.3"
 rust_decimal_macros = "1.36"
-
-[[bench]]
-name = "cdr_benchmarks"
-harness = false
-
-[[example]]
-name = "cdr_api_usage"
-path = "examples/cdr_api_usage.rs"
 
 [features]
 integration-tests = []
