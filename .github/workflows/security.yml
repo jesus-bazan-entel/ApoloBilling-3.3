@@ -1,0 +1,96 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+
+jobs:
+  # Rust Security Audit
+  rust-security:
+    name: Rust Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit - Backend
+      working-directory: ./rust-backend
+      run: cargo audit
+
+    - name: Run security audit - Billing Engine
+      working-directory: ./rust-billing-engine
+      run: cargo audit
+
+    - name: Check for outdated dependencies - Backend
+      working-directory: ./rust-backend
+      run: cargo outdated --exit-code 1
+      continue-on-error: true
+
+    - name: Check for outdated dependencies - Billing Engine
+      working-directory: ./rust-billing-engine
+      run: cargo outdated --exit-code 1
+      continue-on-error: true
+
+  # Frontend Security Audit
+  frontend-security:
+    name: Frontend Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Run npm audit
+      working-directory: ./frontend
+      run: npm audit --audit-level=moderate
+
+    - name: Check for outdated packages
+      working-directory: ./frontend
+      run: npm outdated
+      continue-on-error: true
+
+  # CodeQL Analysis
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript', 'typescript' ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3

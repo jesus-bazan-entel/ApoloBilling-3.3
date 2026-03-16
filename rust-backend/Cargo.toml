@@ -1,0 +1,124 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/apolo-core",
+    "crates/apolo-db",
+    "crates/apolo-cache",
+    "crates/apolo-auth",
+    "crates/apolo-services",
+    "crates/apolo-api",
+    "crates/apolo-esl",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["ApoloBilling Team"]
+license = "MIT"
+repository = "https://github.com/apollobilling/apolo-billing"
+
+[workspace.dependencies]
+# Web framework
+actix-web = "4.4"
+actix-rt = "2.9"
+actix-cors = "0.7"
+actix-files = "0.6"
+actix-ws = "0.3"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "rust_decimal", "migrate", "macros"] }
+
+# Redis
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# DateTime and UUID
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+
+# Decimal precision for financial calculations
+rust_decimal = { version = "1.36", features = ["maths", "serde", "db-postgres"] }
+
+# Authentication
+jsonwebtoken = "9.3"
+argon2 = "0.5"
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging/Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# Bytes for network buffers
+bytes = "1.5"
+
+# Internal crates
+apolo-core = { path = "crates/apolo-core" }
+apolo-db = { path = "crates/apolo-db" }
+apolo-cache = { path = "crates/apolo-cache" }
+apolo-auth = { path = "crates/apolo-auth" }
+apolo-services = { path = "crates/apolo-services" }
+apolo-api = { path = "crates/apolo-api" }
+apolo-esl = { path = "crates/apolo-esl" }
+
+[package]
+name = "apolo-billing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "apolo-billing"
+path = "src/main.rs"
+
+[dependencies]
+apolo-core.workspace = true
+apolo-db.workspace = true
+apolo-cache.workspace = true
+apolo-auth.workspace = true
+apolo-services.workspace = true
+apolo-api.workspace = true
+apolo-esl.workspace = true
+
+actix-web.workspace = true
+actix-rt.workspace = true
+actix-cors.workspace = true
+actix-files.workspace = true
+actix-ws.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-actix-web.workspace = true
+dotenvy.workspace = true
+config.workspace = true
+serde_json = { workspace = true }
+num_cpus = "1.16"
+
+[dev-dependencies]
+tokio-test = "0.4"
+reqwest = { version = "0.12", features = ["json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+opt-level = 3
+strip = true

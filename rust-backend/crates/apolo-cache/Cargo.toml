@@ -1,0 +1,26 @@
+[package]
+name = "apolo-cache"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Redis caching layer for ApoloBilling"
+
+[dependencies]
+apolo-core = { workspace = true }
+
+# Redis
+redis = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }

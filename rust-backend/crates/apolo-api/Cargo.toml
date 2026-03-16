@@ -1,0 +1,59 @@
+[package]
+name = "apolo-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "HTTP API layer for ApoloBilling"
+
+[dependencies]
+apolo-core = { workspace = true }
+apolo-db = { workspace = true }
+apolo-cache = { workspace = true }
+apolo-auth = { workspace = true }
+apolo-services = { workspace = true }
+
+# Web framework
+actix-web = { workspace = true }
+actix-cors = { workspace = true }
+actix-files = { workspace = true }
+actix-ws = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+chrono = { workspace = true }
+chrono-tz = "0.9"
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+
+# Validation
+validator = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+tracing-actix-web = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tracing-subscriber = "0.3"
+rust_decimal_macros = "1.36"
+
+[[bench]]
+name = "cdr_benchmarks"
+harness = false
+
+[[example]]
+name = "cdr_api_usage"
+path = "examples/cdr_api_usage.rs"
+
+[features]
+integration-tests = []

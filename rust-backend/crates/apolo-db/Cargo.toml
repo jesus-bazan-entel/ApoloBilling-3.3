@@ -1,0 +1,28 @@
+[package]
+name = "apolo-db"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Database layer with repositories for ApoloBilling"
+
+[dependencies]
+apolo-core = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Types
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }

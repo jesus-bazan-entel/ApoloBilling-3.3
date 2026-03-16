@@ -1,0 +1,36 @@
+[package]
+name = "apolo-services"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Business logic services for ApoloBilling"
+
+[dependencies]
+apolo-core = { workspace = true }
+apolo-db = { workspace = true }
+apolo-cache = { workspace = true }
+apolo-auth = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Types
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+rust_decimal_macros = "1.36"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Concurrency
+parking_lot = "0.12"

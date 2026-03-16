@@ -1,0 +1,76 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Permite ejecución manual
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    # Solo ejecutar si el CI pasó
+    needs: []
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_SSH_KEY }}
+        port: ${{ secrets.DEPLOY_PORT || 22 }}
+        script: |
+          cd /opt/ApoloBilling
+
+          # Pull latest changes
+          git pull origin main
+
+          # Backup current state
+          BACKUP_DIR="/opt/backups/apolobilling/$(date +%Y%m%d_%H%M%S)"
+          mkdir -p $BACKUP_DIR
+
+          # Build Rust Backend
+          cd /opt/ApoloBilling/rust-backend
+          source ~/.cargo/env
+          cargo build --release
+
+          # Build Rust Billing Engine
+          cd /opt/ApoloBilling/rust-billing-engine
+          source ~/.cargo/env
+          cargo build --release
+
+          # Build Frontend
+          cd /opt/ApoloBilling/frontend
+          npm install
+          npm run build
+
+          # Restart services
+          sudo systemctl restart apolo-backend
+          sudo systemctl restart apolo-billing-engine
+          sudo systemctl restart apolo-frontend
+
+          # Verify services are running
+          sleep 5
+          sudo systemctl status apolo-backend --no-pager
+          sudo systemctl status apolo-billing-engine --no-pager
+          sudo systemctl status apolo-frontend --no-pager
+
+          # Health check
+          curl -f http://localhost:8000/api/v1/health || exit 1
+
+          echo "✅ Deployment completed successfully"
+
+    - name: Notify deployment status
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        text: 'Deployment to production ${{ job.status }}'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+      continue-on-error: true

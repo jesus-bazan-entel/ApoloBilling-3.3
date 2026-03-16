@@ -1,0 +1,27 @@
+[Unit]
+Description=Apolo Billing Engine - Real-time call authorization and billing
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/ApoloBilling/rust-billing-engine
+Environment=RUST_LOG=info,apolo_billing_engine=debug
+ExecStart=/opt/ApoloBilling/rust-billing-engine/target/release/apolo-billing-engine
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ApoloBilling/rust-billing-engine
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

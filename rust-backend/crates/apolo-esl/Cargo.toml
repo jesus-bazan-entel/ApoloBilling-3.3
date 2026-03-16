@@ -1,0 +1,40 @@
+[package]
+name = "apolo-esl"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "FreeSWITCH ESL integration for ApoloBilling"
+
+[dependencies]
+apolo-core = { workspace = true }
+apolo-services = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+
+# Network
+bytes = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Types
+chrono = { workspace = true }
+uuid = { workspace = true }
+rust_decimal = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# URL encoding
+urlencoding = "2.1"
+
+# TLS (optional)
+tokio-native-tls = "0.3"
+native-tls = "0.2"

@@ -1,0 +1,27 @@
+[Unit]
+Description=Apolo Backend - REST API for billing management
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/ApoloBilling/rust-backend
+Environment=RUST_LOG=info,apolo_api=debug,apolo_billing=debug
+ExecStart=/opt/ApoloBilling/rust-backend/target/release/apolo-billing
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ApoloBilling/rust-backend /etc/freeswitch/dialplan
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

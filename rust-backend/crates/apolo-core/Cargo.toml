@@ -1,0 +1,46 @@
+[package]
+name = "apolo-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Core types, traits, and error handling for ApoloBilling"
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# DateTime and UUID
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+# Decimal precision
+rust_decimal = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Async traits
+async-trait = { workspace = true }
+
+# Web framework for ResponseError
+actix-web = { workspace = true }
+
+# Validation
+validator = { workspace = true }
+
+# Configuration
+config = { workspace = true }
+dotenvy = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# System info
+num_cpus = "1.16"
+
+[dev-dependencies]
+rust_decimal_macros = "1.36"
