@@ -303,21 +303,45 @@ install_rust() {
 install_nodejs() {
     log_step "6/12 - Instalando Node.js ${NODE_VERSION}"
 
-    if command -v node &> /dev/null; then
+    if command -v node &> /dev/null && command -v npm &> /dev/null; then
         local current_version=$(node --version | tr -d 'v' | cut -d. -f1)
         if [[ $current_version -ge 20 ]]; then
-            log_info "Node.js ya instalado: $(node --version)"
+            log_info "Node.js ya instalado: $(node --version) con npm $(npm --version)"
             return
         fi
     fi
 
+    # Eliminar versiones anteriores de Node.js que no incluyen npm
+    if command -v node &> /dev/null && ! command -v npm &> /dev/null; then
+        run_cmd "apt-get remove -y nodejs 2>/dev/null || true" \
+            "Eliminando Node.js anterior (sin npm)"
+    fi
+
+    # Eliminar paquete Debian si existe (no incluye npm)
+    run_cmd "apt-get remove -y nodejs libnode108 2>/dev/null || true" \
+        "Eliminando Node.js de Debian (si existe)"
+
     run_cmd "curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -" \
-        "Agregando repositorio Node.js"
+        "Agregando repositorio Node.js ${NODE_VERSION}"
 
-    run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs" \
-        "Instalando Node.js ${NODE_VERSION}"
+    # Instalar versión de NodeSource explícitamente (evita que Debian tome prioridad)
+    local nodesource_ver=$(apt-cache madison nodejs 2>/dev/null | grep nodesource | head -1 | awk '{print $3}')
+    if [[ -n "$nodesource_ver" ]]; then
+        run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs=${nodesource_ver}" \
+            "Instalando Node.js ${NODE_VERSION} (NodeSource)"
+    else
+        run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs" \
+            "Instalando Node.js ${NODE_VERSION}"
+    fi
 
-    log_info "Node.js instalado: $(node --version)"
+    # Verificar que npm está disponible
+    if ! command -v npm &> /dev/null; then
+        log_error "npm no se instaló correctamente. Intentando instalar manualmente..."
+        run_cmd "apt-get install -y npm 2>/dev/null || true" \
+            "Instalando npm como paquete separado"
+    fi
+
+    log_info "Node.js instalado: $(node --version), npm: $(npm --version)"
 }
 
 clone_repository() {
@@ -362,8 +386,8 @@ setup_database() {
     local admin_hash='$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$8K1TqNwGVdPCIJL0hFz8qLqkU8b5HjZm7RIJqK5hI/E'
 
     sudo -u postgres psql -d apolo_billing << EOF
-INSERT INTO usuarios (username, password_hash, full_name, role, active)
-VALUES ('admin', '${admin_hash}', 'Administrador', 'superadmin', true)
+INSERT INTO usuarios (username, password, nombre, apellido, role, activo)
+VALUES ('admin', '${admin_hash}', 'Administrador', '', 'superadmin', true)
 ON CONFLICT (username) DO NOTHING;
 EOF
 
@@ -581,7 +605,9 @@ server {
 }
 EOF
 
-    run_cmd "ln -sf /etc/nginx/sites-available/apolobilling /etc/nginx/sites-enabled/ && rm -f /etc/nginx/sites-enabled/default" \
+    # Usar extensión .conf para compatibilidad con configuraciones que usan include *.conf
+    mv /etc/nginx/sites-available/apolobilling /etc/nginx/sites-available/apolobilling.conf 2>/dev/null || true
+    run_cmd "ln -sf /etc/nginx/sites-available/apolobilling.conf /etc/nginx/sites-enabled/apolobilling.conf && rm -f /etc/nginx/sites-enabled/default" \
         "Configurando Nginx"
 
     # Habilitar e iniciar servicios
