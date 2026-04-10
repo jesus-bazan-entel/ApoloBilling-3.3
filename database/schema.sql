@@ -2,7 +2,8 @@
 -- APOLO BILLING ENGINE - DATABASE SCHEMA
 -- =============================================================================
 
--- Conectar a la base de datos correcta
+-- Conectar a la base de datos correcta (si se ejecuta manualmente)
+-- El instalador ya conecta con -d apolo_billing
 \c apolo_billing;
 
 -- Limpiar si existe (CUIDADO: esto borra todo)
@@ -23,15 +24,15 @@ DROP TYPE IF EXISTS transaction_type CASCADE;
 
 -- Tipo de cuenta
 CREATE TYPE account_type AS ENUM (
-    'PREPAID',
-    'POSTPAID'
+    'prepaid',
+    'postpaid'
 );
 
 -- Estado de cuenta
 CREATE TYPE account_status AS ENUM (
-    'ACTIVE',
-    'SUSPENDED',
-    'CLOSED'
+    'active',
+    'suspended',
+    'closed'
 );
 
 -- Estado de reservación
@@ -68,8 +69,8 @@ CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,
     account_code VARCHAR(50) UNIQUE NOT NULL,
     account_name VARCHAR(200) NOT NULL,
-    account_type account_type NOT NULL DEFAULT 'PREPAID',
-    status account_status NOT NULL DEFAULT 'ACTIVE',
+    account_type account_type NOT NULL DEFAULT 'prepaid',
+    status account_status NOT NULL DEFAULT 'active',
     balance DECIMAL(12, 4) NOT NULL DEFAULT 0.0000,
     currency VARCHAR(3) NOT NULL DEFAULT 'USD',
     credit_limit DECIMAL(12, 4) DEFAULT 0.0000,
@@ -81,10 +82,10 @@ CREATE TABLE accounts (
     updated_by VARCHAR(100) DEFAULT 'system',
     
     -- Constraints
-    CONSTRAINT chk_balance_positive_prepaid 
-        CHECK (account_type = 'POSTPAID' OR balance >= 0),
-    CONSTRAINT chk_credit_limit_postpaid 
-        CHECK (account_type = 'PREPAID' OR credit_limit >= 0)
+    CONSTRAINT chk_balance_positive_prepaid
+        CHECK (account_type = 'postpaid' OR balance >= 0),
+    CONSTRAINT chk_credit_limit_postpaid
+        CHECK (account_type = 'prepaid' OR credit_limit >= 0)
 );
 
 -- Índices
@@ -94,9 +95,8 @@ CREATE INDEX idx_accounts_type ON accounts(account_type);
 
 -- Datos de prueba
 INSERT INTO accounts (id, account_code, account_name, account_type, status, balance, created_by) VALUES
-(1, '100001', 'Cliente Prepago Demo', 'PREPAID', 'ACTIVE', 10.0000, 'system'),
-(2, '100002', 'Cliente Postpago Demo', 'POSTPAID', 'ACTIVE', 0.0000, 'system'),
-(3, '100001', 'Test Account Prepaid', 'PREPAID', 'ACTIVE', 10.0000, 'system')
+(1, '100001', 'Cliente Prepago Demo', 'prepaid', 'active', 10.0000, 'system'),
+(2, '100002', 'Cliente Postpago Demo', 'postpaid', 'active', 0.0000, 'system')
 ON CONFLICT (account_code) DO NOTHING;
 
 -- =============================================================================
@@ -340,6 +340,15 @@ FROM accounts a
 LEFT JOIN balance_reservations br ON a.id = br.account_id AND br.status = 'active'
 GROUP BY a.id, a.account_code, a.account_name, a.balance;
 
+-- Vista cdrs: alias de call_detail_records usado por el dashboard y API
+CREATE OR REPLACE VIEW cdrs AS
+SELECT
+    id, call_uuid, account_id, caller_number, callee_number, destination_prefix,
+    start_time, answer_time, end_time, duration, billsec,
+    rate_card_id, rate_per_minute, cost as total_cost,
+    hangup_cause, hangup_disposition, reservation_id, created_at, processed_at
+FROM call_detail_records;
+
 -- Vista de resumen de CDRs por cuenta
 CREATE OR REPLACE VIEW v_cdr_summary AS
 SELECT 
@@ -356,10 +365,19 @@ GROUP BY account_id, DATE(start_time);
 -- PERMISOS (ajusta según tu usuario)
 -- =============================================================================
 
--- Asumiendo que tu usuario es 'postgres' o el que uses en tu app
+-- Permisos para postgres y apolo_user
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO postgres;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'apolo_user') THEN
+        EXECUTE 'GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO apolo_user';
+        EXECUTE 'GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO apolo_user';
+        EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO apolo_user';
+    END IF;
+END $$;
 
 -- =============================================================================
 -- VERIFICACIÓN

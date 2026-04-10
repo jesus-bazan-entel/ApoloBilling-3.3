@@ -171,6 +171,58 @@ CREATE TRIGGER update_usuarios_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
+-- FIX: Enums en minúsculas (el código Rust usa 'active', no 'ACTIVE')
+-- ============================================
+
+-- account_status: ACTIVE/SUSPENDED/CLOSED -> active/suspended/closed
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+               WHERE typname = 'account_status' AND enumlabel = 'ACTIVE') THEN
+        ALTER TABLE accounts ALTER COLUMN status DROP DEFAULT;
+        ALTER TABLE accounts ALTER COLUMN status TYPE VARCHAR(20) USING status::text;
+        UPDATE accounts SET status = LOWER(status);
+        DROP TYPE account_status CASCADE;
+        CREATE TYPE account_status AS ENUM ('active', 'suspended', 'closed');
+        ALTER TABLE accounts ALTER COLUMN status TYPE account_status USING status::account_status;
+        ALTER TABLE accounts ALTER COLUMN status SET DEFAULT 'active';
+    END IF;
+END $$;
+
+-- account_type: PREPAID/POSTPAID -> prepaid/postpaid
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_enum JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+               WHERE typname = 'account_type' AND enumlabel = 'PREPAID') THEN
+        ALTER TABLE accounts DROP CONSTRAINT IF EXISTS chk_balance_positive_prepaid;
+        ALTER TABLE accounts DROP CONSTRAINT IF EXISTS chk_credit_limit_postpaid;
+        ALTER TABLE accounts ALTER COLUMN account_type DROP DEFAULT;
+        ALTER TABLE accounts ALTER COLUMN account_type TYPE VARCHAR(20) USING account_type::text;
+        UPDATE accounts SET account_type = LOWER(account_type);
+        DROP TYPE account_type CASCADE;
+        CREATE TYPE account_type AS ENUM ('prepaid', 'postpaid');
+        ALTER TABLE accounts ALTER COLUMN account_type TYPE account_type USING account_type::account_type;
+        ALTER TABLE accounts ALTER COLUMN account_type SET DEFAULT 'prepaid';
+        ALTER TABLE accounts ADD CONSTRAINT chk_balance_positive_prepaid
+            CHECK (account_type = 'postpaid' OR balance >= 0);
+        ALTER TABLE accounts ADD CONSTRAINT chk_credit_limit_postpaid
+            CHECK (account_type = 'prepaid' OR credit_limit >= 0);
+    END IF;
+END $$;
+
+-- ============================================
+-- Vista cdrs: alias de call_detail_records
+-- ============================================
+
+CREATE OR REPLACE VIEW cdrs AS
+SELECT
+    id, call_uuid, account_id, caller_number, callee_number, destination_prefix,
+    start_time, answer_time, end_time, duration, billsec,
+    rate_card_id, rate_per_minute, cost as total_cost,
+    hangup_cause, hangup_disposition, reservation_id, created_at, processed_at
+FROM call_detail_records;
+
+-- ============================================
 -- PERMISOS
 -- ============================================
 
