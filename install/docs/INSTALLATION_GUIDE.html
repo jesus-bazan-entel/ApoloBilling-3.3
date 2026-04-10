@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApoloBilling - Guia de Instalacion</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #1a365d;
+            border-bottom: 3px solid #3182ce;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #2c5282;
+            margin-top: 40px;
+            border-left: 4px solid #4299e1;
+            padding-left: 15px;
+        }
+
+        h3 {
+            color: #2b6cb0;
+        }
+
+        .diagram {
+            background: #1a202c;
+            color: #68d391;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 20px 0;
+        }
+
+        .cmd {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .cmd-one-liner {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 20px 0;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .step-box {
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            background: linear-gradient(to bottom, #fff, #f7fafc);
+        }
+
+        .step-number {
+            background: #3182ce;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+
+        .step-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #2c5282;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th {
+            background: #3182ce;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        tr:nth-child(even) {
+            background: #f7fafc;
+        }
+
+        .info-box {
+            background: #ebf8ff;
+            border-left: 4px solid #3182ce;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .warning-box {
+            background: #fffaf0;
+            border-left: 4px solid #ed8936;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .success-box {
+            background: #f0fff4;
+            border-left: 4px solid #48bb78;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .logo {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, #1a365d 0%, #2c5282 100%);
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            border: none;
+            color: white;
+            margin: 0;
+        }
+
+        code {
+            background: #edf2f7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .flow-arrow {
+            text-align: center;
+            font-size: 24px;
+            color: #3182ce;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+
+<div class="logo">
+    <h1>ApoloBilling</h1>
+    <p>Guia de Instalacion Automatizada</p>
+</div>
+
+<h2>Instalacion en Una Linea</h2>
+
+<p>La forma mas rapida de instalar ApoloBilling es ejecutando un solo comando:</p>
+
+<div class="cmd-one-liner">
+curl -sSL https://raw.githubusercontent.com/jesus-bazan-entel/ApoloBillingv3/main/install/apolobilling.sh | sudo bash -s install
+</div>
+
+<p>Este comando descarga y ejecuta el script de instalacion automatizado que:</p>
+<ul>
+    <li>Detecta tu sistema operativo y recursos</li>
+    <li>Instala todas las dependencias</li>
+    <li>Configura las bases de datos</li>
+    <li>Compila los componentes Rust y React</li>
+    <li>Configura los servicios systemd</li>
+    <li>Genera credenciales seguras automaticamente</li>
+</ul>
+
+<h2>Diagrama del Proceso de Instalacion</h2>
+
+<div class="diagram">
+                            PROCESO DE INSTALACION APOLOBILLING
+    +=================================================================================+
+
+    [1] PREPARACION                    [2] BASES DE DATOS                [3] CODIGO
+    +------------------+               +------------------+               +------------------+
+    |                  |               |                  |               |                  |
+    | apt update       |               | PostgreSQL 15    |               | git clone        |
+    | build-essential  |  --------->   | Redis            |  --------->   | ApoloBillingv3   |
+    | curl, git, etc   |               | MariaDB          |               |                  |
+    +------------------+               +------------------+               +------------------+
+            |                                  |                                  |
+            v                                  v                                  v
+    +------------------+               +------------------+               +------------------+
+    | Verificar:       |               | Crear:           |               | Ejecutar:        |
+    | - CPU >= 4 cores |               | - apolo_billing  |               | - schema.sql     |
+    | - RAM >= 8GB     |               | - kamailio       |               | - migrations     |
+    | - Disk >= 50GB   |               | - usuarios       |               | - user admin     |
+    +------------------+               +------------------+               +------------------+
+
+    [4] COMPILACION                    [5] SERVICIOS                     [6] VERIFICACION
+    +------------------+               +------------------+               +------------------+
+    |                  |               |                  |               |                  |
+    | Rust Backend     |               | apolo-backend    |               | PostgreSQL   [OK]|
+    | cargo build      |  --------->   | apolo-billing    |  --------->   | Redis        [OK]|
+    | --release        |               | nginx            |               | Backend      [OK]|
+    |                  |               |                  |               | Nginx        [OK]|
+    | Frontend React   |               | systemd enable   |               |                  |
+    | npm run build    |               | systemd start    |               | URL: http://IP   |
+    +------------------+               +------------------+               +------------------+
+
+    +=================================================================================+
+    |                                                                                 |
+    |   Tiempo estimado: 10-20 minutos (dependiendo del hardware y conexion)          |
+    |                                                                                 |
+    +=================================================================================+
+</div>
+
+<h2>Requisitos del Sistema</h2>
+
+<table>
+    <tr>
+        <th>Recurso</th>
+        <th>Minimo</th>
+        <th>Recomendado</th>
+    </tr>
+    <tr>
+        <td>Sistema Operativo</td>
+        <td>Debian 11+</td>
+        <td>Debian 12</td>
+    </tr>
+    <tr>
+        <td>CPU</td>
+        <td>4 cores</td>
+        <td>8+ cores</td>
+    </tr>
+    <tr>
+        <td>RAM</td>
+        <td>8 GB</td>
+        <td>16+ GB</td>
+    </tr>
+    <tr>
+        <td>Disco</td>
+        <td>50 GB SSD</td>
+        <td>100+ GB SSD</td>
+    </tr>
+    <tr>
+        <td>Red</td>
+        <td>100 Mbps</td>
+        <td>1 Gbps</td>
+    </tr>
+</table>
+
+<h2>Instalacion Paso a Paso (Manual)</h2>
+
+<p>Si prefieres mas control sobre el proceso, puedes clonar el repositorio y ejecutar el script localmente:</p>
+
+<div class="step-box">
+    <span class="step-number">1</span>
+    <span class="step-title">Clonar el repositorio</span>
+    <div class="cmd">
+git clone https://github.com/jesus-bazan-entel/ApoloBillingv3.git /opt/ApoloBilling
+cd /opt/ApoloBilling/install
+    </div>
+</div>
+
+<div class="step-box">
+    <span class="step-number">2</span>
+    <span class="step-title">Dar permisos de ejecucion</span>
+    <div class="cmd">
+chmod +x apolobilling.sh
+    </div>
+</div>
+
+<div class="step-box">
+    <span class="step-number">3</span>
+    <span class="step-title">Ejecutar la instalacion</span>
+    <div class="cmd">
+sudo ./apolobilling.sh install
+    </div>
+</div>
+
+<h2>Arquitectura Instalada</h2>
+
+<div class="diagram">
+    +==================================================================================+
+    |                         SERVIDOR APOLOBILLING                                    |
+    +==================================================================================+
+    |                                                                                  |
+    |    INTERNET                                                                      |
+    |        |                                                                         |
+    |        v                                                                         |
+    |   +----------+                                                                   |
+    |   |  NGINX   |  :80/:443                                                         |
+    |   +----+-----+                                                                   |
+    |        |                                                                         |
+    |        +------------------+------------------+                                   |
+    |        |                  |                  |                                   |
+    |        v                  v                  v                                   |
+    |   +----------+      +----------+      +----------+                               |
+    |   | Frontend |      |   API    |      |    WS    |                               |
+    |   |  React   |      | /api/*   |      |   /ws    |                               |
+    |   |  (dist/) |      |  :8000   |      |  :8000   |                               |
+    |   +----------+      +----+-----+      +----+-----+                               |
+    |                          |                 |                                     |
+    |                          v                 v                                     |
+    |                     +----+-----+      +----+-----+                               |
+    |                     | Backend  |      | Billing  |                               |
+    |                     |  Rust    |      | Engine   |                               |
+    |                     |  :8000   |      |  :9000   |                               |
+    |                     +----+-----+      +----+-----+                               |
+    |                          |                 |                                     |
+    |              +-----------+-----------------+-----------+                         |
+    |              |           |                 |           |                         |
+    |              v           v                 v           v                         |
+    |         +--------+  +--------+       +--------+  +--------+                      |
+    |         | Postgre|  | Redis  |       | MySQL  |  | ESL    |                      |
+    |         |  SQL   |  |        |       |(Kamlio)|  |FreeSW  |                      |
+    |         | :5432  |  | :6379  |       | :3306  |  | :8021  |                      |
+    |         +--------+  +--------+       +--------+  +--------+                      |
+    |                                                                                  |
+    +==================================================================================+
+</div>
+
+<h2>Comandos Disponibles</h2>
+
+<table>
+    <tr>
+        <th>Comando</th>
+        <th>Descripcion</th>
+    </tr>
+    <tr>
+        <td><code>./apolobilling.sh install</code></td>
+        <td>Instala ApoloBilling completo</td>
+    </tr>
+    <tr>
+        <td><code>./apolobilling.sh status</code></td>
+        <td>Muestra el estado de los servicios</td>
+    </tr>
+    <tr>
+        <td><code>./apolobilling.sh upgrade</code></td>
+        <td>Actualiza a la ultima version</td>
+    </tr>
+    <tr>
+        <td><code>./apolobilling.sh uninstall</code></td>
+        <td>Desinstala ApoloBilling</td>
+    </tr>
+    <tr>
+        <td><code>./apolobilling.sh help</code></td>
+        <td>Muestra ayuda</td>
+    </tr>
+</table>
+
+<h2>Puertos Utilizados</h2>
+
+<div class="diagram">
+    PUERTOS DE RED - APOLOBILLING
+    +===============================================================================+
+
+    PUBLICOS (exponer en firewall):
+    +---------------+---------------+---------------+---------------+
+    |    :80/:443   |    :5060      |  :10000-20000 |    :5080      |
+    |    Nginx      |   Kamailio    |   RTPEngine   |  FreeSWITCH   |
+    |    Web UI     |   SIP SBC     |   RTP Media   |   SIP PBX     |
+    +---------------+---------------+---------------+---------------+
+
+    INTERNOS (solo localhost):
+    +---------------+---------------+---------------+---------------+
+    |    :8000      |    :9000      |    :5432      |    :6379      |
+    |   Backend     |   Billing     |  PostgreSQL   |    Redis      |
+    |    API        |   Engine      |               |               |
+    +---------------+---------------+---------------+---------------+
+
+    +---------------+---------------+---------------+
+    |    :3306      |    :8021      |    :2223      |
+    |    MySQL      |  FreeSWITCH   |   RTPEngine   |
+    |  (Kamailio)   |     ESL       |   Control     |
+    +---------------+---------------+---------------+
+
+    +===============================================================================+
+</div>
+
+<h2>Post-Instalacion</h2>
+
+<div class="success-box">
+    <strong>Acceso al Sistema:</strong>
+    <ul>
+        <li>URL: <code>http://&lt;IP_SERVIDOR&gt;</code></li>
+        <li>Usuario: <code>admin</code></li>
+        <li>Password: <code>admin123</code> (cambiar inmediatamente)</li>
+    </ul>
+</div>
+
+<div class="warning-box">
+    <strong>Importante:</strong>
+    <ul>
+        <li>Cambiar la password del usuario admin</li>
+        <li>Las credenciales se guardan en <code>/opt/ApoloBilling/credentials.txt</code></li>
+        <li>Eliminar ese archivo despues de guardar las credenciales</li>
+        <li>Configurar SSL con Let's Encrypt para produccion</li>
+    </ul>
+</div>
+
+<h2>Configurar SSL (Produccion)</h2>
+
+<div class="cmd">
+# Instalar certbot
+apt install -y certbot python3-certbot-nginx
+
+# Obtener certificado
+certbot --nginx -d tu-dominio.com
+
+# Renovacion automatica
+systemctl enable certbot.timer
+</div>
+
+<h2>Logs y Troubleshooting</h2>
+
+<div class="cmd">
+# Ver logs del backend
+journalctl -u apolo-backend -f
+
+# Ver logs del billing engine
+journalctl -u apolo-billing-engine -f
+
+# Ver todos los logs
+journalctl -u apolo-backend -u apolo-billing-engine -f
+
+# Ver log de instalacion
+cat /var/log/apolobilling/install.log
+</div>
+
+<h2>Diagrama de Flujo de Instalacion Detallado</h2>
+
+<div class="diagram">
+                                    INICIO
+                                       |
+                                       v
+                        +------------------------------+
+                        |     curl | sudo bash        |
+                        |  Descarga apolobilling.sh   |
+                        +------------------------------+
+                                       |
+                                       v
+                        +------------------------------+
+                        |     Verificar root          |
+                        |     Verificar Debian        |
+                        +------------------------------+
+                                       |
+                                       v
+                        +------------------------------+
+                        |     Detectar IP publica     |
+                        |     Verificar recursos      |
+                        +------------------------------+
+                                       |
+            +--------------------------|---------------------------+
+            |                          |                           |
+            v                          v                           v
+    +---------------+         +---------------+         +---------------+
+    |  PostgreSQL   |         |    Redis      |         |   MariaDB     |
+    |    15         |         |               |         | (Kamailio)    |
+    +---------------+         +---------------+         +---------------+
+            |                          |                           |
+            |     +--------------------+---------------------------+
+            |     |
+            v     v
+    +------------------------------+
+    |   Crear bases de datos:      |
+    |   - apolo_billing (PG)       |
+    |   - kamailio (MySQL)         |
+    +------------------------------+
+                   |
+                   v
+    +------------------------------+
+    |   Instalar Rust & Node.js    |
+    |   - rustup                   |
+    |   - nodejs 20.x              |
+    +------------------------------+
+                   |
+                   v
+    +------------------------------+
+    |   git clone ApoloBillingv3   |
+    |   /opt/ApoloBilling          |
+    +------------------------------+
+                   |
+                   v
+    +------------------------------+
+    |   Ejecutar migraciones SQL   |
+    |   - schema.sql               |
+    |   - 002_*.sql ... 009_*.sql  |
+    +------------------------------+
+                   |
+                   v
+    +------------------------------+
+    |   Generar credenciales:      |
+    |   - DB_PASSWORD (32 chars)   |
+    |   - JWT_SECRET (64 chars)    |
+    |   - MYSQL_PASSWORD           |
+    +------------------------------+
+                   |
+          +-------+-------+
+          |               |
+          v               v
+    +------------+  +------------+
+    | cargo build|  | npm install|
+    | --release  |  | npm build  |
+    | (Backend)  |  | (Frontend) |
+    +------------+  +------------+
+          |               |
+          +-------+-------+
+                  |
+                  v
+    +------------------------------+
+    |   Crear archivos .env        |
+    |   con credenciales           |
+    +------------------------------+
+                  |
+                  v
+    +------------------------------+
+    |   Configurar systemd:        |
+    |   - apolo-backend.service    |
+    |   - apolo-billing-engine     |
+    +------------------------------+
+                  |
+                  v
+    +------------------------------+
+    |   Configurar Nginx:          |
+    |   - Reverse proxy :8000      |
+    |   - Servir frontend          |
+    +------------------------------+
+                  |
+                  v
+    +------------------------------+
+    |   systemctl enable & start   |
+    +------------------------------+
+                  |
+                  v
+    +------------------------------+
+    |   Verificar servicios:       |
+    |   [ ] PostgreSQL             |
+    |   [ ] Redis                  |
+    |   [ ] Backend API            |
+    |   [ ] Nginx                  |
+    +------------------------------+
+                  |
+                  v
+    +------------------------------+
+    |   Guardar credenciales en:   |
+    |   /opt/ApoloBilling/         |
+    |   credentials.txt            |
+    +------------------------------+
+                  |
+                  v
+                 FIN
+         Acceder a http://IP
+</div>
+
+<h2>Soporte</h2>
+
+<div class="info-box">
+    <strong>Repositorio:</strong> <a href="https://github.com/jesus-bazan-entel/ApoloBillingv3">github.com/jesus-bazan-entel/ApoloBillingv3</a><br>
+    <strong>Issues:</strong> <a href="https://github.com/jesus-bazan-entel/ApoloBillingv3/issues">Reportar problema</a>
+</div>
+
+</div>
+
+</body>
+</html>
