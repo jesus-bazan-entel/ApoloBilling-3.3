@@ -1,0 +1,2711 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ApoloBilling - Arquitectura SBC Completa</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20px;
+            background: #fff;
+        }
+
+        .cover {
+            text-align: center;
+            padding: 60px 20px;
+            page-break-after: always;
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+            color: white;
+            margin: -20px -20px 20px -20px;
+            border-radius: 0 0 20px 20px;
+        }
+
+        .cover h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .cover .subtitle {
+            font-size: 1.3em;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+
+        .cover .version {
+            font-size: 1em;
+            opacity: 0.8;
+            margin-top: 60px;
+        }
+
+        .logo-placeholder {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #1e3a5f;
+            border-bottom: 3px solid #2d5a87;
+            padding-bottom: 10px;
+            page-break-after: avoid;
+        }
+
+        h2 {
+            color: #2d5a87;
+            margin-top: 30px;
+            border-left: 4px solid #4a90d9;
+            padding-left: 15px;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            color: #4a6fa5;
+            page-break-after: avoid;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 30px 0;
+            page-break-after: always;
+        }
+
+        .toc h2 {
+            margin-top: 0;
+            border: none;
+            padding-left: 0;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            padding: 8px 0;
+            border-bottom: 1px dotted #ddd;
+        }
+
+        .toc a {
+            color: #2d5a87;
+            text-decoration: none;
+        }
+
+        .diagram {
+            background: #1a1a2e;
+            color: #00ff88;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 20px 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .diagram-light {
+            background: #f5f7fa;
+            color: #2d3748;
+            border: 2px solid #e2e8f0;
+        }
+
+        .diagram-title {
+            background: #2d5a87;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px 10px 0 0;
+            margin: 20px 0 0 0;
+            font-weight: bold;
+        }
+
+        .diagram-title + .diagram {
+            margin-top: 0;
+            border-radius: 0 0 10px 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        th {
+            background: #2d5a87;
+            color: white;
+            padding: 12px 10px;
+            text-align: left;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .info-box {
+            background: #e8f4fd;
+            border-left: 4px solid #4a90d9;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .success-box {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .code-block {
+            background: #282c34;
+            color: #abb2bf;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+            margin: 15px 0;
+            white-space: pre;
+            line-height: 1.5;
+        }
+
+        /* Estilo especial para XML - fondo claro, mejor legibilidad */
+        .code-xml {
+            background: #f8f9fa;
+            color: #2d3748;
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #e2e8f0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.82em;
+            overflow-x: auto;
+            margin: 15px 0;
+            white-space: pre;
+            line-height: 1.6;
+        }
+
+        .code-xml .tag { color: #d73a49; font-weight: bold; }
+        .code-xml .attr { color: #6f42c1; }
+        .code-xml .value { color: #22863a; }
+        .code-xml .comment { color: #6a737d; font-style: italic; }
+
+        .component-card {
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            background: linear-gradient(to bottom, #fff, #f8f9fa);
+        }
+
+        .component-card h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .port-badge {
+            background: #4a90d9;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .flow-number {
+            background: #2d5a87;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .page-break {
+            page-break-before: always;
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media print {
+            .diagram {
+                font-size: 9px;
+            }
+
+            body {
+                padding: 0;
+            }
+
+            .cover {
+                margin: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- PORTADA -->
+<div class="cover">
+    <div class="logo-placeholder">&#128222;</div>
+    <h1>ApoloBilling</h1>
+    <div class="subtitle">Arquitectura SBC Completa</div>
+    <p>Kamailio + dSIPRouter + RTPEngine + FreeSWITCH</p>
+    <p>Backend Rust + PostgreSQL + React/Vite</p>
+    <div class="version">
+        <p>Documento Tecnico v2.0</p>
+        <p>Abril 2026</p>
+    </div>
+</div>
+
+<!-- TABLA DE CONTENIDOS -->
+<div class="toc">
+    <h2>Tabla de Contenidos</h2>
+    <ul>
+        <li><strong>1.</strong> Vision General de la Arquitectura</li>
+        <li><strong>2.</strong> Componentes del Sistema</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.1 Kamailio / dSIPRouter (SBC)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.2 RTPEngine (Media Proxy)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.3 FreeSWITCH (PBX)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.4 Backend Rust (API)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.5 Frontend React + Vite</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;2.6 PostgreSQL + MySQL</li>
+        <li><strong>3.</strong> Flujos de Llamadas</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;3.1 Llamada Entrante (PSTN -> Extension)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;3.2 Llamada Saliente (Extension -> PSTN)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;3.3 Proceso de Autorizacion y Facturacion</li>
+        <li><strong>4.</strong> Flujo de Senalizacion SIP</li>
+        <li><strong>5.</strong> Flujo de Media RTP</li>
+        <li><strong>6.</strong> Configuraciones Principales</li>
+        <li><strong>7.</strong> Puertos y Servicios</li>
+        <li><strong>8.</strong> Proceso de Facturacion en Tiempo Real</li>
+        <li><strong>9.</strong> APIs y Endpoints</li>
+        <li><strong>10.</strong> Interfaces Publicas y Privadas</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;10.1 Kamailio - Lado Publico vs Privado</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;10.2 RTPEngine - Interfaces Internal/External</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;10.3 FreeSWITCH - Bypass Media (RTP NO procesado)</li>
+        <li><strong>11.</strong> Monitoreo de Llamadas Simultaneas</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;11.1 Monitoreo en Kamailio (SIP)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;11.2 Monitoreo en RTPEngine (RTP)</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;11.3 Monitoreo en FreeSWITCH</li>
+        <li>&nbsp;&nbsp;&nbsp;&nbsp;11.4 Script de Monitoreo Integrado</li>
+        <li><strong>12.</strong> Conexion Interna FreeSWITCH - Kamailio</li>
+        <li><strong>Apendice:</strong> Comandos Utiles</li>
+    </ul>
+</div>
+
+<!-- SECCION 1: VISION GENERAL -->
+<h1>1. Vision General de la Arquitectura</h1>
+
+<p>ApoloBilling es una plataforma de facturacion de telecomunicaciones en tiempo real para entornos VoIP. La arquitectura implementa un Session Border Controller (SBC) completo con los siguientes componentes:</p>
+
+<div class="diagram-title">Arquitectura General del Sistema</div>
+<div class="diagram">
+                                    INTERNET / PSTN
+                                          |
+                                          | SIP :5060
+                                          v
+    +=====================================================================+
+    |                        SERVIDOR SBC (10.10.22.4)                    |
+    |                                                                     |
+    |  +---------------------------------------------------------------+  |
+    |  |                    KAMAILIO / dSIPRouter                      |  |
+    |  |                         :5060 (UDP/TCP)                       |  |
+    |  |                                                               |  |
+    |  |   [Funciones]                                                 |  |
+    |  |   - Session Border Controller (SBC)                           |  |
+    |  |   - SIP Routing (drouting module)                             |  |
+    |  |   - Carrier Gateway Selection                                 |  |
+    |  |   - IP-based ACL (address module)                             |  |
+    |  |   - NAT Traversal                                             |  |
+    |  +---------------------------------------------------------------+  |
+    |                    |                           |                    |
+    |         SIP :5080  |                           | Control (rtpengine)|
+    |                    v                           v                    |
+    |  +-----------------------------+    +---------------------------+   |
+    |  |        FREESWITCH           |    |       RTPENGINE           |   |
+    |  |                             |    |                           |   |
+    |  |  Internal :5080 (from-pbx)  |    |  Control: 127.0.0.1:2223  |   |
+    |  |  External :5062 (trunks)    |    |  RTP: 10000-20000 UDP     |   |
+    |  |                             |    |                           |   |
+    |  |  [Funciones]                |    |  [Funciones]              |   |
+    |  |  - PBX Features             |    |  - Media Relay/Proxy      |   |
+    |  |  - IVR, Voicemail           |    |  - Codec Transcoding      |   |
+    |  |  - Conference               |    |  - DTMF Interworking      |   |
+    |  |  - Recording                |    |  - ICE/STUN/TURN          |   |
+    |  |  - mod_xml_curl auth        |    |  - SRTP <-> RTP           |   |
+    |  +-----------------------------+    +---------------------------+   |
+    |            |                                                        |
+    |            | ESL :8021                                              |
+    |            v                                                        |
+    |  +---------------------------------------------------------------+  |
+    |  |                 RUST BILLING ENGINE (:9000)                   |  |
+    |  |                                                               |  |
+    |  |  - Real-time Call Authorization                               |  |
+    |  |  - Balance Reservation Management                             |  |
+    |  |  - CDR Generation                                             |  |
+    |  |  - LPM Rate Lookup                                            |  |
+    |  +---------------------------------------------------------------+  |
+    |            |                                                        |
+    |            | HTTP                                                   |
+    |            v                                                        |
+    |  +---------------------------------------------------------------+  |
+    |  |                   RUST BACKEND API (:8000)                    |  |
+    |  |                                                               |  |
+    |  |  - Account Management          - Unified Routing              |  |
+    |  |  - Rate Cards CRUD             - SIP Device Management        |  |
+    |  |  - CDR Queries/Export          - Kamailio Sync                |  |
+    |  |  - User Auth (JWT)             - FreeSWITCH Directory         |  |
+    |  +---------------------------------------------------------------+  |
+    |            |                                                        |
+    |            | SQL                                                    |
+    |            v                                                        |
+    |  +-----------------------------+    +---------------------------+   |
+    |  |       POSTGRESQL            |    |         MYSQL             |   |
+    |  |       :5432                 |    |         :3306             |   |
+    |  |                             |    |                           |   |
+    |  |  - accounts                 |    |  - dr_gateways            |   |
+    |  |  - cdrs                     |    |  - dr_gw_lists            |   |
+    |  |  - rate_cards               |    |  - dr_rules               |   |
+    |  |  - routing_trunks           |    |  - address                |   |
+    |  |  - sip_devices              |    |  - dsip_* tables          |   |
+    |  +-----------------------------+    +---------------------------+   |
+    |                                                                     |
+    +=====================================================================+
+                                          |
+                                          | HTTP :80/443
+                                          v
+    +=====================================================================+
+    |                          NGINX (Reverse Proxy)                      |
+    |                                                                     |
+    |    /              -> React Frontend (Static files)                  |
+    |    /api/*         -> Rust Backend :8000                             |
+    |    /ws            -> WebSocket (Rust Backend)                       |
+    +=====================================================================+
+                                          |
+                                          v
+    +=====================================================================+
+    |                     REACT FRONTEND (:3000 dev)                      |
+    |                                                                     |
+    |  - Dashboard             - Active Calls Monitor                     |
+    |  - Account Management    - CDR Queries                              |
+    |  - Rate Management       - Unified Routing UI                       |
+    |  - User Management       - SIP Device Management                    |
+    +=====================================================================+
+</div>
+
+<div class="info-box">
+    <strong>Nota:</strong> Todos los componentes pueden ejecutarse en un unico servidor o distribuirse en multiples nodos segun los requisitos de escalabilidad.
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 2: COMPONENTES -->
+<h1>2. Componentes del Sistema</h1>
+
+<h2>2.1 Kamailio / dSIPRouter</h2>
+
+<div class="component-card">
+    <h3>&#128274; Session Border Controller <span class="port-badge">:5060 UDP/TCP</span></h3>
+
+    <p>Kamailio actua como el punto de entrada principal para todo el trafico SIP externo. dSIPRouter proporciona una interfaz de gestion adicional.</p>
+
+    <table>
+        <tr>
+            <th>Funcion</th>
+            <th>Modulo</th>
+            <th>Descripcion</th>
+        </tr>
+        <tr>
+            <td>SIP Routing</td>
+            <td>drouting</td>
+            <td>Enrutamiento dinamico basado en prefijos (LPM)</td>
+        </tr>
+        <tr>
+            <td>ACL por IP</td>
+            <td>permissions</td>
+            <td>Control de acceso por direccion IP</td>
+        </tr>
+        <tr>
+            <td>NAT Traversal</td>
+            <td>nathelper</td>
+            <td>Manejo de clientes detras de NAT</td>
+        </tr>
+        <tr>
+            <td>Media Proxy</td>
+            <td>rtpengine</td>
+            <td>Integracion con RTPEngine para relay de media</td>
+        </tr>
+        <tr>
+            <td>Autenticacion</td>
+            <td>auth_db</td>
+            <td>Autenticacion digest contra MySQL</td>
+        </tr>
+        <tr>
+            <td>Registrar</td>
+            <td>usrloc</td>
+            <td>Registro de ubicacion de usuarios</td>
+        </tr>
+    </table>
+
+    <h4>Tablas MySQL (Kamailio)</h4>
+    <table>
+        <tr>
+            <th>Tabla</th>
+            <th>Proposito</th>
+        </tr>
+        <tr>
+            <td><code>dr_gateways</code></td>
+            <td>Gateways SIP (type=8 carriers, type=9 PBX)</td>
+        </tr>
+        <tr>
+            <td><code>dr_gw_lists</code></td>
+            <td>Grupos de gateways para failover</td>
+        </tr>
+        <tr>
+            <td><code>dr_rules</code></td>
+            <td>Reglas de enrutamiento saliente</td>
+        </tr>
+        <tr>
+            <td><code>address</code></td>
+            <td>ACL basada en IP (peers confiables)</td>
+        </tr>
+    </table>
+</div>
+
+<h2>2.2 RTPEngine</h2>
+
+<div class="component-card">
+    <h3>&#127911; Media Proxy <span class="port-badge">Control :2223</span> <span class="port-badge">RTP :10000-20000</span></h3>
+
+    <p>RTPEngine maneja todo el trafico de media (audio/video) actuando como proxy/relay entre los endpoints.</p>
+
+    <div class="diagram-title">Funciones de RTPEngine</div>
+    <div class="diagram diagram-light">
+    +------------------+     +------------------+     +------------------+
+    |   Endpoint A     |     |    RTPENGINE     |     |   Endpoint B     |
+    |  (Telefono IP)   |     |                  |     |   (Carrier)      |
+    +------------------+     +------------------+     +------------------+
+           |                        |                        |
+           |   RTP (G.711)          |   RTP (G.729)          |
+           | --------------------> |  ------------------>   |
+           |                        |    [Transcoding]       |
+           |   RTP (G.711)          |   RTP (G.729)          |
+           | <-------------------- |  <------------------   |
+           |                        |                        |
+
+    Capacidades:
+    - Codec Transcoding (G.711 <-> G.729, Opus, etc.)
+    - DTMF Interworking (RFC2833 <-> SIP INFO <-> In-band)
+    - SRTP <-> RTP Bridge (encripcion/desencripcion)
+    - ICE/STUN/TURN para NAT traversal
+    - Recording (captura de media)
+    - Symmetric RTP handling
+    </div>
+
+    <h4>Configuracion Principal</h4>
+    <div class="code-block">
+# /etc/rtpengine/rtpengine.conf
+[rtpengine]
+interface = internal/127.0.0.1;external/10.10.22.4
+listen-ng = 127.0.0.1:2223
+port-min = 10000
+port-max = 20000
+log-level = 6
+    </div>
+</div>
+
+<div class="page-break"></div>
+
+<h2>2.3 FreeSWITCH</h2>
+
+<div class="component-card">
+    <h3>&#128222; PBX / Media Server <span class="port-badge">Internal :5080</span> <span class="port-badge">External :5062</span></h3>
+
+    <p>FreeSWITCH maneja todas las funciones de PBX incluyendo IVR, voicemail, conferencias y grabacion.</p>
+
+    <div class="diagram-title">Perfiles SIP de FreeSWITCH</div>
+    <div class="diagram">
+    +================================================================+
+    |                        FREESWITCH                              |
+    +================================================================+
+    |                                                                |
+    |   INTERNAL PROFILE (:5080)           EXTERNAL PROFILE (:5062)  |
+    |   +------------------------+         +------------------------+ |
+    |   |                        |         |                        | |
+    |   | Context: from-pbx      |         | Context: public        | |
+    |   |                        |         |                        | |
+    |   | Proposito:             |         | Proposito:             | |
+    |   | - Dispositivos SIP     |         | - Conexion a Kamailio  | |
+    |   |   registrados          |         | - Trunks externos      | |
+    |   | - Trafico desde        |         | - Gateway de salida    | |
+    |   |   Kamailio             |         |                        | |
+    |   |                        |         |                        | |
+    |   | Auth: mod_xml_curl     |         | Auth: IP-based / ACL   | |
+    |   |   -> Backend API       |         |                        | |
+    |   +------------------------+         +------------------------+ |
+    |                                                                |
+    |   ESL (Event Socket Layer) :8021                               |
+    |   +----------------------------------------------------------+ |
+    |   | - Conexion con Billing Engine                            | |
+    |   | - Eventos: CHANNEL_CREATE, CHANNEL_ANSWER, HANGUP        | |
+    |   | - Control de llamadas en tiempo real                     | |
+    |   +----------------------------------------------------------+ |
+    +================================================================+
+    </div>
+
+    <h4>mod_xml_curl - Autenticacion Dinamica</h4>
+    <p>FreeSWITCH consulta al Backend Rust para autenticar dispositivos SIP:</p>
+    <div class="code-block">
+POST /api/v1/freeswitch/directory
+Content-Type: application/x-www-form-urlencoded
+
+sip_auth_username=1001
+sip_auth_realm=apolo.local
+action=sip_auth
+section=directory
+    </div>
+
+    <p>El Backend responde con XML conteniendo el A1 hash y configuracion:</p>
+    <div class="code-block">
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;document type="freeswitch/xml"&gt;
+  &lt;section name="directory"&gt;
+    &lt;domain name="apolo.local"&gt;
+      &lt;user id="1001"&gt;
+        &lt;params&gt;
+          &lt;param name="a1-hash" value="md5_hash_here"/&gt;
+        &lt;/params&gt;
+        &lt;variables&gt;
+          &lt;variable name="accountcode" value="ACC001"/&gt;
+          &lt;variable name="user_context" value="from-pbx"/&gt;
+        &lt;/variables&gt;
+      &lt;/user&gt;
+    &lt;/domain&gt;
+  &lt;/section&gt;
+&lt;/document&gt;
+    </div>
+</div>
+
+<div class="page-break"></div>
+
+<h2>2.4 Backend Rust (Actix-web)</h2>
+
+<div class="component-card">
+    <h3>&#128187; API REST <span class="port-badge">:8000</span></h3>
+
+    <p>El Backend Rust maneja toda la logica de negocio, autenticacion, y sincronizacion entre componentes.</p>
+
+    <div class="diagram-title">Arquitectura del Backend</div>
+    <div class="diagram diagram-light">
+    rust-backend/
+    +-- src/main.rs                    # Server setup, routes, middleware
+    +-- crates/
+        +-- apolo-api/                 # HTTP handlers y DTOs
+        |   +-- handlers/
+        |   |   +-- auth.rs            # Login, JWT, register
+        |   |   +-- account.rs         # Cuentas, topup
+        |   |   +-- cdr.rs             # CDRs, export, stats
+        |   |   +-- rate_card.rs       # Tarifas, LPM search
+        |   |   +-- unified_routing.rs # Trunks, routes
+        |   |   +-- sip_device.rs      # Dispositivos SIP
+        |   |   +-- kamailio_*.rs      # Sync con Kamailio
+        |   |   +-- freeswitch_*.rs    # Directory endpoint
+        |   +-- dto/                   # Request/Response types
+        |
+        +-- apolo-db/                  # PostgreSQL repositories (SQLx)
+        +-- apolo-auth/                # JWT + Argon2
+        +-- apolo-cache/               # Redis caching
+        +-- apolo-core/                # Models, traits, errors
+        +-- apolo-services/            # Business logic
+        +-- apolo-esl/                 # FreeSWITCH ESL integration
+    </div>
+
+    <h4>Endpoints Principales</h4>
+    <table>
+        <tr>
+            <th>Endpoint</th>
+            <th>Metodo</th>
+            <th>Descripcion</th>
+        </tr>
+        <tr>
+            <td><code>/api/v1/auth/*</code></td>
+            <td>POST</td>
+            <td>Login, logout, register, change-password</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/accounts</code></td>
+            <td>CRUD</td>
+            <td>Gestion de cuentas de clientes</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/cdrs</code></td>
+            <td>GET</td>
+            <td>Consulta y exportacion de CDRs</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/routing/*</code></td>
+            <td>CRUD</td>
+            <td>Trunks, grupos, rutas</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/sip-devices</code></td>
+            <td>CRUD</td>
+            <td>Dispositivos SIP</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/freeswitch/directory</code></td>
+            <td>POST</td>
+            <td>Auth dinamica para FreeSWITCH</td>
+        </tr>
+        <tr>
+            <td><code>/api/v1/kamailio-dialplan/*</code></td>
+            <td>CRUD</td>
+            <td>Sync con tablas dr_* de Kamailio</td>
+        </tr>
+        <tr>
+            <td><code>/ws</code></td>
+            <td>WS</td>
+            <td>WebSocket para updates en tiempo real</td>
+        </tr>
+    </table>
+</div>
+
+<h2>2.5 Frontend React + Vite</h2>
+
+<div class="component-card">
+    <h3>&#127912; Interfaz de Usuario <span class="port-badge">:3000 (dev)</span></h3>
+
+    <p>SPA moderna con React 19, TypeScript, TanStack Query, Radix UI y Tailwind CSS 4.</p>
+
+    <table>
+        <tr>
+            <th>Pagina</th>
+            <th>Funcionalidad</th>
+        </tr>
+        <tr>
+            <td>Dashboard</td>
+            <td>Estadisticas en tiempo real, llamadas activas</td>
+        </tr>
+        <tr>
+            <td>Accounts</td>
+            <td>Gestion de cuentas, topup, balance</td>
+        </tr>
+        <tr>
+            <td>CDR</td>
+            <td>Consulta, filtrado, exportacion CSV/JSON</td>
+        </tr>
+        <tr>
+            <td>Rates</td>
+            <td>Zonas, prefijos, tarifas</td>
+        </tr>
+        <tr>
+            <td>Unified Routing</td>
+            <td>Trunks, grupos, rutas inbound/outbound</td>
+        </tr>
+        <tr>
+            <td>SIP Devices</td>
+            <td>Dispositivos registrados, credenciales</td>
+        </tr>
+        <tr>
+            <td>Active Calls</td>
+            <td>Monitor de llamadas en tiempo real</td>
+        </tr>
+    </table>
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 3: FLUJOS DE LLAMADAS -->
+<h1>3. Flujos de Llamadas</h1>
+
+<h2>3.1 Llamada Entrante (PSTN -> Extension)</h2>
+
+<div class="diagram-title">Flujo Completo: Llamada Entrante</div>
+<div class="diagram">
+   PSTN           CARRIER          KAMAILIO         RTPENGINE        FREESWITCH       EXTENSION
+    |               |                 |                 |                 |               |
+    |  INVITE       |                 |                 |                 |               |
+    |-------------->|                 |                 |                 |               |
+    |               |  INVITE         |                 |                 |               |
+    |               |---------------->|                 |                 |               |
+    |               |                 |                 |                 |               |
+    |               |                 | 1. Validar IP (address table)     |               |
+    |               |                 | 2. Buscar destino (dr_rules)      |               |
+    |               |                 | 3. Seleccionar PBX (dr_gateways)  |               |
+    |               |                 |                 |                 |               |
+    |               |                 | rtpengine offer |                 |               |
+    |               |                 |---------------->|                 |               |
+    |               |                 |    (mangled SDP)|                 |               |
+    |               |                 |<----------------|                 |               |
+    |               |                 |                 |                 |               |
+    |               |                 |  INVITE (to :5080)                |               |
+    |               |                 |---------------------------------->|               |
+    |               |                 |                 |                 |               |
+    |               |                 |                 |                 | 4. Context:   |
+    |               |                 |                 |                 |    from-pbx   |
+    |               |                 |                 |                 | 5. Buscar     |
+    |               |                 |                 |                 |    extension  |
+    |               |                 |                 |                 |               |
+    |               |                 |                 |                 |  INVITE       |
+    |               |                 |                 |                 |-------------->|
+    |               |                 |                 |                 |               |
+    |               |                 |                 |                 |  180 Ringing  |
+    |               |                 |                 |                 |<--------------|
+    |               |                 |                 |                 |               |
+    |               |                 |  180 Ringing    |                 |               |
+    |               |                 |<----------------------------------|               |
+    |               |  180 Ringing    |                 |                 |               |
+    |               |<----------------|                 |                 |               |
+    |  180 Ringing  |                 |                 |                 |               |
+    |<--------------|                 |                 |                 |               |
+    |               |                 |                 |                 |               |
+    |               |                 |                 |                 |  200 OK       |
+    |               |                 |                 |                 |<--------------|
+    |               |                 |                 |                 |               |
+    |               |                 |  200 OK         |                 |               |
+    |               |                 |<----------------------------------|               |
+    |               |                 |                 |                 |               |
+    |               |                 | rtpengine answer|                 |               |
+    |               |                 |---------------->|                 |               |
+    |               |                 |    (final SDP)  |                 |               |
+    |               |                 |<----------------|                 |               |
+    |               |                 |                 |                 |               |
+    |               |  200 OK         |                 |                 |               |
+    |               |<----------------|                 |                 |               |
+    |  200 OK       |                 |                 |                 |               |
+    |<--------------|                 |                 |                 |               |
+    |               |                 |                 |                 |               |
+    |  ACK          |                 |                 |                 |               |
+    |-------------->|                 |                 |                 |               |
+    |               |  ACK            |                 |                 |               |
+    |               |---------------->|                 |                 |               |
+    |               |                 |  ACK            |                 |               |
+    |               |                 |---------------------------------->|               |
+    |               |                 |                 |                 |  ACK          |
+    |               |                 |                 |                 |-------------->|
+    |               |                 |                 |                 |               |
+    |===============|=================|=================|=================|===============|
+    |               |          RTP MEDIA (via RTPEngine)|                 |               |
+    |               |<=================================>|<================================>|
+    |               |                 |                 |                 |               |
+</div>
+
+<div class="flow-step"><span class="flow-number">1</span><span>PSTN origina llamada hacia el DID del cliente</span></div>
+<div class="flow-step"><span class="flow-number">2</span><span>Carrier envia INVITE a Kamailio :5060</span></div>
+<div class="flow-step"><span class="flow-number">3</span><span>Kamailio valida IP del carrier (tabla address)</span></div>
+<div class="flow-step"><span class="flow-number">4</span><span>Kamailio busca destino en dr_rules (prefix match)</span></div>
+<div class="flow-step"><span class="flow-number">5</span><span>Selecciona gateway tipo PBX (type=9) de dr_gateways</span></div>
+<div class="flow-step"><span class="flow-number">6</span><span>RTPEngine modifica SDP para relay de media</span></div>
+<div class="flow-step"><span class="flow-number">7</span><span>INVITE se envia a FreeSWITCH :5080</span></div>
+<div class="flow-step"><span class="flow-number">8</span><span>FreeSWITCH busca extension en dialplan (context: from-pbx)</span></div>
+<div class="flow-step"><span class="flow-number">9</span><span>Extension contesta, media fluye via RTPEngine</span></div>
+
+<div class="page-break"></div>
+
+<h2>3.2 Llamada Saliente (Extension -> PSTN)</h2>
+
+<div class="diagram-title">Flujo Completo: Llamada Saliente</div>
+<div class="diagram">
+   EXTENSION       FREESWITCH        BILLING          KAMAILIO         RTPENGINE        CARRIER
+    |                 |                 |                 |                 |               |
+    |  REGISTER       |                 |                 |                 |               |
+    |---------------->|                 |                 |                 |               |
+    |                 | POST /freeswitch/directory        |                 |               |
+    |                 |---------------->|                 |                 |               |
+    |                 |   XML (a1-hash) |                 |                 |               |
+    |                 |<----------------|                 |                 |               |
+    |  200 OK         |                 |                 |                 |               |
+    |<----------------|                 |                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |  INVITE (dial)  |                 |                 |                 |               |
+    |---------------->|                 |                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 | 1. Context: from-pbx              |                 |               |
+    |                 | 2. Check dialplan                 |                 |               |
+    |                 | 3. Match outbound route           |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 | ESL: CHANNEL_CREATE               |                 |               |
+    |                 |================>|                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |                 | 4. Authorize call (LPM rate)      |               |
+    |                 |                 | 5. Reserve balance                |               |
+    |                 |                 | 6. Calculate max_duration         |               |
+    |                 |                 |                 |                 |               |
+    |                 |<================| (auth response) |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |  INVITE (via gateway kamailio)    |                 |               |
+    |                 |---------------------------------->|                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 | 7. Match dr_rules (prefix)      |
+    |                 |                 |                 | 8. Select carrier (dr_gw_lists) |
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 | rtpengine offer |               |
+    |                 |                 |                 |---------------->|               |
+    |                 |                 |                 |<----------------|               |
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 |  INVITE         |               |
+    |                 |                 |                 |-------------------------------->|
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 |  100 Trying     |               |
+    |                 |                 |                 |<--------------------------------|
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 |  183 Progress   |               |
+    |                 |                 |                 |<--------------------------------|
+    |                 |                 |                 |                 |               |
+    |                 |  183 Progress   |                 |                 |               |
+    |                 |<----------------------------------|                 |               |
+    |  183 Progress   |                 |                 |                 |               |
+    |<----------------|                 |                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 |  200 OK         |               |
+    |                 |                 |                 |<--------------------------------|
+    |                 |                 |                 |                 |               |
+    |                 |                 |                 | rtpengine answer|               |
+    |                 |                 |                 |---------------->|               |
+    |                 |                 |                 |<----------------|               |
+    |                 |                 |                 |                 |               |
+    |                 |  200 OK         |                 |                 |               |
+    |                 |<----------------------------------|                 |               |
+    |  200 OK         |                 |                 |                 |               |
+    |<----------------|                 |                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 | ESL: CHANNEL_ANSWER               |                 |               |
+    |                 |================>|                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |                 | 9. Start realtime billing         |               |
+    |                 |                 | 10. Monitor every 180s            |               |
+    |                 |                 | 11. Extend reservations           |               |
+    |                 |                 |                 |                 |               |
+    |=================|=================|=================|=================|===============|
+    |           RTP MEDIA (via RTPEngine)                 |                 |               |
+    |<=================================>|<===============>|<================================>|
+    |                 |                 |                 |                 |               |
+    |  BYE            |                 |                 |                 |               |
+    |---------------->|                 |                 |                 |               |
+    |                 |  BYE            |                 |                 |               |
+    |                 |---------------------------------->|                 |               |
+    |                 |                 |                 |  BYE            |               |
+    |                 |                 |                 |-------------------------------->|
+    |                 |                 |                 |                 |               |
+    |                 | ESL: CHANNEL_HANGUP_COMPLETE      |                 |               |
+    |                 |================>|                 |                 |               |
+    |                 |                 |                 |                 |               |
+    |                 |                 | 12. Generate CDR                  |               |
+    |                 |                 | 13. Commit balance                |               |
+    |                 |                 | 14. Release excess reservation    |               |
+    |                 |                 |                 |                 |               |
+</div>
+
+<div class="page-break"></div>
+
+<h2>3.3 Proceso de Autorizacion y Facturacion</h2>
+
+<div class="diagram-title">Billing Engine - Flujo de Autorizacion</div>
+<div class="diagram">
+    +=========================================================================+
+    |                    PROCESO DE AUTORIZACION DE LLAMADA                   |
+    +=========================================================================+
+
+    1. CHANNEL_CREATE Event
+       +------------------------------------------------------------------+
+       |  Billing Engine recibe evento ESL con:                          |
+       |  - caller_id_number (origen)                                    |
+       |  - destination_number (destino)                                 |
+       |  - context (from-pbx = outbound, to-kamailio = inbound)        |
+       +------------------------------------------------------------------+
+                                    |
+                                    v
+    2. Account Lookup
+       +------------------------------------------------------------------+
+       |  Buscar cuenta por:                                             |
+       |  - Outbound: caller_id_number -> accounts.codigo                |
+       |  - Toll-free (0800): destination_number -> accounts.codigo      |
+       |  - Inbound normal: SKIP (no billing)                            |
+       +------------------------------------------------------------------+
+                                    |
+                                    v
+    3. Rate Lookup (LPM - Longest Prefix Match)
+       +------------------------------------------------------------------+
+       |  Para destino "541156789012":                                   |
+       |                                                                 |
+       |  Generar prefijos:                                              |
+       |  ["5", "54", "541", "5411", "54115", "541156", ...]             |
+       |                                                                 |
+       |  Query rate_cards:                                              |
+       |  SELECT * FROM rate_cards                                       |
+       |  WHERE destination_prefix IN (prefixes)                         |
+       |    AND effective_date <= NOW()                                  |
+       |    AND (expiration_date IS NULL OR expiration_date > NOW())     |
+       |  ORDER BY LENGTH(destination_prefix) DESC, priority ASC         |
+       |  LIMIT 1                                                        |
+       |                                                                 |
+       |  Resultado: prefix="54115" -> rate=$0.05/min                    |
+       +------------------------------------------------------------------+
+                                    |
+                                    v
+    4. Balance Reservation
+       +------------------------------------------------------------------+
+       |  Formula de reserva:                                            |
+       |                                                                 |
+       |  base_amount = rate_per_minute * 5 minutes                      |
+       |  buffer = base_amount * 8%                                      |
+       |  total = CLAMP(base_amount + buffer, $0.30, $30.00)            |
+       |                                                                 |
+       |  max_duration = (total / rate_per_minute) * 60 seconds          |
+       |                                                                 |
+       |  INSERT INTO balance_reservations (...)                         |
+       |  UPDATE accounts SET balance = balance - total                  |
+       +------------------------------------------------------------------+
+                                    |
+                                    v
+    5. Authorization Response
+       +------------------------------------------------------------------+
+       |  Si OK:                                                         |
+       |  - Set channel var: max_duration_seconds                        |
+       |  - Set channel var: billing_rate                                |
+       |  - Allow call to proceed                                        |
+       |                                                                 |
+       |  Si DENIED (insufficient balance, no rate, account disabled):   |
+       |  - Hangup call with appropriate cause code                      |
+       +------------------------------------------------------------------+
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 4: SENALIZACION SIP DETALLADA -->
+<h1>4. Flujo de Senalizacion SIP Detallado</h1>
+
+<h2>4.1 Mensajes SIP - Llamada Saliente</h2>
+
+<div class="diagram-title">Secuencia SIP Completa</div>
+<div class="diagram">
+    Extension          FreeSWITCH            Kamailio             Carrier
+    (1001@apolo)        (:5080)               (:5060)           (190.x.x.x)
+        |                   |                    |                   |
+        |                   |                    |                   |
+        | INVITE            |                    |                   |
+        | sip:5491156@apolo |                    |                   |
+        |------------------>|                    |                   |
+        |                   |                    |                   |
+        | 100 Trying        |                    |                   |
+        |<------------------|                    |                   |
+        |                   |                    |                   |
+        |                   | INVITE             |                   |
+        |                   | sip:5491156@kam    |                   |
+        |                   | Via: FS            |                   |
+        |                   | From: 1001@apolo   |                   |
+        |                   | To: 5491156@kam    |                   |
+        |                   |                    |                   |
+        |                   | SDP:               |                   |
+        |                   | m=audio 10000 RTP  |                   |
+        |                   | c=IN IP4 10.10.22.4|                   |
+        |                   | a=rtpmap:0 PCMU    |                   |
+        |                   | a=rtpmap:8 PCMA    |                   |
+        |                   |------------------->|                   |
+        |                   |                    |                   |
+        |                   | 100 Trying         |                   |
+        |                   |<-------------------|                   |
+        |                   |                    |                   |
+        |                   |                    | [drouting lookup]  |
+        |                   |                    | prefix=54911       |
+        |                   |                    | -> gwlist=14       |
+        |                   |                    | -> carrier=voipswitch|
+        |                   |                    |                   |
+        |                   |                    | [rtpengine offer]  |
+        |                   |                    | Replace SDP IPs    |
+        |                   |                    |                   |
+        |                   |                    | INVITE             |
+        |                   |                    | sip:5491156@voip   |
+        |                   |                    | Via: KAM,FS        |
+        |                   |                    | From: 1001@apolo   |
+        |                   |                    |                   |
+        |                   |                    | SDP (mangled):     |
+        |                   |                    | m=audio 12000 RTP  |
+        |                   |                    | c=IN IP4 10.10.22.4|
+        |                   |                    |------------------->|
+        |                   |                    |                   |
+        |                   |                    | 100 Trying         |
+        |                   |                    |<-------------------|
+        |                   |                    |                   |
+        |                   |                    | 183 Session Prog.  |
+        |                   |                    | SDP: carrier media |
+        |                   |                    |<-------------------|
+        |                   |                    |                   |
+        |                   |                    | [rtpengine answer] |
+        |                   |                    |                   |
+        |                   | 183 Session Prog.  |                   |
+        |                   |<-------------------|                   |
+        |                   |                    |                   |
+        | 183 Session Prog. |                    |                   |
+        |<------------------|                    |                   |
+        |                   |                    |                   |
+        |==================>| EARLY MEDIA (ringback tone)            |
+        |                   |<===================|<==================|
+        |                   |                    |                   |
+        |                   |                    | 200 OK            |
+        |                   |                    |<-------------------|
+        |                   |                    |                   |
+        |                   | 200 OK             |                   |
+        |                   |<-------------------|                   |
+        |                   |                    |                   |
+        | 200 OK            |                    |                   |
+        |<------------------|                    |                   |
+        |                   |                    |                   |
+        | ACK               |                    |                   |
+        |------------------>|                    |                   |
+        |                   | ACK                |                   |
+        |                   |------------------->|                   |
+        |                   |                    | ACK               |
+        |                   |                    |------------------->|
+        |                   |                    |                   |
+        |                   |                    |                   |
+        |<==================| RTP BIDIRECCIONAL  |==================>|
+        |                   | (via RTPEngine)    |                   |
+        |                   |                    |                   |
+</div>
+
+<div class="page-break"></div>
+
+<h2>4.2 Headers SIP Importantes</h2>
+
+<table>
+    <tr>
+        <th>Header</th>
+        <th>Proposito</th>
+        <th>Ejemplo</th>
+    </tr>
+    <tr>
+        <td><code>Via</code></td>
+        <td>Ruta de respuesta SIP</td>
+        <td>Via: SIP/2.0/UDP 10.10.22.4:5060;branch=z9hG4bK...</td>
+    </tr>
+    <tr>
+        <td><code>From</code></td>
+        <td>Origen de la llamada</td>
+        <td>From: "User" &lt;sip:1001@apolo.local&gt;;tag=abc123</td>
+    </tr>
+    <tr>
+        <td><code>To</code></td>
+        <td>Destino de la llamada</td>
+        <td>To: &lt;sip:5491156789@carrier.com&gt;</td>
+    </tr>
+    <tr>
+        <td><code>Contact</code></td>
+        <td>Direccion para mensajes directos</td>
+        <td>Contact: &lt;sip:1001@192.168.1.100:5060&gt;</td>
+    </tr>
+    <tr>
+        <td><code>Call-ID</code></td>
+        <td>Identificador unico de llamada</td>
+        <td>Call-ID: 12345-67890@apolo.local</td>
+    </tr>
+    <tr>
+        <td><code>CSeq</code></td>
+        <td>Secuencia de comandos</td>
+        <td>CSeq: 1 INVITE</td>
+    </tr>
+    <tr>
+        <td><code>Record-Route</code></td>
+        <td>Forzar proxy en dialogo</td>
+        <td>Record-Route: &lt;sip:10.10.22.4;lr&gt;</td>
+    </tr>
+    <tr>
+        <td><code>P-Asserted-Identity</code></td>
+        <td>Identidad verificada</td>
+        <td>P-Asserted-Identity: &lt;sip:1001@apolo.local&gt;</td>
+    </tr>
+</table>
+
+<!-- SECCION 5: FLUJO RTP -->
+<h1>5. Flujo de Media RTP</h1>
+
+<div class="diagram-title">Topologia de Media con RTPEngine</div>
+<div class="diagram">
+    +===========================================================================+
+    |                          FLUJO DE MEDIA RTP                               |
+    +===========================================================================+
+
+    SIN RTPENGINE (Problema de NAT):
+
+        Extension                                              Carrier
+        (192.168.1.100)                                    (190.105.250.x)
+              |                                                    |
+              |  RTP directo (FALLA - NAT blocking)                |
+              |  x x x x x x x x x x x x x x x x x x x x x x x x > |
+              |                                                    |
+
+
+    CON RTPENGINE (Solucion):
+
+        Extension              RTPENGINE                      Carrier
+        (192.168.1.100)       (10.10.22.4)                (190.105.250.x)
+              |                    |                            |
+              |  RTP :10000        |   RTP :12000               |
+              | =================> | ==========================> |
+              |  Audio G.711      |   Audio G.711              |
+              |                    |                            |
+              |  RTP :10000        |   RTP :12000               |
+              | <================= | <========================== |
+              |                    |                            |
+
+
+    RTPENGINE como Transcoder:
+
+        Extension              RTPENGINE                      Carrier
+        (G.711 only)           (Transcoding)               (G.729 only)
+              |                    |                            |
+              |  RTP G.711         |   RTP G.729                |
+              | =================> | ==========================> |
+              |  PCMU/PCMA        |   G.729a                   |
+              |                    | [encode/decode]            |
+              |  RTP G.711         |   RTP G.729                |
+              | <================= | <========================== |
+              |                    |                            |
+
+
+    Puertos RTP asignados por RTPEngine:
+
+    +------------------+------------------+------------------+
+    |   Leg A (Phone)  |    RTPENGINE     |   Leg B (Trunk)  |
+    +------------------+------------------+------------------+
+    |                  |                  |                  |
+    | send: 10000      | recv: 10000      | send: 12000      |
+    | recv: 10001      | send: 10001      | recv: 12001      |
+    |                  |                  |                  |
+    | Symmetric RTP    | Media Bridge     | Symmetric RTP    |
+    +------------------+------------------+------------------+
+
+
+    Beneficios de RTPEngine:
+
+    1. NAT Traversal     - Media siempre fluye por IP publica del servidor
+    2. Codec Transcoding - Conversion entre codecs incompatibles
+    3. SRTP Bridge       - Encripcion/desencripcion de media
+    4. ICE Support       - Interactive Connectivity Establishment
+    5. Recording         - Captura de media para grabacion
+    6. DTMF Handling     - Conversion RFC2833 <-> SIP INFO <-> In-band
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 6: CONFIGURACIONES -->
+<h1>6. Configuraciones Principales</h1>
+
+<h2>6.1 Variables de Entorno</h2>
+
+<div class="code-block">
+# ===========================================
+# RUST BACKEND (.env)
+# ===========================================
+
+# PostgreSQL (Base de datos principal)
+DATABASE_URL=postgresql://apolo_user:PASSWORD@localhost:5432/apolo_billing
+DATABASE_MAX_CONNECTIONS=20
+
+# MySQL Kamailio (Opcional - para sync con dr_* tables)
+KAMAILIO_DATABASE_URL=mysql://kamailio:PASSWORD@localhost:3306/kamailio
+
+# Redis (Cache)
+REDIS_URL=redis://localhost:6379
+
+# Server
+RUST_SERVER_HOST=0.0.0.0
+RUST_SERVER_PORT=8000
+RUST_SERVER_WORKERS=4
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# JWT Authentication
+JWT_SECRET=your-super-secret-key-change-in-production
+JWT_EXPIRATION_SECS=1800
+
+# Logging
+RUST_LOG=apolo_billing=info,apolo_api=info,actix_web=info
+
+
+# ===========================================
+# BILLING ENGINE (.env)
+# ===========================================
+
+# Server
+HOST=0.0.0.0
+PORT=9000
+ENVIRONMENT=production
+
+# FreeSWITCH ESL
+# Vacio = modo testing (ESL server en :8021)
+# host:port:password = modo produccion (ESL client)
+FREESWITCH_SERVERS=127.0.0.1:8021:ClueCon
+
+# Database
+DATABASE_URL=postgresql://apolo_user:PASSWORD@localhost:5432/apolo_billing
+REDIS_URL=redis://localhost:6379
+
+
+# ===========================================
+# FRONTEND (.env)
+# ===========================================
+
+VITE_API_URL=http://localhost:8000
+VITE_WS_URL=ws://localhost:8000/ws
+</div>
+
+<h2>6.2 Configuracion de Kamailio</h2>
+
+<div class="code-block">
+# /etc/kamailio/kamailio.cfg (fragmentos relevantes)
+
+# ===== Modulos de Routing =====
+loadmodule "drouting.so"
+loadmodule "permissions.so"
+loadmodule "rtpengine.so"
+
+# ===== Parametros drouting =====
+modparam("drouting", "db_url", "mysql://kamailio:pass@localhost/kamailio")
+modparam("drouting", "use_domain", 0)
+modparam("drouting", "sort_order", 1)  # 0=groupid, 1=priority
+
+# ===== Parametros rtpengine =====
+modparam("rtpengine", "rtpengine_sock", "udp:127.0.0.1:2223")
+modparam("rtpengine", "rtpengine_disable_tout", 20)
+
+# ===== Logica de routing =====
+route[RELAY] {
+    # Aplicar rtpengine para manejo de media
+    if (is_method("INVITE")) {
+        rtpengine_offer("RTP/AVP replace-origin replace-session-connection");
+    }
+
+    # Forward request
+    if (!t_relay()) {
+        sl_reply_error();
+    }
+}
+
+route[OUTBOUND] {
+    # Buscar ruta en drouting
+    if (!do_routing("0")) {
+        sl_send_reply("404", "No Route Found");
+        exit;
+    }
+    route(RELAY);
+}
+</div>
+
+<div class="page-break"></div>
+
+<h2>6.3 Configuracion de FreeSWITCH</h2>
+
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/sip_profiles/internal.xml --&gt;</span>
+<span class="tag">&lt;profile</span> <span class="attr">name</span>=<span class="value">"internal"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;settings&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"sip-ip"</span> <span class="attr">value</span>=<span class="value">"$${local_ip_v4}"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"sip-port"</span> <span class="attr">value</span>=<span class="value">"5080"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"context"</span> <span class="attr">value</span>=<span class="value">"from-pbx"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Codecs --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"inbound-codec-prefs"</span> <span class="attr">value</span>=<span class="value">"PCMU,PCMA,G729,opus"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"outbound-codec-prefs"</span> <span class="attr">value</span>=<span class="value">"PCMU,PCMA,G729"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- NAT --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"ext-rtp-ip"</span> <span class="attr">value</span>=<span class="value">"$${external_rtp_ip}"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"ext-sip-ip"</span> <span class="attr">value</span>=<span class="value">"$${external_sip_ip}"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/settings&gt;</span>
+<span class="tag">&lt;/profile&gt;</span></div>
+
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/autoload_configs/xml_curl.conf.xml --&gt;</span>
+<span class="tag">&lt;configuration</span> <span class="attr">name</span>=<span class="value">"xml_curl.conf"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;bindings&gt;</span>
+    <span class="tag">&lt;binding</span> <span class="attr">name</span>=<span class="value">"directory"</span><span class="tag">&gt;</span>
+      <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"gateway-url"</span> <span class="attr">value</span>=<span class="value">"http://127.0.0.1:8000/api/v1/freeswitch/directory"</span><span class="tag">/&gt;</span>
+      <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"bindings"</span> <span class="attr">value</span>=<span class="value">"directory"</span><span class="tag">/&gt;</span>
+      <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"timeout"</span> <span class="attr">value</span>=<span class="value">"5"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;/binding&gt;</span>
+  <span class="tag">&lt;/bindings&gt;</span>
+<span class="tag">&lt;/configuration&gt;</span></div>
+
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/dialplan/from-pbx.xml --&gt;</span>
+<span class="tag">&lt;extension</span> <span class="attr">name</span>=<span class="value">"outbound-via-kamailio"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;condition</span> <span class="attr">field</span>=<span class="value">"destination_number"</span> <span class="attr">expression</span>=<span class="value">"^(\d{10,15})$"</span><span class="tag">&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"effective_caller_id_number=${caller_id_number}"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"bridge"</span> <span class="attr">data</span>=<span class="value">"sofia/gateway/kamailio/$1"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/condition&gt;</span>
+<span class="tag">&lt;/extension&gt;</span></div>
+
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/sip_profiles/external/kamailio.xml --&gt;</span>
+<span class="tag">&lt;gateway</span> <span class="attr">name</span>=<span class="value">"kamailio"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"realm"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"proxy"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4:5060"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"register"</span> <span class="attr">value</span>=<span class="value">"false"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"caller-id-in-from"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+<span class="tag">&lt;/gateway&gt;</span></div>
+
+<h2>6.4 Configuracion de RTPEngine</h2>
+
+<div class="code-block">
+# /etc/rtpengine/rtpengine.conf
+
+[rtpengine]
+# Interfaces de red
+# internal = loopback para comunicacion con Kamailio
+# external = IP publica para media
+interface = internal/127.0.0.1;external/10.10.22.4
+
+# Puerto de control (ng protocol)
+listen-ng = 127.0.0.1:2223
+
+# Rango de puertos RTP
+port-min = 10000
+port-max = 20000
+
+# Timeout de sesiones inactivas (segundos)
+timeout = 60
+silent-timeout = 600
+
+# Logging
+log-level = 5
+log-facility = daemon
+
+# Codecs soportados para transcoding
+# (requiere compilacion con libavcodec)
+# codec-rtpengine = opus,g729,g722,pcmu,pcma
+
+# DTMF
+dtmf-via-sip = on
+
+# Recording (opcional)
+# recording-dir = /var/spool/rtpengine
+# recording-method = pcap
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 7: PUERTOS -->
+<h1>7. Puertos y Servicios</h1>
+
+<table>
+    <tr>
+        <th>Puerto</th>
+        <th>Protocolo</th>
+        <th>Servicio</th>
+        <th>Descripcion</th>
+    </tr>
+    <tr>
+        <td>80/443</td>
+        <td>TCP</td>
+        <td>Nginx</td>
+        <td>Web frontend + API proxy</td>
+    </tr>
+    <tr>
+        <td>3000</td>
+        <td>TCP</td>
+        <td>Vite Dev Server</td>
+        <td>Frontend en desarrollo</td>
+    </tr>
+    <tr>
+        <td>5060</td>
+        <td>UDP/TCP</td>
+        <td>Kamailio</td>
+        <td>SIP signaling (SBC)</td>
+    </tr>
+    <tr>
+        <td>5080</td>
+        <td>UDP/TCP</td>
+        <td>FreeSWITCH Internal</td>
+        <td>Dispositivos SIP registrados</td>
+    </tr>
+    <tr>
+        <td>5062</td>
+        <td>UDP/TCP</td>
+        <td>FreeSWITCH External</td>
+        <td>Gateway hacia Kamailio</td>
+    </tr>
+    <tr>
+        <td>8000</td>
+        <td>TCP</td>
+        <td>Rust Backend API</td>
+        <td>REST API + WebSocket</td>
+    </tr>
+    <tr>
+        <td>9000</td>
+        <td>TCP</td>
+        <td>Billing Engine</td>
+        <td>API de facturacion</td>
+    </tr>
+    <tr>
+        <td>8021</td>
+        <td>TCP</td>
+        <td>FreeSWITCH ESL</td>
+        <td>Event Socket Layer</td>
+    </tr>
+    <tr>
+        <td>2223</td>
+        <td>UDP</td>
+        <td>RTPEngine</td>
+        <td>Control protocol (ng)</td>
+    </tr>
+    <tr>
+        <td>10000-20000</td>
+        <td>UDP</td>
+        <td>RTPEngine</td>
+        <td>Media relay (RTP)</td>
+    </tr>
+    <tr>
+        <td>5432</td>
+        <td>TCP</td>
+        <td>PostgreSQL</td>
+        <td>Base de datos principal</td>
+    </tr>
+    <tr>
+        <td>3306</td>
+        <td>TCP</td>
+        <td>MySQL</td>
+        <td>Base de datos Kamailio</td>
+    </tr>
+    <tr>
+        <td>6379</td>
+        <td>TCP</td>
+        <td>Redis</td>
+        <td>Cache</td>
+    </tr>
+</table>
+
+<div class="diagram-title">Diagrama de Puertos</div>
+<div class="diagram diagram-light">
+                    INTERNET
+                        |
+          +-------------+-------------+
+          |             |             |
+          v             v             v
+    +----------+  +-----------+  +-----------+
+    | HTTP(S)  |  | SIP       |  | RTP       |
+    | 80/443   |  | 5060      |  | 10000-    |
+    +----------+  +-----------+  | 20000     |
+          |             |        +-----------+
+          v             v             |
+    +-----------+  +-----------+      |
+    |   NGINX   |  | KAMAILIO  |<-----+
+    +-----------+  +-----------+
+          |             |    \
+          v             v     \
+    +-----------+  +-----------+  +-----------+
+    | BACKEND   |  | FREESWITCH|  | RTPENGINE |
+    | :8000     |  | :5080/:5062  | :2223     |
+    +-----------+  +-----------+  +-----------+
+          |             |
+          v             v
+    +-----------+  +-----------+  +-----------+
+    | PostgreSQL|  | BILLING   |  |   REDIS   |
+    | :5432     |  | :9000     |  |   :6379   |
+    +-----------+  +-----------+  +-----------+
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 8: FACTURACION -->
+<h1>8. Proceso de Facturacion en Tiempo Real</h1>
+
+<div class="diagram-title">Ciclo de Vida de Facturacion</div>
+<div class="diagram">
+    +==========================================================================+
+    |                     BILLING ENGINE - CICLO DE VIDA                       |
+    +==========================================================================+
+
+    FASE 1: AUTORIZACION (CHANNEL_CREATE)
+    +-------------------------------------------------------------------------+
+    |                                                                         |
+    |   FreeSWITCH                    Billing Engine                          |
+    |       |                              |                                  |
+    |       | ESL: CHANNEL_CREATE          |                                  |
+    |       |----------------------------->|                                  |
+    |       |                              |                                  |
+    |       |                    1. Parse caller/destination                  |
+    |       |                    2. Lookup account by accountcode             |
+    |       |                    3. Check account status (enabled)            |
+    |       |                    4. Check concurrent calls limit              |
+    |       |                    5. LPM rate lookup                           |
+    |       |                    6. Calculate reservation amount              |
+    |       |                    7. Reserve balance                           |
+    |       |                    8. Set max_duration variable                 |
+    |       |                              |                                  |
+    |       | ESL: set variables           |                                  |
+    |       |<-----------------------------|                                  |
+    |       |                              |                                  |
+    +-------------------------------------------------------------------------+
+
+
+    FASE 2: MONITOREO EN TIEMPO REAL (CHANNEL_ANSWER)
+    +-------------------------------------------------------------------------+
+    |                                                                         |
+    |   FreeSWITCH                    Billing Engine                          |
+    |       |                              |                                  |
+    |       | ESL: CHANNEL_ANSWER          |                                  |
+    |       |----------------------------->|                                  |
+    |       |                              |                                  |
+    |       |                    Start RealtimeBiller                         |
+    |       |                              |                                  |
+    |       |                    +--------------------+                       |
+    |       |                    | Monitor Loop       |                       |
+    |       |                    | Every 180 seconds: |                       |
+    |       |                    |                    |                       |
+    |       |                    | 1. Check call      |                       |
+    |       |                    |    duration        |                       |
+    |       |                    |                    |                       |
+    |       |                    | 2. Calculate       |                       |
+    |       |                    |    consumed $      |                       |
+    |       |                    |                    |                       |
+    |       |                    | 3. If reservation  |                       |
+    |       |                    |    running low:    |                       |
+    |       |                    |    - Extend        |                       |
+    |       |                    |    - Or hangup     |                       |
+    |       |                    +--------------------+                       |
+    |       |                              |                                  |
+    +-------------------------------------------------------------------------+
+
+
+    FASE 3: FINALIZACION (CHANNEL_HANGUP_COMPLETE)
+    +-------------------------------------------------------------------------+
+    |                                                                         |
+    |   FreeSWITCH                    Billing Engine          PostgreSQL      |
+    |       |                              |                      |           |
+    |       | ESL: HANGUP_COMPLETE         |                      |           |
+    |       |----------------------------->|                      |           |
+    |       |                              |                      |           |
+    |       |                    1. Get final duration            |           |
+    |       |                    2. Calculate final cost          |           |
+    |       |                              |                      |           |
+    |       |                              | INSERT CDR           |           |
+    |       |                              |--------------------->|           |
+    |       |                              |                      |           |
+    |       |                              | Commit balance       |           |
+    |       |                              | (reservation - cost) |           |
+    |       |                              |--------------------->|           |
+    |       |                              |                      |           |
+    |       |                              | Delete reservation   |           |
+    |       |                              |--------------------->|           |
+    |       |                              |                      |           |
+    |       |                              | Update active_calls  |           |
+    |       |                              |--------------------->|           |
+    |       |                              |                      |           |
+    +-------------------------------------------------------------------------+
+
+
+    FORMULAS DE CALCULO
+    +-------------------------------------------------------------------------+
+    |                                                                         |
+    |   Reserva Inicial:                                                      |
+    |   ----------------                                                      |
+    |   base = rate_per_minute * 5 minutes                                    |
+    |   buffer = base * 8%                                                    |
+    |   reservation = CLAMP(base + buffer, $0.30, $30.00)                     |
+    |   max_duration = (reservation / rate_per_minute) * 60                   |
+    |                                                                         |
+    |   Costo Final:                                                          |
+    |   ------------                                                          |
+    |   billable_seconds = CEIL(duration / billing_increment) * increment     |
+    |   cost = (billable_seconds / 60) * rate_per_minute                      |
+    |                                                                         |
+    |   Refund:                                                               |
+    |   -------                                                               |
+    |   refund = reservation - cost                                           |
+    |   balance = balance + refund                                            |
+    |                                                                         |
+    +-------------------------------------------------------------------------+
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 9: APIs -->
+<h1>9. APIs y Endpoints</h1>
+
+<h2>9.1 API REST Principal (Backend)</h2>
+
+<table>
+    <tr>
+        <th>Endpoint</th>
+        <th>Metodo</th>
+        <th>Acceso</th>
+        <th>Descripcion</th>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">Autenticacion</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/auth/login</code></td>
+        <td>POST</td>
+        <td>Public</td>
+        <td>Login, setea JWT cookie</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/auth/logout</code></td>
+        <td>POST</td>
+        <td>Auth</td>
+        <td>Logout, elimina cookie</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/auth/me</code></td>
+        <td>GET</td>
+        <td>Auth</td>
+        <td>Info del usuario actual</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">Cuentas</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/accounts</code></td>
+        <td>GET/POST</td>
+        <td>Auth</td>
+        <td>Listar/crear cuentas</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/accounts/{id}/topup</code></td>
+        <td>POST</td>
+        <td>Auth</td>
+        <td>Recargar saldo</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">CDRs</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/cdrs</code></td>
+        <td>GET</td>
+        <td>Auth</td>
+        <td>Consultar CDRs (paginado)</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/cdrs/export</code></td>
+        <td>GET</td>
+        <td>Auth</td>
+        <td>Exportar CSV/JSON</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/cdrs/stats</code></td>
+        <td>GET</td>
+        <td>Auth</td>
+        <td>Estadisticas de CDRs</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">Routing Unificado</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/routing/trunks</code></td>
+        <td>CRUD</td>
+        <td>Superadmin</td>
+        <td>Gestion de trunks</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/routing/trunk-groups</code></td>
+        <td>CRUD</td>
+        <td>Superadmin</td>
+        <td>Grupos de failover</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/routing/outbound-routes</code></td>
+        <td>CRUD</td>
+        <td>Superadmin</td>
+        <td>Rutas salientes</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/routing/inbound-routes</code></td>
+        <td>CRUD</td>
+        <td>Superadmin</td>
+        <td>Rutas entrantes</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">Dispositivos SIP</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/sip-devices</code></td>
+        <td>CRUD</td>
+        <td>Auth</td>
+        <td>Dispositivos SIP</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/sip-devices/{id}/password</code></td>
+        <td>GET</td>
+        <td>Admin</td>
+        <td>Obtener password</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">FreeSWITCH</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/freeswitch/directory</code></td>
+        <td>POST</td>
+        <td>IP Whitelist</td>
+        <td>mod_xml_curl auth</td>
+    </tr>
+    <tr>
+        <td colspan="4" style="background:#e8f4fd;font-weight:bold">Kamailio</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/kamailio-dialplan/*</code></td>
+        <td>CRUD</td>
+        <td>Superadmin</td>
+        <td>Sync con dr_* tables</td>
+    </tr>
+    <tr>
+        <td><code>/api/v1/kamailio-dialplan/reload</code></td>
+        <td>POST</td>
+        <td>Superadmin</td>
+        <td>kamcmd drouting.reload</td>
+    </tr>
+</table>
+
+<h2>9.2 WebSocket (/ws)</h2>
+
+<p>El endpoint WebSocket envia actualizaciones en tiempo real:</p>
+
+<div class="code-block">
+// Tipos de mensajes
+{
+  "type": "active_calls",      // Lista completa de llamadas activas
+  "data": [...]
+}
+
+{
+  "type": "call_start",        // Nueva llamada iniciada
+  "data": { call_id, caller, destination, ... }
+}
+
+{
+  "type": "call_update",       // Actualizacion de llamada
+  "data": { call_id, duration, cost, ... }
+}
+
+{
+  "type": "call_end",          // Llamada terminada
+  "data": { call_id, final_duration, final_cost, hangup_cause }
+}
+
+{
+  "type": "stats_update",      // Estadisticas del dashboard
+  "data": { active_calls, total_cost_today, ... }
+}
+</div>
+
+<div class="page-break"></div>
+
+<h1>Apendice: Comandos Utiles</h1>
+
+<h2>Servicios Systemd</h2>
+<div class="code-block">
+# Ver estado de servicios
+systemctl status apolo-backend
+systemctl status apolo-billing-engine
+systemctl status apolo-frontend
+systemctl status kamailio
+systemctl status freeswitch
+systemctl status rtpengine
+
+# Ver logs en tiempo real
+journalctl -u apolo-backend -f
+journalctl -u kamailio -f
+
+# Reiniciar servicios
+systemctl restart apolo-backend
+systemctl restart kamailio
+</div>
+
+<h2>Kamailio</h2>
+<div class="code-block">
+# Recargar routing
+kamcmd drouting.reload
+
+# Recargar ACL de IPs
+kamcmd permissions.addressReload
+
+# Ver gateways activos
+kamcmd drouting.dump_gw
+
+# Ver estado de RTPEngine
+kamcmd rtpengine.show_all
+</div>
+
+<h2>FreeSWITCH</h2>
+<div class="code-block">
+# Consola interactiva
+fs_cli -x "show registrations"
+fs_cli -x "show channels"
+fs_cli -x "sofia status"
+fs_cli -x "sofia status profile internal"
+
+# Recargar configuracion
+fs_cli -x "reloadxml"
+
+# Ver llamadas activas
+fs_cli -x "show calls"
+</div>
+
+<h2>RTPEngine</h2>
+<div class="code-block">
+# Ver sesiones activas
+rtpengine-ctl list sessions
+
+# Ver estadisticas
+rtpengine-ctl stats
+
+# Ver estado del daemon
+systemctl status rtpengine
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 10: INTERFACES PUBLICAS Y PRIVADAS -->
+<h1>10. Manejo de Interfaces Publicas y Privadas</h1>
+
+<h2>10.1 Kamailio - Lado Publico vs Privado</h2>
+
+<p>Kamailio actua como SBC y debe manejar correctamente el trafico desde redes publicas (carriers) y privadas (FreeSWITCH, LAN).</p>
+
+<div class="diagram-title">Topologia de Red Kamailio</div>
+<div class="diagram">
+    +===========================================================================+
+    |                    KAMAILIO - INTERFACES DE RED                           |
+    +===========================================================================+
+
+                         INTERNET (Publico)
+                               |
+                               | 190.105.250.x (Carriers)
+                               v
+    +------------------------------------------------------------------+
+    |                     KAMAILIO :5060                               |
+    |                                                                  |
+    |   LADO PUBLICO (External)           LADO PRIVADO (Internal)      |
+    |   +------------------------+        +------------------------+   |
+    |   |                        |        |                        |   |
+    |   | listen=udp:IP_PUBLICA  |        | listen=udp:127.0.0.1   |   |
+    |   |        :5060           |        |        :5060           |   |
+    |   |                        |        | listen=udp:10.10.22.4  |   |
+    |   | Trafico de:            |        |        :5060           |   |
+    |   | - Carriers externos    |        |                        |   |
+    |   | - Telefonos remotos    |        | Trafico de:            |   |
+    |   |   (detras de NAT)      |        | - FreeSWITCH :5080     |   |
+    |   |                        |        | - Clientes LAN         |   |
+    |   | Flags:                 |        |                        |   |
+    |   | - Validar IP (ACL)     |        | Flags:                 |   |
+    |   | - rtpengine external   |        | - Trust (sin ACL)      |   |
+    |   | - fix_nated_contact()  |        | - rtpengine internal   |   |
+    |   |                        |        |                        |   |
+    |   +------------------------+        +------------------------+   |
+    |                                                                  |
+    +------------------------------------------------------------------+
+                               |
+                               | 127.0.0.1 / 10.10.22.4
+                               v
+    +------------------------------------------------------------------+
+    |                     FREESWITCH                                   |
+    |                                                                  |
+    |   Internal :5080              External :5062                     |
+    |   (Dispositivos SIP)          (Gateway a Kamailio)               |
+    +------------------------------------------------------------------+
+</div>
+
+<h4>Configuracion Kamailio - listen</h4>
+<div class="code-block">
+# /etc/kamailio/kamailio.cfg
+
+# ===== Interfaces de Escucha =====
+# Interfaz publica (carriers externos)
+listen=udp:190.105.250.100:5060
+listen=tcp:190.105.250.100:5060
+
+# Interfaz privada (FreeSWITCH, LAN)
+listen=udp:10.10.22.4:5060
+listen=udp:127.0.0.1:5060
+
+# Alias para identificar el lado
+#!define EXTERNAL_IP "190.105.250.100"
+#!define INTERNAL_IP "10.10.22.4"
+#!define FREESWITCH_IP "10.10.22.4"
+#!define FREESWITCH_PORT 5080
+
+# ===== Deteccion de lado publico/privado =====
+route[CLASSIFY_SOURCE] {
+    if (src_ip == FREESWITCH_IP || src_ip == "127.0.0.1" || from_subnet("10.10.22.0/24")) {
+        setflag(FLT_INTERNAL);  # Trafico interno
+        xlog("L_INFO", "INTERNAL traffic from $si\n");
+    } else {
+        setflag(FLT_EXTERNAL);  # Trafico externo
+        xlog("L_INFO", "EXTERNAL traffic from $si\n");
+    }
+}
+</div>
+
+<h2>10.2 RTPEngine - Interfaces Internal/External</h2>
+
+<p>RTPEngine DEBE configurarse con dos interfaces para manejar correctamente el bridging de media entre la red interna y externa.</p>
+
+<div class="diagram-title">RTPEngine - Bridging de Media</div>
+<div class="diagram">
+    +===========================================================================+
+    |              RTPENGINE - INTERFACES Y BRIDGING DE MEDIA                   |
+    +===========================================================================+
+
+    CONFIGURACION:
+    interface = internal/10.10.22.4;external/190.105.250.100
+
+    LADO INTERNO (internal)               LADO EXTERNO (external)
+    +-------------------------+           +-------------------------+
+    |  IP: 10.10.22.4         |           |  IP: 190.105.250.100    |
+    |  Puertos: 10000-14999   |           |  Puertos: 15000-20000   |
+    |                         |           |                         |
+    |  Conecta con:           |           |  Conecta con:           |
+    |  - FreeSWITCH           |           |  - Carriers (VOIPSWITCH)|
+    |  - Telefonos LAN        |           |  - Telefonos remotos    |
+    |                         |           |                         |
+    +-------------------------+           +-------------------------+
+              |                                      |
+              |         RTPENGINE BRIDGE             |
+              |<====================================>|
+              |                                      |
+
+    LLAMADA SALIENTE (Extension -> PSTN):
+    +-----------+                                    +-------------+
+    | Extension |                                    |   Carrier   |
+    | LAN       |                                    |   Publico   |
+    +-----------+                                    +-------------+
+         |                                                 |
+         | RTP a 10.10.22.4:10500                          |
+         |---------------->+                               |
+                           |    RTPENGINE                  |
+                           |    +------------------+       |
+                           |    | Bridge:          |       |
+                           |    | internal:10500   |       |
+                           |    |     <--->        |       | RTP a 190.x:15500
+                           |    | external:15500   |------>|
+                           |    +------------------+       |
+                           |                               |
+
+
+    KAMAILIO rtpengine_offer() FLAGS:
+    +-----------------------------------------------------------------------+
+    | Llamada desde INTERNO hacia EXTERNO:                                  |
+    |   rtpengine_offer("internal-iface=internal external-iface=external"); |
+    |                                                                       |
+    | Llamada desde EXTERNO hacia INTERNO:                                  |
+    |   rtpengine_offer("internal-iface=external external-iface=internal"); |
+    |                                                                       |
+    | Llamada INTERNO <-> INTERNO (misma LAN):                             |
+    |   rtpengine_offer("internal-iface=internal external-iface=internal"); |
+    +-----------------------------------------------------------------------+
+</div>
+
+<h4>Configuracion RTPEngine Completa</h4>
+<div class="code-block">
+# /etc/rtpengine/rtpengine.conf
+
+[rtpengine]
+# ===== Interfaces de Red =====
+# internal = red privada (FreeSWITCH, LAN)
+# external = red publica (Internet, carriers)
+interface = internal/10.10.22.4;external/190.105.250.100
+
+# Si hay un solo servidor con IP publica:
+# interface = internal/10.10.22.4!190.105.250.100
+
+# ===== Puerto de Control =====
+listen-ng = 127.0.0.1:2223
+
+# ===== Rango de Puertos RTP =====
+port-min = 10000
+port-max = 20000
+
+# ===== Timeouts =====
+timeout = 60              # Inactividad antes de cerrar sesion
+silent-timeout = 600      # Timeout si no hay RTP
+
+# ===== Logging =====
+log-level = 6
+log-facility = daemon
+
+# ===== TOS/DSCP =====
+tos = 184                 # EF (Expedited Forwarding) para QoS
+
+# ===== Codecs (si se compila con libavcodec) =====
+# codec-rtpengine = opus,g729,g722,pcmu,pcma
+
+# ===== DTMF =====
+dtmf-via-sip = on         # Convertir RFC2833 <-> SIP INFO
+
+# ===== Delete Delay =====
+delete-delay = 30         # Segundos antes de liberar puertos
+</div>
+
+<h4>Kamailio - Integracion con RTPEngine por Lado</h4>
+<div class="code-block">
+# /etc/kamailio/kamailio.cfg
+
+# ===== Parametros rtpengine =====
+modparam("rtpengine", "rtpengine_sock", "udp:127.0.0.1:2223")
+
+# ===== Rutina para seleccionar interfaces =====
+route[RTPENGINE_MANAGE] {
+    $var(rtpengine_flags) = "RTP/AVP replace-origin replace-session-connection";
+
+    # Determinar direccion de la llamada
+    if (isflagset(FLT_INTERNAL)) {
+        # Origen interno
+        if (is_request() && has_body("application/sdp")) {
+            # Internal -> External
+            $var(rtpengine_flags) = $var(rtpengine_flags) + " internal-iface=internal external-iface=external";
+        }
+    } else {
+        # Origen externo
+        if (is_request() && has_body("application/sdp")) {
+            # External -> Internal
+            $var(rtpengine_flags) = $var(rtpengine_flags) + " internal-iface=external external-iface=internal";
+        }
+    }
+
+    if (is_method("INVITE")) {
+        rtpengine_offer($var(rtpengine_flags));
+    } else if (is_method("ACK|PRACK") && has_body("application/sdp")) {
+        rtpengine_answer($var(rtpengine_flags));
+    }
+}
+
+onreply_route[REPLY_RTPENGINE] {
+    if (has_body("application/sdp")) {
+        if (isflagset(FLT_INTERNAL)) {
+            rtpengine_answer("internal-iface=external external-iface=internal");
+        } else {
+            rtpengine_answer("internal-iface=internal external-iface=external");
+        }
+    }
+}
+</div>
+
+<div class="page-break"></div>
+
+<h2>10.3 FreeSWITCH - Bypass Media (RTP NO procesado por FS)</h2>
+
+<div class="warning-box">
+    <strong>CRITICO:</strong> Para que RTPEngine maneje TODO el flujo de media, FreeSWITCH debe configurarse con <code>bypass_media</code> para evitar que procese los paquetes RTP.
+</div>
+
+<div class="diagram-title">FreeSWITCH - Modos de Media</div>
+<div class="diagram">
+    +===========================================================================+
+    |                    FREESWITCH - MODOS DE MEDIA                            |
+    +===========================================================================+
+
+    MODO 1: SIN BYPASS_MEDIA (FreeSWITCH procesa RTP) - NO DESEADO
+    +-----------------------------------------------------------------------+
+    |                                                                       |
+    |   Extension        FreeSWITCH            RTPEngine         Carrier    |
+    |       |                |                     |                |       |
+    |       | RTP            |                     |                |       |
+    |       |--------------->| RTP                 |                |       |
+    |       |                |-------------------->| RTP            |       |
+    |       |                |                     |--------------->|       |
+    |       |                |                     |                |       |
+    |   [FreeSWITCH procesa CADA paquete RTP - Latencia adicional]         |
+    |   [FreeSWITCH usa CPU para transcoding/procesamiento]                 |
+    |                                                                       |
+    +-----------------------------------------------------------------------+
+
+
+    MODO 2: CON BYPASS_MEDIA (FreeSWITCH NO procesa RTP) - DESEADO
+    +-----------------------------------------------------------------------+
+    |                                                                       |
+    |   Extension        FreeSWITCH            RTPEngine         Carrier    |
+    |       |                |                     |                |       |
+    |       |   SIP only     |   SIP only          |                |       |
+    |       |<-------------->|<------------------->|                |       |
+    |       |                |                     |                |       |
+    |       | RTP DIRECTO    |                     | RTP            |       |
+    |       |=====================================>|<=============>|       |
+    |       |                                      |                |       |
+    |   [FreeSWITCH solo maneja senalizacion SIP]                          |
+    |   [RTPEngine maneja TODO el flujo de media]                          |
+    |   [Menor latencia, menor uso de CPU en FreeSWITCH]                   |
+    |                                                                       |
+    +-----------------------------------------------------------------------+
+</div>
+
+<h4>Configuracion de Perfil SIP para Bypass Media</h4>
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/sip_profiles/internal.xml --&gt;</span>
+<span class="tag">&lt;profile</span> <span class="attr">name</span>=<span class="value">"internal"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;settings&gt;</span>
+    <span class="comment">&lt;!-- IP y Puerto --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"sip-ip"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"sip-port"</span> <span class="attr">value</span>=<span class="value">"5080"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"context"</span> <span class="attr">value</span>=<span class="value">"from-pbx"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- ========== BYPASS MEDIA - CRITICO ========== --&gt;</span>
+    <span class="comment">&lt;!-- NO procesar RTP, solo senalizacion SIP --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"inbound-bypass-media"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Heredar codecs del leg A (no negociar) --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"inbound-late-negotiation"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Proxy media: false = bypass completo --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"inbound-proxy-media"</span> <span class="attr">value</span>=<span class="value">"false"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- ========== NAT Handling ========== --&gt;</span>
+    <span class="comment">&lt;!-- Para bypass_media, usar IP externa en SDP --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"ext-rtp-ip"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"ext-sip-ip"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- NO hacer STUN ya que RTPEngine maneja NAT --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"stun-enabled"</span> <span class="attr">value</span>=<span class="value">"false"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"stun-auto-disable"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- ========== Codecs ========== --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"inbound-codec-prefs"</span> <span class="attr">value</span>=<span class="value">"PCMU,PCMA,G729,opus"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"outbound-codec-prefs"</span> <span class="attr">value</span>=<span class="value">"PCMU,PCMA,G729"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Disable codec negotiation cuando bypass_media=true --&gt;</span>
+    <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"disable-transcoding"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/settings&gt;</span>
+<span class="tag">&lt;/profile&gt;</span></div>
+
+<h4>Configuracion de Gateway hacia Kamailio con Bypass</h4>
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/sip_profiles/external/kamailio.xml --&gt;</span>
+<span class="tag">&lt;gateway</span> <span class="attr">name</span>=<span class="value">"kamailio"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"realm"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"proxy"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4:5060"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"register"</span> <span class="attr">value</span>=<span class="value">"false"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"caller-id-in-from"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- ========== BYPASS MEDIA EN GATEWAY ========== --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"bypass-media"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- Variables para llamadas a traves de este gateway --&gt;</span>
+  <span class="tag">&lt;variables&gt;</span>
+    <span class="tag">&lt;variable</span> <span class="attr">name</span>=<span class="value">"bypass_media"</span> <span class="attr">value</span>=<span class="value">"true"</span> <span class="attr">direction</span>=<span class="value">"outbound"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;variable</span> <span class="attr">name</span>=<span class="value">"proxy_media"</span> <span class="attr">value</span>=<span class="value">"false"</span> <span class="attr">direction</span>=<span class="value">"outbound"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;variable</span> <span class="attr">name</span>=<span class="value">"inherit_codec"</span> <span class="attr">value</span>=<span class="value">"true"</span> <span class="attr">direction</span>=<span class="value">"outbound"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/variables&gt;</span>
+<span class="tag">&lt;/gateway&gt;</span></div>
+
+<h4>Dialplan con Bypass Media Explicito</h4>
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/dialplan/from-pbx.xml --&gt;</span>
+<span class="tag">&lt;extension</span> <span class="attr">name</span>=<span class="value">"outbound-via-kamailio-bypass"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;condition</span> <span class="attr">field</span>=<span class="value">"destination_number"</span> <span class="attr">expression</span>=<span class="value">"^(\d{10,15})$"</span><span class="tag">&gt;</span>
+    <span class="comment">&lt;!-- ========== FORZAR BYPASS MEDIA ========== --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"bypass_media=true"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"proxy_media=false"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Heredar codec del origen (no re-negociar) --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"inherit_codec=true"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"absolute_codec_string=inherit"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Disable jitterbuffer (no procesamos media) --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"jitterbuffer_msec=0"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"suppress_cng=true"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Ring strategy --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"ringback=${us-ring}"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"call_timeout=60"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Caller ID --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"effective_caller_id_number=${caller_id_number}"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"effective_caller_id_name=${caller_id_name}"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Bridge a Kamailio --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"bridge"</span> <span class="attr">data</span>=<span class="value">"{bypass_media=true}sofia/gateway/kamailio/$1"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/condition&gt;</span>
+<span class="tag">&lt;/extension&gt;</span>
+
+
+<span class="comment">&lt;!-- Ruta entrante desde Kamailio --&gt;</span>
+<span class="tag">&lt;extension</span> <span class="attr">name</span>=<span class="value">"inbound-from-kamailio-bypass"</span><span class="tag">&gt;</span>
+  <span class="tag">&lt;condition</span> <span class="attr">field</span>=<span class="value">"network_addr"</span> <span class="attr">expression</span>=<span class="value">"^10\.10\.22\.4$"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;condition</span> <span class="attr">field</span>=<span class="value">"destination_number"</span> <span class="attr">expression</span>=<span class="value">"^(\d+)$"</span><span class="tag">&gt;</span>
+    <span class="comment">&lt;!-- ========== FORZAR BYPASS MEDIA ENTRANTE ========== --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"bypass_media=true"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"proxy_media=false"</span><span class="tag">/&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"set"</span> <span class="attr">data</span>=<span class="value">"inherit_codec=true"</span><span class="tag">/&gt;</span>
+
+    <span class="comment">&lt;!-- Buscar extension registrada --&gt;</span>
+    <span class="tag">&lt;action</span> <span class="attr">application</span>=<span class="value">"bridge"</span> <span class="attr">data</span>=<span class="value">"{bypass_media=true}user/$1@${domain_name}"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;/condition&gt;</span>
+<span class="tag">&lt;/extension&gt;</span></div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 11: MONITOREO DE LLAMADAS -->
+<h1>11. Monitoreo de Llamadas Simultaneas</h1>
+
+<p>Es esencial verificar que el flujo de media pasa por RTPEngine y NO por FreeSWITCH. Estos comandos permiten monitorear llamadas a nivel SIP y RTP.</p>
+
+<h2>11.1 Monitoreo en Kamailio (Senalizacion SIP)</h2>
+
+<div class="code-block">
+# ===== DIALOGOS SIP ACTIVOS =====
+# Listar todos los dialogos activos
+kamcmd dlg.list
+
+# Contar dialogos activos
+kamcmd dlg.stats
+
+# Ejemplo de salida:
+# {
+#   "active_dialogs": 15,
+#   "early_dialogs": 2,
+#   "processed_dialogs": 1523
+# }
+
+
+# ===== TRANSACCIONES ACTIVAS =====
+kamcmd tm.stats
+# Muestra transacciones SIP en curso (INVITE, BYE, etc.)
+
+
+# ===== ESTADO DE RTPENGINE =====
+# Ver sesiones de media activas en RTPEngine
+kamcmd rtpengine.show_all
+
+# Ejemplo de salida:
+# [
+#   {
+#     "url": "udp:127.0.0.1:2223",
+#     "set": 0,
+#     "weight": 1,
+#     "disabled": 0,
+#     "recheck": 0
+#   }
+# ]
+
+
+# ===== USUARIOS REGISTRADOS =====
+kamcmd ul.dump
+
+
+# ===== MONITOREO EN TIEMPO REAL (syslog) =====
+tail -f /var/log/syslog | grep kamailio
+
+# O con filtro de llamadas:
+tail -f /var/log/syslog | grep -E "INVITE|BYE|CANCEL|ACK"
+</div>
+
+<h2>11.2 Monitoreo en RTPEngine (Flujo de Media RTP)</h2>
+
+<div class="code-block">
+# ===== SESIONES RTP ACTIVAS =====
+# Listar todas las sesiones de media
+rtpengine-ctl list sessions
+
+# Ejemplo de salida:
+# o]4_7_from-tag_abc123_to-tag_xyz789
+#   created: 1712764800
+#   last signal: 1712764810
+#   in dialogue with 192.168.1.100 and 190.105.250.25
+#   ports: 10500 (RTP) 10501 (RTCP) / 15500 (RTP) 15501 (RTCP)
+#   stats: 2500 packets in, 2480 packets out, 0 packets dropped
+
+
+# ===== ESTADISTICAS GLOBALES =====
+rtpengine-ctl stats
+
+# Ejemplo de salida:
+# currentstatistics:
+# - sessions_own:          15       # Sesiones activas
+# - sessions_foreign:      0
+# - packets_in:            125000
+# - packets_out:           124500
+# - bytes_in:              20000000
+# - bytes_out:             19920000
+# - errors:                0
+# - timeout:               2
+
+
+# ===== DETALLE DE UNA SESION =====
+# Obtener info detallada de una sesion
+rtpengine-ctl query call_id_here
+
+# ===== ESTADISTICAS POR INTERFAZ =====
+rtpengine-ctl list interfaces
+
+# Ejemplo:
+# internal: 10.10.22.4, ports used: 145/5000 (2.9%)
+# external: 190.105.250.100, ports used: 145/5000 (2.9%)
+
+
+# ===== MONITOREO CONTINUO =====
+# Ver sesiones en tiempo real (cada 2 segundos)
+watch -n 2 'rtpengine-ctl list sessions | wc -l'
+
+
+# ===== VER TRAFICO RTP EN WIRESHARK/TCPDUMP =====
+# Capturar trafico RTP en la interfaz publica
+tcpdump -i eth0 udp portrange 10000-20000 -n
+
+# Con mas detalle:
+tcpdump -i eth0 udp portrange 10000-20000 -n -v
+</div>
+
+<h2>11.3 Monitoreo en FreeSWITCH</h2>
+
+<div class="code-block">
+# ===== VERIFICAR QUE FS NO PROCESA RTP =====
+
+# Ver llamadas activas (solo debe mostrar senalizacion)
+fs_cli -x "show channels"
+
+# Verificar bypass_media esta activo
+fs_cli -x "show channels" | grep -i bypass
+# Si bypass_media=true, la columna "read_codec" mostrara "PROXY"
+
+
+# ===== DETALLE DE UN CANAL ESPECIFICO =====
+fs_cli -x "uuid_dump &lt;uuid&gt;"
+
+# Buscar estas variables para confirmar bypass:
+# variable_bypass_media=true
+# variable_proxy_media=false
+# read_codec=PROXY
+# write_codec=PROXY
+
+
+# ===== ESTADO DE PERFILES SIP =====
+fs_cli -x "sofia status"
+fs_cli -x "sofia status profile internal"
+
+
+# ===== LLAMADAS CON DETALLE =====
+fs_cli -x "show calls"
+
+# Columnas importantes:
+# - direction: inbound/outbound
+# - read_codec: PROXY (si bypass activo) o PCMU/PCMA (si procesa media)
+# - write_codec: PROXY o codec real
+
+
+# ===== ESTADISTICAS DE GATEWAY =====
+fs_cli -x "sofia status gateway kamailio"
+
+
+# ===== REGISTROS ACTIVOS =====
+fs_cli -x "show registrations"
+
+
+# ===== MONITOREO EN TIEMPO REAL =====
+# Activar logging de eventos
+fs_cli -x "sofia loglevel all 9"
+
+# Ver eventos SIP en tiempo real
+fs_cli
+> /log 7
+> /filter Codec
+
+# Desactivar logging verbose
+fs_cli -x "sofia loglevel all 0"
+
+
+# ===== VERIFICAR QUE NO HAY PUERTOS RTP ABIERTOS EN FS =====
+# FreeSWITCH NO debe tener puertos RTP abiertos si bypass_media=true
+
+# Ver puertos UDP abiertos por FreeSWITCH
+ss -ulnp | grep freeswitch
+
+# Debe mostrar solo puertos SIP (5080, 5062) NO puertos RTP (16384-32768)
+# Si ves puertos en el rango RTP, bypass_media NO esta funcionando
+</div>
+
+<div class="success-box">
+    <strong>Test de Bypass Media:</strong> Si <code>fs_cli -x "show channels"</code> muestra <code>read_codec=PROXY</code> y <code>ss -ulnp | grep freeswitch</code> NO muestra puertos en el rango 16384-32768, entonces bypass_media esta funcionando correctamente.
+</div>
+
+<div class="page-break"></div>
+
+<h2>11.4 Script de Monitoreo Integrado</h2>
+
+<div class="code-block">
+#!/bin/bash
+# /usr/local/bin/sbc-monitor.sh
+# Script de monitoreo integrado para SBC
+
+echo "============================================"
+echo "   MONITOR SBC - $(date)"
+echo "============================================"
+echo ""
+
+# ===== KAMAILIO =====
+echo ">>> KAMAILIO - Dialogos SIP Activos"
+kam_dialogs=$(kamcmd dlg.stats 2>/dev/null | grep active_dialogs | awk '{print $2}')
+echo "    Llamadas SIP activas: ${kam_dialogs:-0}"
+echo ""
+
+# ===== RTPENGINE =====
+echo ">>> RTPENGINE - Sesiones de Media"
+rtp_sessions=$(rtpengine-ctl list sessions 2>/dev/null | grep -c "^o]")
+rtp_stats=$(rtpengine-ctl stats 2>/dev/null | grep sessions_own | awk '{print $2}')
+echo "    Sesiones RTP activas: ${rtp_sessions:-0}"
+echo "    Sesiones (stats): ${rtp_stats:-0}"
+
+# Mostrar interfaces
+echo ""
+echo "    Interfaces:"
+rtpengine-ctl list interfaces 2>/dev/null | grep -E "internal|external"
+echo ""
+
+# ===== FREESWITCH =====
+echo ">>> FREESWITCH - Canales"
+fs_channels=$(fs_cli -x "show channels count" 2>/dev/null | grep -oP '\d+(?= total)')
+echo "    Canales activos: ${fs_channels:-0}"
+
+# Verificar bypass_media
+fs_proxy=$(fs_cli -x "show channels" 2>/dev/null | grep -c "PROXY")
+fs_codec=$(fs_cli -x "show channels" 2>/dev/null | grep -c "PCMU\|PCMA\|G729")
+echo ""
+echo "    Canales con PROXY (bypass): ${fs_proxy:-0}"
+echo "    Canales procesando codec: ${fs_codec:-0}"
+
+# Verificar puertos RTP en FreeSWITCH
+fs_rtp_ports=$(ss -ulnp 2>/dev/null | grep freeswitch | grep -cE ":(1[6-9][0-9]{3}|2[0-9]{4}|3[0-2][0-7][0-9]{2})")
+echo ""
+if [ "${fs_rtp_ports:-0}" -gt 0 ]; then
+    echo "    ⚠️  ALERTA: FreeSWITCH tiene $fs_rtp_ports puertos RTP abiertos!"
+    echo "    bypass_media puede NO estar funcionando"
+else
+    echo "    ✓ FreeSWITCH NO tiene puertos RTP abiertos (bypass OK)"
+fi
+echo ""
+
+# ===== CONSISTENCIA =====
+echo ">>> VERIFICACION DE CONSISTENCIA"
+echo ""
+if [ "${kam_dialogs:-0}" -eq "${rtp_sessions:-0}" ] && [ "${kam_dialogs:-0}" -eq "${fs_channels:-0}" ]; then
+    echo "    ✓ Todos los sistemas reportan el mismo numero de llamadas"
+else
+    echo "    ⚠️  INCONSISTENCIA DETECTADA:"
+    echo "       Kamailio: ${kam_dialogs:-0}"
+    echo "       RTPEngine: ${rtp_sessions:-0}"
+    echo "       FreeSWITCH: ${fs_channels:-0}"
+fi
+
+echo ""
+echo "============================================"
+</div>
+
+<h4>Uso del Script</h4>
+<div class="code-block">
+# Dar permisos de ejecucion
+chmod +x /usr/local/bin/sbc-monitor.sh
+
+# Ejecutar manualmente
+sbc-monitor.sh
+
+# Ejecutar cada 5 segundos
+watch -n 5 sbc-monitor.sh
+
+# Agregar a cron para logging
+echo "*/5 * * * * root /usr/local/bin/sbc-monitor.sh >> /var/log/sbc-monitor.log" >> /etc/crontab
+</div>
+
+<div class="page-break"></div>
+
+<!-- SECCION 12: CONEXION FS-KAMAILIO -->
+<h1>12. Conexion Interna FreeSWITCH - Kamailio</h1>
+
+<h2>12.1 Arquitectura de Interconexion</h2>
+
+<div class="diagram-title">FreeSWITCH <-> Kamailio Interconnect</div>
+<div class="diagram">
+    +===========================================================================+
+    |              INTERCONEXION FREESWITCH <-> KAMAILIO                        |
+    +===========================================================================+
+
+    +-------------------+                               +-------------------+
+    |    FREESWITCH     |                               |     KAMAILIO      |
+    |                   |                               |                   |
+    | +---------------+ |         OUTBOUND              | +---------------+ |
+    | | External      | |============================>| | Listen :5060  | |
+    | | Profile       | |    sofia/gateway/kamailio    | |               | |
+    | | :5062         | |         SIP INVITE           | | dr_gateways   | |
+    | +---------------+ |                               | | dr_rules      | |
+    |                   |                               | +---------------+ |
+    | +---------------+ |         INBOUND               |                   |
+    | | Internal      | |<============================| | +---------------+ |
+    | | Profile       | |    sip:ext@10.10.22.4:5080   | | PBX Endpoint  | |
+    | | :5080         | |         SIP INVITE           | | gwid=100      | |
+    | +---------------+ |                               | | type=9        | |
+    +-------------------+                               +-------------------+
+           |                                                    |
+           | context: from-pbx                                  | Routing:
+           |   - outbound: bridge to kamailio gw                |   - drouting
+           |   - inbound: find registered user                  |   - dr_rules
+           |                                                    |   - dr_gw_lists
+
+
+    TABLAS MYSQL (KAMAILIO):
+
+    dr_gateways:
+    +-------+--------+--------------------+-------+-------+
+    | gwid  | type   | address            | strip | attrs |
+    +-------+--------+--------------------+-------+-------+
+    | 100   | 9      | sip:10.10.22.4:5080| 0     | fs    |  <- PBX FreeSWITCH
+    | 101   | 8      | sip:190.105.250.25 | 0     | voip  |  <- Carrier VOIPSWITCH
+    +-------+--------+--------------------+-------+-------+
+
+    dr_gw_lists:
+    +----+----------+-------------+
+    | id | gwlist   | description |
+    +----+----------+-------------+
+    | 1  | 100      | FreeSWITCH  |
+    | 14 | 101      | VOIPSWITCH  |
+    +----+----------+-------------+
+
+    dr_rules (inbound):
+    +--------+---------+--------+----------+--------+
+    | ruleid | groupid | prefix | priority | gwlist |
+    +--------+---------+--------+----------+--------+
+    | 1      | 0       |        | 1        | 1      |  <- Todo a FS (gwid 100)
+    +--------+---------+--------+----------+--------+
+</div>
+
+<h2>12.2 Configuracion de Gateway en FreeSWITCH</h2>
+
+<div class="code-xml"><span class="comment">&lt;!-- /etc/freeswitch/sip_profiles/external/kamailio.xml --&gt;</span>
+<span class="tag">&lt;gateway</span> <span class="attr">name</span>=<span class="value">"kamailio"</span><span class="tag">&gt;</span>
+  <span class="comment">&lt;!-- ========== Conexion a Kamailio ========== --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"realm"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4"</span><span class="tag">/&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"proxy"</span> <span class="attr">value</span>=<span class="value">"10.10.22.4:5060"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- No registrarse (conexion directa IP) --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"register"</span> <span class="attr">value</span>=<span class="value">"false"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- Mantener caller-id original --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"caller-id-in-from"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- ========== Bypass Media ========== --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"bypass-media"</span> <span class="attr">value</span>=<span class="value">"true"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- Retry settings --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"retry-seconds"</span> <span class="attr">value</span>=<span class="value">"30"</span><span class="tag">/&gt;</span>
+
+  <span class="comment">&lt;!-- Ping gateway para detectar fallas --&gt;</span>
+  <span class="tag">&lt;param</span> <span class="attr">name</span>=<span class="value">"ping"</span> <span class="attr">value</span>=<span class="value">"25"</span><span class="tag">/&gt;</span>
+<span class="tag">&lt;/gateway&gt;</span></div>
+
+<h2>12.3 Configuracion de PBX Endpoint en Kamailio</h2>
+
+<div class="code-block">
+-- MySQL: Insertar gateway de FreeSWITCH como PBX (type=9)
+INSERT INTO dr_gateways (gwid, type, address, strip, pri_prefix, attrs, description)
+VALUES (100, 9, 'sip:10.10.22.4:5080', 0, '', 'freeswitch', 'FreeSWITCH PBX');
+
+-- Crear grupo para el PBX
+INSERT INTO dr_gw_lists (id, gwlist, description)
+VALUES (1, '100', 'FreeSWITCH PBX Group');
+
+-- Ruta por defecto: todo a FreeSWITCH
+INSERT INTO dr_rules (ruleid, groupid, prefix, timerec, priority, routeid, gwlist, description)
+VALUES (1, 0, '', '', 1, '', '1', 'Default to FreeSWITCH');
+
+-- Recargar routing en Kamailio
+-- kamcmd drouting.reload
+</div>
+
+<h2>12.4 Kamailio - Routing hacia FreeSWITCH</h2>
+
+<div class="code-block">
+# /etc/kamailio/kamailio.cfg
+
+#!define FREESWITCH_IP "10.10.22.4"
+#!define FREESWITCH_PORT 5080
+
+route[TO_FREESWITCH] {
+    # Marcar trafico interno
+    setflag(FLT_INTERNAL);
+
+    # RTPEngine para media bridging
+    rtpengine_offer("internal-iface=external external-iface=internal");
+
+    # Construir Request-URI hacia FreeSWITCH
+    $ru = "sip:" + $rU + "@" + FREESWITCH_IP + ":" + FREESWITCH_PORT;
+
+    # Agregar Record-Route para mantener dialogo
+    record_route();
+
+    # Forward
+    route(RELAY);
+}
+
+route[FROM_FREESWITCH] {
+    # Trafico desde FreeSWITCH hacia carriers
+    if (src_ip == FREESWITCH_IP) {
+        # Marcar como interno
+        setflag(FLT_INTERNAL);
+
+        # Buscar ruta en drouting (carriers)
+        if (!do_routing("0")) {
+            sl_send_reply("404", "No Route");
+            exit;
+        }
+
+        # RTPEngine
+        rtpengine_offer("internal-iface=internal external-iface=external");
+
+        route(RELAY);
+    }
+}
+</div>
+
+<div class="info-box">
+    <strong>Documento generado:</strong> Abril 2026<br>
+    <strong>Version:</strong> ApoloBilling v2.1 (Actualizado con bypass_media y monitoreo)<br>
+    <strong>Autor:</strong> Documentacion Tecnica
+</div>
+
+</body>
+</html>
