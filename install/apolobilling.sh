@@ -303,21 +303,45 @@ install_rust() {
 install_nodejs() {
     log_step "6/12 - Instalando Node.js ${NODE_VERSION}"
 
-    if command -v node &> /dev/null; then
+    if command -v node &> /dev/null && command -v npm &> /dev/null; then
         local current_version=$(node --version | tr -d 'v' | cut -d. -f1)
         if [[ $current_version -ge 20 ]]; then
-            log_info "Node.js ya instalado: $(node --version)"
+            log_info "Node.js ya instalado: $(node --version) con npm $(npm --version)"
             return
         fi
     fi
 
+    # Eliminar versiones anteriores de Node.js que no incluyen npm
+    if command -v node &> /dev/null && ! command -v npm &> /dev/null; then
+        run_cmd "apt-get remove -y nodejs 2>/dev/null || true" \
+            "Eliminando Node.js anterior (sin npm)"
+    fi
+
+    # Eliminar paquete Debian si existe (no incluye npm)
+    run_cmd "apt-get remove -y nodejs libnode108 2>/dev/null || true" \
+        "Eliminando Node.js de Debian (si existe)"
+
     run_cmd "curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash -" \
-        "Agregando repositorio Node.js"
+        "Agregando repositorio Node.js ${NODE_VERSION}"
 
-    run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs" \
-        "Instalando Node.js ${NODE_VERSION}"
+    # Instalar versión de NodeSource explícitamente (evita que Debian tome prioridad)
+    local nodesource_ver=$(apt-cache madison nodejs 2>/dev/null | grep nodesource | head -1 | awk '{print $3}')
+    if [[ -n "$nodesource_ver" ]]; then
+        run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs=${nodesource_ver}" \
+            "Instalando Node.js ${NODE_VERSION} (NodeSource)"
+    else
+        run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs" \
+            "Instalando Node.js ${NODE_VERSION}"
+    fi
 
-    log_info "Node.js instalado: $(node --version)"
+    # Verificar que npm está disponible
+    if ! command -v npm &> /dev/null; then
+        log_error "npm no se instaló correctamente. Intentando instalar manualmente..."
+        run_cmd "apt-get install -y npm 2>/dev/null || true" \
+            "Instalando npm como paquete separado"
+    fi
+
+    log_info "Node.js instalado: $(node --version), npm: $(npm --version)"
 }
 
 clone_repository() {
@@ -358,16 +382,47 @@ setup_database() {
         done
     fi
 
-    # Crear usuario administrador
-    local admin_hash='$argon2id$v=19$m=19456,t=2,p=1$YWJjZGVmZ2hpamtsbW5vcA$8K1TqNwGVdPCIJL0hFz8qLqkU8b5HjZm7RIJqK5hI/E'
+    # Crear usuario administrador con hash generado dinámicamente
+    # Requiere un pequeño binario Rust para generar el hash Argon2 compatible
+    local admin_hash=""
+    if [[ -f "${APOLO_HOME}/rust-backend/target/release/apolo-billing" ]]; then
+        # Generar hash usando un script Rust temporal con las mismas dependencias
+        mkdir -p /tmp/apolo-hashgen/src
+        cat > /tmp/apolo-hashgen/Cargo.toml << 'HASHEOF'
+[package]
+name = "hashgen"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+HASHEOF
+        cat > /tmp/apolo-hashgen/src/main.rs << 'HASHEOF'
+use argon2::{password_hash::{PasswordHasher, SaltString}, Argon2};
+use rand_core::OsRng;
+fn main() {
+    let password = std::env::args().nth(1).unwrap_or_else(|| "admin123".to_string());
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default().hash_password(password.as_bytes(), &salt).unwrap();
+    print!("{}", hash.to_string());
+}
+HASHEOF
+        admin_hash=$(cd /tmp/apolo-hashgen && cargo run --release -- "${ADMIN_PASSWORD}" 2>/dev/null)
+        rm -rf /tmp/apolo-hashgen
+    fi
+
+    # Fallback: hash pre-generado para admin123 (generado con Argon2id defaults)
+    if [[ -z "$admin_hash" ]]; then
+        admin_hash='$argon2id$v=19$m=19456,t=2,p=1$n6bvDYLutGH+6pXqGV51gQ$kCEfkUljW8R3LPdpHZykl8IXViRrUSvMGqkGNRF2YMs'
+    fi
 
     sudo -u postgres psql -d apolo_billing << EOF
-INSERT INTO usuarios (username, password_hash, full_name, role, active)
-VALUES ('admin', '${admin_hash}', 'Administrador', 'superadmin', true)
+INSERT INTO usuarios (username, password, nombre, apellido, role, activo)
+VALUES ('admin', '${admin_hash}', 'Administrador', '', 'superadmin', true)
 ON CONFLICT (username) DO NOTHING;
 EOF
 
-    log_info "Usuario admin creado (password: admin123)"
+    log_info "Usuario admin creado (password: ${ADMIN_PASSWORD})"
 }
 
 build_backend() {
@@ -522,7 +577,7 @@ EOF
     run_cmd "DEBIAN_FRONTEND=noninteractive apt-get install -y nginx" \
         "Instalando Nginx"
 
-    cat > /etc/nginx/sites-available/apolobilling << EOF
+    cat > /etc/nginx/sites-available/apolobilling.conf << EOF
 server {
     listen 80;
     listen [::]:80;
@@ -581,7 +636,8 @@ server {
 }
 EOF
 
-    run_cmd "ln -sf /etc/nginx/sites-available/apolobilling /etc/nginx/sites-enabled/ && rm -f /etc/nginx/sites-enabled/default" \
+    # Extensión .conf requerida por configuraciones nginx que usan include *.conf
+    run_cmd "ln -sf /etc/nginx/sites-available/apolobilling.conf /etc/nginx/sites-enabled/apolobilling.conf && rm -f /etc/nginx/sites-enabled/default" \
         "Configurando Nginx"
 
     # Habilitar e iniciar servicios
@@ -808,8 +864,8 @@ cmd_uninstall() {
     # Eliminar servicios
     rm -f /etc/systemd/system/apolo-backend.service
     rm -f /etc/systemd/system/apolo-billing-engine.service
-    rm -f /etc/nginx/sites-enabled/apolobilling
-    rm -f /etc/nginx/sites-available/apolobilling
+    rm -f /etc/nginx/sites-enabled/apolobilling /etc/nginx/sites-enabled/apolobilling.conf
+    rm -f /etc/nginx/sites-available/apolobilling /etc/nginx/sites-available/apolobilling.conf
 
     systemctl daemon-reload
     systemctl restart nginx 2>/dev/null || true
