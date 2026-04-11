@@ -100,7 +100,7 @@ export default function AccountsPage() {
       key: 'account_number',
       header: 'Número de Cuenta',
       render: (acc: Account) => (
-        <span className="font-mono font-medium text-slate-900">
+        <span className="font-mono font-medium text-[var(--color-text-primary)]">
           {acc.account_number}
         </span>
       ),
@@ -123,7 +123,7 @@ export default function AccountsPage() {
       render: (acc: Account) => {
         const planName = getPlanName(acc.plan_id)
         return (
-          <span className={`text-sm ${planName === '-' ? 'text-slate-400 italic' : 'text-slate-700'}`}>
+          <span className={`text-sm ${planName === '-' ? 'text-[var(--color-text-muted)] italic' : 'text-[var(--color-text-secondary)]'}`}>
             {planName}
           </span>
         )
@@ -169,20 +169,20 @@ export default function AccountsPage() {
               }`}>
                 S/{info.currentBalance?.toFixed(2)}
               </div>
-              <div className="text-xs text-slate-500">Saldo Disponible</div>
+              <div className="text-xs text-[var(--color-text-tertiary)]">Saldo Disponible</div>
             </div>
           )
         } else {
           return (
             <div className="text-right space-y-1 min-w-[200px]">
-              <div className="text-sm font-medium text-slate-700">
+              <div className="text-sm font-medium text-[var(--color-text-secondary)]">
                 Consumido: S/{info.consumedCredit?.toFixed(2)}
               </div>
               <CreditUtilizationBar
                 utilizationPercent={info.utilizationPercent || 0}
                 showLabel={false}
               />
-              <div className="text-xs text-slate-500">
+              <div className="text-xs text-[var(--color-text-tertiary)]">
                 Disponible: S/{info.availableCredit?.toFixed(2)} de S/{info.creditLimit?.toFixed(2)}
               </div>
             </div>
@@ -208,7 +208,7 @@ export default function AccountsPage() {
             {/* Editar */}
             <button
               onClick={() => handleEdit(acc)}
-              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+              className="p-1.5 text-[var(--color-text-tertiary)] hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
               title="Editar cuenta"
             >
               <Edit className="w-4 h-4" />
@@ -220,7 +220,7 @@ export default function AccountsPage() {
               disabled={isToggling}
               className={`p-1.5 rounded transition-colors ${
                 isActive
-                  ? 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'
+                  ? 'text-[var(--color-text-tertiary)] hover:text-amber-600 hover:bg-amber-50'
                   : 'text-amber-600 hover:text-green-600 hover:bg-green-50'
               }`}
               title={isActive ? 'Suspender cuenta' : 'Activar cuenta'}
@@ -231,7 +231,7 @@ export default function AccountsPage() {
             {/* Eliminar */}
             <button
               onClick={() => setDeleteConfirm(acc)}
-              className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+              className="p-1.5 text-[var(--color-text-tertiary)] hover:text-red-600 hover:bg-red-50 rounded transition-colors"
               title="Eliminar cuenta"
             >
               <Trash2 className="w-4 h-4" />
@@ -252,10 +252,10 @@ export default function AccountsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">
             Gestión de Cuentas
           </h1>
-          <p className="text-slate-500">
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
             Administra cuentas prepago y postpago
           </p>
         </div>
@@ -315,39 +315,39 @@ export default function AccountsPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Total Cuentas</p>
-              <p className="text-2xl font-bold text-slate-900">{accounts.length}</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{accounts.length}</p>
             </div>
             <Users className="w-8 h-8 text-blue-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Activas</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Activas</p>
               <p className="text-2xl font-bold text-green-600">{activeAccounts}</p>
             </div>
             <Users className="w-8 h-8 text-green-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Prepago / Postpago</p>
-              <p className="text-2xl font-bold text-slate-900">
+              <p className="text-sm text-[var(--color-text-tertiary)]">Prepago / Postpago</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">
                 {prepaidAccounts} / {postpaidAccounts}
               </p>
             </div>
             <DollarSign className="w-8 h-8 text-purple-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Saldo Total</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Total</p>
               <p className="text-2xl font-bold text-green-600">
                 S/{totalBalance.toFixed(2)}
               </p>
@@ -389,22 +389,22 @@ export default function AccountsPage() {
       {/* Delete Confirmation Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+          <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-md w-full mx-4">
             <div className="p-6">
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
                   <AlertTriangle className="w-6 h-6 text-red-600" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Eliminar Cuenta</h3>
-                  <p className="text-sm text-slate-500">Esta acción no se puede deshacer</p>
+                  <h3 className="text-lg font-bold text-[var(--color-text-primary)]">Eliminar Cuenta</h3>
+                  <p className="text-sm text-[var(--color-text-tertiary)]">Esta acción no se puede deshacer</p>
                 </div>
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-4 mb-4">
-                <p className="text-sm text-slate-600">
+              <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 mb-4">
+                <p className="text-sm text-[var(--color-text-secondary)]">
                   ¿Estás seguro de eliminar la cuenta{' '}
-                  <span className="font-mono font-bold text-slate-900">
+                  <span className="font-mono font-bold text-[var(--color-text-primary)]">
                     {deleteConfirm.account_number}
                   </span>
                   ?
@@ -420,7 +420,7 @@ export default function AccountsPage() {
               <div className="flex justify-end gap-3">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+                  className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
                 >
                   Cancelar
                 </button>
@@ -528,14 +528,14 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
             {account ? 'Editar Cuenta' : 'Nueva Cuenta'}
           </h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -550,7 +550,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
               <select
                 value={selectedPlan?.id || ''}
                 onChange={(e) => handlePlanChange(e.target.value)}
-                className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-[var(--color-bg-card)]"
               >
                 <option value="">Sin plan (configuración manual)</option>
                 {plans
@@ -571,7 +571,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Número de Cuenta *
               </label>
               <input
@@ -582,12 +582,12 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   setFormData({ ...formData, account_number: e.target.value })
                 }
                 disabled={!!account}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Tipo de Cuenta *
               </label>
               <select
@@ -599,19 +599,19 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={!!account || !!selectedPlan}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               >
                 <option value="prepaid">Prepago</option>
                 <option value="postpaid">Postpago</option>
               </select>
               {selectedPlan && (
-                <p className="text-xs text-slate-500 mt-1">🔒 Bloqueado por plan</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
               )}
             </div>
 
             {!isEditing ? (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                   {formData.account_type === 'prepaid' ? 'Saldo Inicial *' : 'Saldo Inicial'}
                 </label>
                 <input
@@ -627,33 +627,33 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                     })
                   }
                   disabled={!!selectedPlan}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
                 />
                 {selectedPlan && (
-                  <p className="text-xs text-slate-500 mt-1">🔒 Bloqueado por plan</p>
+                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
                 )}
                 {formData.account_type === 'prepaid' && !selectedPlan && (
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                     Prepago requiere saldo inicial {'>'} 0
                   </p>
                 )}
               </div>
             ) : (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                   Saldo Actual
                 </label>
-                <div className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700 font-mono">
+                <div className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] font-mono">
                   S/{Number(account?.balance || 0).toFixed(2)}
                 </div>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                   Para modificar el saldo, usa la opción "Recargar" en Gestión de Saldos
                 </p>
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 {formData.account_type === 'postpaid' ? 'Límite de Crédito *' : 'Límite de Crédito'}
               </label>
               <input
@@ -669,20 +669,20 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={formData.account_type?.toLowerCase() === 'prepaid' || !!selectedPlan}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
               {selectedPlan && formData.account_type === 'postpaid' && (
-                <p className="text-xs text-slate-500 mt-1">🔒 Bloqueado por plan</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
               )}
               {formData.account_type === 'postpaid' && !selectedPlan && (
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                   Postpago requiere límite de crédito {'>'} 0
                 </p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Estado
               </label>
               <select
@@ -693,7 +693,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                     status: e.target.value as AccountStatus,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="active">Activa</option>
                 <option value="suspended">Suspendida</option>
@@ -702,7 +702,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Llamadas Concurrentes Máx. *
               </label>
               <input
@@ -718,19 +718,19 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={!!selectedPlan && !isEditing}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-100"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
               {selectedPlan && !isEditing && (
-                <p className="text-xs text-slate-500 mt-1">🔒 Bloqueado por plan</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
               )}
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>

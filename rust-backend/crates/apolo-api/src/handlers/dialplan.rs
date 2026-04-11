@@ -16,7 +16,7 @@ use tracing::{error, info, instrument, warn};
 
 // File paths (hardcoded for security)
 const FROM_PBX_XML: &str = "/etc/freeswitch/dialplan/from-pbx.xml";
-const TO_KAMAILIO_XML: &str = "/etc/freeswitch/dialplan/from-kamailio.xml";
+const TO_KAMAILIO_XML: &str = "/etc/freeswitch/dialplan/to-kamailio.xml";
 
 /// Default values for DTO fields
 fn default_port() -> u16 {

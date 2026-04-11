@@ -39,14 +39,25 @@ yarn-error.log*
 
 # Rust
 target/
-Cargo.lock
+# Cargo.lock is included for applications (not libraries)
 
-# Configuración local
+# Configuración local - Archivos .env con credenciales
+.env
 .env.local
 .env.production
 .env.development
 backend/.env
+rust-backend/.env
 rust-billing-engine/.env
+frontend/.env
+
+# Directorios de backup locales
+backup_local/
+frontend_v2_backup/
+*_backup/
+
+# Archivos temporales de imágenes
+fibertel.png
 
 # Logs
 logs/

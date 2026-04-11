@@ -52,7 +52,7 @@ export default function BalancePage() {
       key: 'account_number',
       header: 'Número de Cuenta',
       render: (account: Account) => (
-        <span className="font-mono font-medium text-slate-900">
+        <span className="font-mono font-medium text-[var(--color-text-primary)]">
           {account.account_number}
         </span>
       ),
@@ -61,7 +61,7 @@ export default function BalancePage() {
       key: 'customer_phone',
       header: 'Teléfono',
       render: (account: Account) => (
-        <span className="text-slate-900">{account.customer_phone || '-'}</span>
+        <span className="text-[var(--color-text-primary)]">{account.customer_phone || '-'}</span>
       ),
     },
     {
@@ -130,10 +130,10 @@ export default function BalancePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
             Gestión de Saldos
           </h1>
-          <p className="text-slate-500">
+          <p className="text-[var(--color-text-tertiary)]">
             Administra saldos de cuentas y realiza recargas
           </p>
         </div>
@@ -141,28 +141,28 @@ export default function BalancePage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Total Cuentas</p>
-              <p className="text-2xl font-bold text-slate-900">{accounts.length}</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{accounts.length}</p>
             </div>
             <Users className="w-8 h-8 text-blue-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Activas</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Activas</p>
               <p className="text-2xl font-bold text-green-600">{activeAccounts}</p>
             </div>
             <Users className="w-8 h-8 text-green-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Saldo Bajo (&lt; S/5)</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Bajo (&lt; S/5)</p>
               <p className="text-2xl font-bold text-red-600">
                 {lowBalanceAccounts}
               </p>
@@ -170,10 +170,10 @@ export default function BalancePage() {
             <TrendingUp className="w-8 h-8 text-red-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Saldo Total</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Total</p>
               <p className="text-2xl font-bold text-green-600">
                 S/{totalBalance.toFixed(2)}
               </p>
@@ -184,15 +184,15 @@ export default function BalancePage() {
       </div>
 
       {/* Search Bar */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)] p-4">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[var(--color-text-muted)]" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar por número de cuenta o teléfono..."
-            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
       </div>
@@ -276,12 +276,12 @@ function RechargeModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">Recargar Saldo</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-lg w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Recargar Saldo</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -289,27 +289,27 @@ function RechargeModal({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Account Info */}
-          <div className="bg-slate-50 rounded-lg p-4">
+          <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-sm text-slate-500">Número de Cuenta</p>
-                <p className="font-mono font-medium text-slate-900">
+                <p className="text-sm text-[var(--color-text-tertiary)]">Número de Cuenta</p>
+                <p className="font-mono font-medium text-[var(--color-text-primary)]">
                   {account.account_number}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-slate-500">Tipo</p>
-                <p className="font-medium text-slate-900">{account.account_type}</p>
+                <p className="text-sm text-[var(--color-text-tertiary)]">Tipo</p>
+                <p className="font-medium text-[var(--color-text-primary)]">{account.account_type}</p>
               </div>
               <div>
-                <p className="text-sm text-slate-500">Saldo Actual</p>
-                <p className="text-xl font-bold text-slate-900">
+                <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Actual</p>
+                <p className="text-xl font-bold text-[var(--color-text-primary)]">
                   S/{currentBalance.toFixed(2)}
                 </p>
               </div>
               {amount > 0 && (
                 <div>
-                  <p className="text-sm text-slate-500">Nuevo Saldo</p>
+                  <p className="text-sm text-[var(--color-text-tertiary)]">Nuevo Saldo</p>
                   <p className="text-xl font-bold text-green-600">
                     S/{newBalance.toFixed(2)}
                   </p>
@@ -320,7 +320,7 @@ function RechargeModal({
 
           {/* Quick Amount Buttons */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
               Montos Rápidos
             </label>
             <div className="grid grid-cols-3 gap-2">
@@ -332,7 +332,7 @@ function RechargeModal({
                   className={`px-4 py-2 border rounded-lg font-medium transition-colors ${
                     selectedAmount === value
                       ? 'bg-blue-600 text-white border-blue-600'
-                      : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+                      : 'border-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
                   }`}
                 >
                   S/{value}
@@ -343,11 +343,11 @@ function RechargeModal({
 
           {/* Custom Amount */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Monto Personalizado
             </label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500 font-medium">
+              <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--color-text-tertiary)] font-medium">
                 S/
               </span>
               <input
@@ -360,7 +360,7 @@ function RechargeModal({
                   setAmount(parseFloat(e.target.value) || 0)
                   setSelectedAmount(null)
                 }}
-                className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-8 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 placeholder="0.00"
               />
             </div>
@@ -368,24 +368,24 @@ function RechargeModal({
 
           {/* Reason */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Motivo (opcional)
             </label>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               placeholder="Ej: Recarga mensual"
             />
           </div>
 
           {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>

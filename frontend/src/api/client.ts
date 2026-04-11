@@ -320,6 +320,16 @@ export const getCurrentUser = async (): Promise<AuthUser | null> => {
   }
 }
 
+export interface ChangePasswordRequest {
+  current_password: string
+  new_password: string
+}
+
+export const changePassword = async (request: ChangePasswordRequest): Promise<{ message: string }> => {
+  const { data } = await api.post('/auth/change-password', request)
+  return data.data || data
+}
+
 // ============== MANAGEMENT (Prefixes, Tariffs) ==============
 
 export interface Prefix {
@@ -600,6 +610,386 @@ export const fetchSettings = async (): Promise<SystemSetting[]> => {
 
 export const updateSetting = async (key: string, value: string): Promise<SystemSetting> => {
   const { data } = await api.put(`/settings/${key}`, { value })
+  return data.data || data
+}
+
+// ============== KAMAILIO DIALPLAN ==============
+
+export interface KamailioCarrierGroup {
+  id: number
+  gwlist: string
+  description: string | null
+}
+
+export interface KamailioCarrier {
+  id?: number
+  gwid: number
+  gw_type: number
+  address: string
+  strip: number
+  pri_prefix: string
+  attrs: string
+  description: string
+}
+
+export interface KamailioOutboundRoute {
+  id?: number
+  ruleid: number
+  groupid: string
+  prefix: string
+  timerec: string
+  priority: number
+  routeid: string
+  gwlist: string
+  description: string
+}
+
+// Carrier Groups
+export const fetchKamailioCarrierGroups = async (): Promise<KamailioCarrierGroup[]> => {
+  try {
+    const { data } = await api.get('/kamailio-dialplan/groups')
+    const groups = data.data || []
+    return groups
+  } catch (error) {
+    console.error('Error fetching carrier groups:', error)
+    throw error
+  }
+}
+
+export const fetchKamailioCarrierGroup = async (id: number): Promise<KamailioCarrierGroup> => {
+  const { data } = await api.get(`/kamailio-dialplan/groups/${id}`)
+  return data.data || data
+}
+
+export const createKamailioCarrierGroup = async (group: { description: string; gwlist?: string }): Promise<KamailioCarrierGroup> => {
+  const { data } = await api.post('/kamailio-dialplan/groups', group)
+  return data.data || data
+}
+
+export const updateKamailioCarrierGroup = async (id: number, group: { description: string; gwlist?: string }): Promise<KamailioCarrierGroup> => {
+  const { data } = await api.put(`/kamailio-dialplan/groups/${id}`, group)
+  return data.data || data
+}
+
+export const deleteKamailioCarrierGroup = async (id: number): Promise<void> => {
+  await api.delete(`/kamailio-dialplan/groups/${id}`)
+}
+
+// Carriers (Gateways)
+export const fetchKamailioCarriers = async (): Promise<KamailioCarrier[]> => {
+  try {
+    const { data } = await api.get('/kamailio-dialplan/carriers')
+    const carriers = data.data || []
+    // Add id field for DataTable compatibility
+    return carriers.map((c: KamailioCarrier) => ({ ...c, id: c.gwid }))
+  } catch (error) {
+    console.error('Error fetching carriers:', error)
+    throw error
+  }
+}
+
+export const fetchKamailioCarrier = async (id: number): Promise<KamailioCarrier> => {
+  const { data } = await api.get(`/kamailio-dialplan/carriers/${id}`)
+  return data.data || data
+}
+
+export const createKamailioCarrier = async (carrier: Partial<KamailioCarrier>): Promise<KamailioCarrier> => {
+  const { data } = await api.post('/kamailio-dialplan/carriers', carrier)
+  return data.data || data
+}
+
+export const updateKamailioCarrier = async (id: number, carrier: Partial<KamailioCarrier>): Promise<KamailioCarrier> => {
+  const { data } = await api.put(`/kamailio-dialplan/carriers/${id}`, carrier)
+  return data.data || data
+}
+
+export const deleteKamailioCarrier = async (id: number): Promise<void> => {
+  await api.delete(`/kamailio-dialplan/carriers/${id}`)
+}
+
+// Outbound Routes
+export const fetchKamailioOutboundRoutes = async (): Promise<KamailioOutboundRoute[]> => {
+  try {
+    const { data } = await api.get('/kamailio-dialplan/routes')
+    const routes = data.data || []
+    // Add id field for DataTable compatibility
+    return routes.map((r: KamailioOutboundRoute) => ({ ...r, id: r.ruleid }))
+  } catch (error) {
+    console.error('Error fetching outbound routes:', error)
+    throw error
+  }
+}
+
+export const fetchKamailioOutboundRoute = async (id: number): Promise<KamailioOutboundRoute> => {
+  const { data } = await api.get(`/kamailio-dialplan/routes/${id}`)
+  return data.data || data
+}
+
+export const createKamailioOutboundRoute = async (route: Partial<KamailioOutboundRoute>): Promise<KamailioOutboundRoute> => {
+  const { data } = await api.post('/kamailio-dialplan/routes', route)
+  return data.data || data
+}
+
+export const updateKamailioOutboundRoute = async (id: number, route: Partial<KamailioOutboundRoute>): Promise<KamailioOutboundRoute> => {
+  const { data } = await api.put(`/kamailio-dialplan/routes/${id}`, route)
+  return data.data || data
+}
+
+export const deleteKamailioOutboundRoute = async (id: number): Promise<void> => {
+  await api.delete(`/kamailio-dialplan/routes/${id}`)
+}
+
+// Reload Kamailio configuration
+export const reloadKamailio = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/kamailio-dialplan/reload')
+  return data.data || data
+}
+
+// ============== SIP DEVICES ==============
+
+import type {
+  SipDevice,
+  SipDeviceWithPassword,
+  SipDeviceCreateRequest,
+  SipDeviceUpdateRequest,
+  FreeswitchAllowedIp,
+} from '../types'
+
+export const fetchSipDevices = async (accountId?: number): Promise<SipDevice[]> => {
+  const params = accountId ? `?account_id=${accountId}` : ''
+  const { data } = await api.get(`/sip-devices${params}`)
+  return data.data || data
+}
+
+export const fetchSipDevice = async (id: number): Promise<SipDevice> => {
+  const { data } = await api.get(`/sip-devices/${id}`)
+  return data.data || data
+}
+
+export const createSipDevice = async (device: SipDeviceCreateRequest): Promise<SipDeviceWithPassword> => {
+  const { data } = await api.post('/sip-devices', device)
+  return data.data || data
+}
+
+export const updateSipDevice = async (id: number, device: SipDeviceUpdateRequest): Promise<SipDevice> => {
+  const { data } = await api.put(`/sip-devices/${id}`, device)
+  return data.data || data
+}
+
+export const deleteSipDevice = async (id: number): Promise<void> => {
+  await api.delete(`/sip-devices/${id}`)
+}
+
+export const getSipDevicePassword = async (id: number): Promise<SipDeviceWithPassword> => {
+  const { data } = await api.get(`/sip-devices/${id}/password`)
+  return data.data || data
+}
+
+export const regenerateSipDevicePassword = async (id: number): Promise<{
+  id: number
+  sip_username: string
+  sip_domain: string
+  new_password: string
+}> => {
+  const { data } = await api.post(`/sip-devices/${id}/regenerate-password`)
+  return data.data || data
+}
+
+// SIP Registration Status
+export interface SipRegistrationStatus {
+  registered: boolean
+  sip_username: string
+  sip_domain: string
+  user_agent?: string
+  contact?: string
+  status?: string
+  ip?: string
+  port?: number
+  ping_status?: string
+  expires_seconds?: number
+  expires_at?: string
+}
+
+export const getSipDeviceRegistrationStatus = async (id: number): Promise<SipRegistrationStatus> => {
+  const { data } = await api.get(`/sip-devices/${id}/registration-status`)
+  return data.data || data
+}
+
+// FreeSWITCH Allowed IPs
+export const fetchFreeswitchAllowedIps = async (): Promise<FreeswitchAllowedIp[]> => {
+  const { data } = await api.get('/sip-devices/allowed-ips')
+  return data.data || data
+}
+
+export const createFreeswitchAllowedIp = async (ip: {
+  ip_address: string
+  description?: string
+  enabled?: boolean
+}): Promise<FreeswitchAllowedIp> => {
+  const { data } = await api.post('/sip-devices/allowed-ips', ip)
+  return data.data || data
+}
+
+export const deleteFreeswitchAllowedIp = async (id: number): Promise<void> => {
+  await api.delete(`/sip-devices/allowed-ips/${id}`)
+}
+
+// ============== UNIFIED ROUTING ==============
+
+import type {
+  RoutingTrunk,
+  RoutingTrunkGroup,
+  RoutingTrunkGroupWithMembers,
+  RoutingOutboundRoute,
+  RoutingInboundRoute,
+  RoutingSyncStatus,
+  RoutingReloadResult,
+  RoutingMigrationResult,
+  CreateTrunkRequest,
+  UpdateTrunkRequest,
+  CreateTrunkGroupRequest,
+  UpdateTrunkGroupRequest,
+  CreateOutboundRouteRequest,
+  UpdateOutboundRouteRequest,
+  CreateInboundRouteRequest,
+  UpdateInboundRouteRequest,
+  SipStatusCheck,
+  BulkSipStatusResult,
+  SipStatusLogEntry,
+} from '../types'
+
+// Trunks
+export const fetchRoutingTrunks = async (): Promise<RoutingTrunk[]> => {
+  const { data } = await api.get('/routing/trunks')
+  return data.data || data
+}
+
+export const fetchRoutingTrunk = async (id: string): Promise<RoutingTrunk> => {
+  const { data } = await api.get(`/routing/trunks/${id}`)
+  return data.data || data
+}
+
+export const createRoutingTrunk = async (trunk: CreateTrunkRequest): Promise<RoutingTrunk> => {
+  const { data } = await api.post('/routing/trunks', trunk)
+  return data.data || data
+}
+
+export const updateRoutingTrunk = async (id: string, trunk: UpdateTrunkRequest): Promise<RoutingTrunk> => {
+  const { data } = await api.put(`/routing/trunks/${id}`, trunk)
+  return data.data || data
+}
+
+export const deleteRoutingTrunk = async (id: string): Promise<void> => {
+  await api.delete(`/routing/trunks/${id}`)
+}
+
+// Trunk Groups
+export const fetchRoutingTrunkGroups = async (): Promise<RoutingTrunkGroup[]> => {
+  const { data } = await api.get('/routing/trunk-groups')
+  return data.data || data
+}
+
+export const fetchRoutingTrunkGroup = async (id: string): Promise<RoutingTrunkGroupWithMembers> => {
+  const { data } = await api.get(`/routing/trunk-groups/${id}`)
+  return data.data || data
+}
+
+export const createRoutingTrunkGroup = async (group: CreateTrunkGroupRequest): Promise<RoutingTrunkGroup> => {
+  const { data } = await api.post('/routing/trunk-groups', group)
+  return data.data || data
+}
+
+export const updateRoutingTrunkGroup = async (id: string, group: UpdateTrunkGroupRequest): Promise<RoutingTrunkGroup> => {
+  const { data } = await api.put(`/routing/trunk-groups/${id}`, group)
+  return data.data || data
+}
+
+export const deleteRoutingTrunkGroup = async (id: string): Promise<void> => {
+  await api.delete(`/routing/trunk-groups/${id}`)
+}
+
+// Outbound Routes
+export const fetchRoutingOutboundRoutes = async (): Promise<RoutingOutboundRoute[]> => {
+  const { data } = await api.get('/routing/outbound')
+  return data.data || data
+}
+
+export const fetchRoutingOutboundRoute = async (id: string): Promise<RoutingOutboundRoute> => {
+  const { data } = await api.get(`/routing/outbound/${id}`)
+  return data.data || data
+}
+
+export const createRoutingOutboundRoute = async (route: CreateOutboundRouteRequest): Promise<RoutingOutboundRoute> => {
+  const { data } = await api.post('/routing/outbound', route)
+  return data.data || data
+}
+
+export const updateRoutingOutboundRoute = async (id: string, route: UpdateOutboundRouteRequest): Promise<RoutingOutboundRoute> => {
+  const { data } = await api.put(`/routing/outbound/${id}`, route)
+  return data.data || data
+}
+
+export const deleteRoutingOutboundRoute = async (id: string): Promise<void> => {
+  await api.delete(`/routing/outbound/${id}`)
+}
+
+// Inbound Routes
+export const fetchRoutingInboundRoutes = async (): Promise<RoutingInboundRoute[]> => {
+  const { data } = await api.get('/routing/inbound')
+  return data.data || data
+}
+
+export const fetchRoutingInboundRoute = async (id: string): Promise<RoutingInboundRoute> => {
+  const { data } = await api.get(`/routing/inbound/${id}`)
+  return data.data || data
+}
+
+export const createRoutingInboundRoute = async (route: CreateInboundRouteRequest): Promise<RoutingInboundRoute> => {
+  const { data } = await api.post('/routing/inbound', route)
+  return data.data || data
+}
+
+export const updateRoutingInboundRoute = async (id: string, route: UpdateInboundRouteRequest): Promise<RoutingInboundRoute> => {
+  const { data } = await api.put(`/routing/inbound/${id}`, route)
+  return data.data || data
+}
+
+export const deleteRoutingInboundRoute = async (id: string): Promise<void> => {
+  await api.delete(`/routing/inbound/${id}`)
+}
+
+// System operations
+export const fetchRoutingSyncStatus = async (): Promise<RoutingSyncStatus> => {
+  const { data } = await api.get('/routing/sync-status')
+  return data.data || data
+}
+
+export const reloadRouting = async (): Promise<RoutingReloadResult> => {
+  const { data } = await api.post('/routing/reload')
+  return data.data || data
+}
+
+export const migrateRouting = async (): Promise<RoutingMigrationResult> => {
+  const { data } = await api.post('/routing/migrate')
+  return data.data || data
+}
+
+// SIP Status Monitoring
+export const checkAllTrunksSipStatus = async (): Promise<BulkSipStatusResult> => {
+  const { data } = await api.get('/routing/sip-status')
+  return data.data || data
+}
+
+export const checkTrunkSipStatus = async (id: string): Promise<SipStatusCheck> => {
+  const { data } = await api.get(`/routing/sip-status/${id}`)
+  return data.data || data
+}
+
+export const getTrunkSipHistory = async (
+  id: string,
+  limit = 20
+): Promise<SipStatusLogEntry[]> => {
+  const { data } = await api.get(`/routing/sip-status/${id}/history?limit=${limit}`)
   return data.data || data
 }
 

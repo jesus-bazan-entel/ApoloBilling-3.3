@@ -2,10 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import {
   fetchStats,
   fetchActiveCalls,
-  fetchActiveReservations,
   fetchCallsByHour,
   fetchRevenueByDay,
-  fetchBalanceTrend,
   fetchCallsByType,
   fetchCallsByZone,
   fetchTrafficByDirection,
@@ -16,21 +14,21 @@ import Badge from '../components/Badge'
 import {
   Users,
   Phone,
-  DollarSign,
   TrendingUp,
-  Clock,
   Activity,
   BarChart3,
+  ArrowDownLeft,
+  ArrowUpRight,
+  RefreshCw,
+  PhoneCall,
+  Globe,
 } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
-import { es } from 'date-fns/locale'
-import type { ActiveCall, Reservation } from '../types'
+import type { ActiveCall } from '../types'
 import {
   LineChart,
   Line,
   BarChart,
   Bar,
-  AreaChart,
   Area,
   PieChart,
   Pie,
@@ -42,9 +40,111 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts'
+import { useState, useEffect } from 'react'
+
+const CHART_COLORS = {
+  primary: '#3b82f6',
+  secondary: '#10b981',
+  tertiary: '#8b5cf6',
+  quaternary: '#f59e0b',
+  neutral: '#64748b',
+}
+
+const PIE_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4']
+
+const ZONE_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
+  '#ec4899', '#14b8a6', '#f97316', '#6366f1',
+  '#84cc16', '#06b6d4'
+]
+
+function CustomTooltip({ active, payload, label, formatter }: any) {
+  if (!active || !payload || !payload.length) return null
+
+  return (
+    <div className="bg-[var(--color-bg-card)] backdrop-blur-sm border border-[var(--color-border-primary)] rounded-xl shadow-xl p-3 min-w-[140px]">
+      <p className="text-xs font-medium text-[var(--color-text-tertiary)] mb-2">{label}</p>
+      {payload.map((entry: any, index: number) => (
+        <div key={index} className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-sm text-[var(--color-text-secondary)]">{entry.name}</span>
+          </div>
+          <span className="text-sm font-semibold text-[var(--color-text-primary)]">
+            {formatter ? formatter(entry.value) : entry.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChartCard({
+  title,
+  icon: Icon,
+  children,
+  isEmpty,
+  emptyIcon: EmptyIcon,
+  emptyMessage,
+}: {
+  title: string
+  icon: React.ComponentType<{ className?: string }>
+  children: React.ReactNode
+  isEmpty?: boolean
+  emptyIcon?: React.ComponentType<{ className?: string }>
+  emptyMessage?: string
+}) {
+  return (
+    <div className="bg-[var(--color-bg-card)] rounded-2xl shadow-sm border border-[var(--color-border-primary)] p-6 hover:shadow-md transition-all duration-300">
+      <div className="flex items-center justify-between mb-6">
+        <h3 className="text-base font-semibold text-[var(--color-text-primary)]">{title}</h3>
+        <div className="p-2 bg-[var(--color-bg-tertiary)] rounded-lg">
+          <Icon className="w-4 h-4 text-[var(--color-text-tertiary)]" />
+        </div>
+      </div>
+      {isEmpty ? (
+        <div className="flex flex-col items-center justify-center h-[250px] text-[var(--color-text-tertiary)]">
+          {EmptyIcon && <EmptyIcon className="w-12 h-12 mb-3 opacity-40" />}
+          <p className="text-sm">{emptyMessage || 'No hay datos disponibles'}</p>
+        </div>
+      ) : (
+        children
+      )}
+    </div>
+  )
+}
+
+function LoadingPulse() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {[...Array(4)].map((_, i) => (
+        <div
+          key={i}
+          className="bg-[var(--color-bg-card)] rounded-2xl shadow-sm border border-[var(--color-border-primary)] p-6 h-[140px]"
+        >
+          <div className="animate-pulse space-y-3">
+            <div className="h-4 bg-[var(--color-bg-tertiary)] rounded w-24" />
+            <div className="h-8 bg-[var(--color-bg-tertiary)] rounded w-32" />
+            <div className="h-3 bg-[var(--color-bg-secondary)] rounded w-20" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function Dashboard() {
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const [currentTime, setCurrentTime] = useState(new Date())
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  const { data: stats, isLoading: statsLoading, isRefetching: statsRefetching } = useQuery({
     queryKey: ['stats'],
     queryFn: fetchStats,
     refetchInterval: 10000,
@@ -56,31 +156,17 @@ export default function Dashboard() {
     refetchInterval: 5000,
   })
 
-  const { data: reservations = [] } = useQuery({
-    queryKey: ['activeReservations'],
-    queryFn: fetchActiveReservations,
-    refetchInterval: 5000,
-  })
-
-  // Agregar id para compatibilidad con DataTable
   const activeCalls = activeCallsData.map(call => ({ ...call, id: call.uuid }))
 
-  // Cargar datos reales de estadísticas
   const { data: callsByHourData = [] } = useQuery({
     queryKey: ['callsByHour'],
     queryFn: fetchCallsByHour,
-    refetchInterval: 60000, // Actualizar cada minuto
+    refetchInterval: 60000,
   })
 
   const { data: revenueByDayData = [] } = useQuery({
     queryKey: ['revenueByDay'],
     queryFn: fetchRevenueByDay,
-    refetchInterval: 60000,
-  })
-
-  const { data: balanceTrendData = [] } = useQuery({
-    queryKey: ['balanceTrend'],
-    queryFn: fetchBalanceTrend,
     refetchInterval: 60000,
   })
 
@@ -99,74 +185,81 @@ export default function Dashboard() {
   const { data: trafficData } = useQuery({
     queryKey: ['trafficByDirection'],
     queryFn: fetchTrafficByDirection,
-    refetchInterval: 10000, // Actualizar cada 10 segundos (datos de hoy)
+    refetchInterval: 10000,
   })
 
-  // Transformar datos del backend para las gráficas
+  // Transform data for charts
   const llamadasPorHora = callsByHourData.map((stat) => ({
     hora: stat.hour_label,
     llamadas: stat.call_count,
   }))
 
-  const ingresosPorDia = revenueByDayData.map((stat) => ({
+  const consumoPorDia = revenueByDayData.map((stat) => ({
     dia: stat.day_label,
-    ingresos: Number(stat.revenue),
+    consumo: Number(stat.revenue),
   }))
 
-  const distribucionTipoLlamada = [
-    { nombre: 'Salientes', valor: activeCalls.filter(c => c.direction === 'outbound').length, color: '#3b82f6' },
-    { nombre: 'Entrantes', valor: activeCalls.filter(c => c.direction === 'inbound').length, color: '#10b981' },
-    { nombre: 'Internas', valor: activeCalls.filter(c => c.direction === 'internal').length, color: '#64748b' },
-  ]
-
-  const tendenciaSaldos = balanceTrendData.map((point) => ({
-    dia: point.day,
-    saldo: Number(point.total_balance),
-  }))
-
-  // Datos para gráfico de llamadas por tipo (últimos 30 días)
   const llamadasPorTipo = callsByTypeData.map((stat) => ({
     nombre: stat.label,
     valor: stat.call_count,
     porcentaje: stat.percentage.toFixed(1),
   }))
 
-  // Colores para el gráfico de tipo
-  const TIPO_COLORS = ['#3b82f6', '#10b981', '#64748b', '#f59e0b']
-
-  // Datos para gráfico de llamadas por zona (top 10)
   const llamadasPorZona = callsByZoneData.map((stat) => ({
     zona: stat.zone_name,
     llamadas: stat.call_count,
     porcentaje: stat.percentage.toFixed(1),
   }))
 
-  // Colores para el gráfico de zonas
-  const ZONA_COLORS = [
-    '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
-    '#ec4899', '#14b8a6', '#f97316', '#6366f1',
-    '#84cc16', '#06b6d4'
-  ]
+  // Generate sparkline data from trends
+  const callsSparkline = callsByHourData.slice(-12).map(d => d.call_count)
 
   const callColumns = [
     {
       key: 'caller_number',
       header: 'Origen',
       render: (call: ActiveCall) => (
-        <span className="font-mono text-slate-900">{call.caller_number}</span>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+            <Phone className="w-4 h-4 text-blue-600" />
+          </div>
+          <span className="font-mono text-sm font-medium text-[var(--color-text-primary)]">{call.caller_number}</span>
+        </div>
       ),
     },
     {
       key: 'callee_number',
       header: 'Destino',
       render: (call: ActiveCall) => (
-        <span className="font-mono text-slate-600">{call.callee_number}</span>
+        <span className="font-mono text-sm text-[var(--color-text-secondary)]">{call.callee_number}</span>
+      ),
+    },
+    {
+      key: 'direction',
+      header: 'Tipo',
+      render: (call: ActiveCall) => (
+        <div className="flex items-center gap-1.5">
+          {call.direction === 'outbound' ? (
+            <ArrowUpRight className="w-4 h-4 text-blue-500" />
+          ) : call.direction === 'inbound' ? (
+            <ArrowDownLeft className="w-4 h-4 text-emerald-500" />
+          ) : (
+            <RefreshCw className="w-4 h-4 text-[var(--color-text-tertiary)]" />
+          )}
+          <span className="text-sm text-[var(--color-text-secondary)] capitalize">
+            {call.direction === 'outbound' ? 'Saliente' : call.direction === 'inbound' ? 'Entrante' : 'Interna'}
+          </span>
+        </div>
       ),
     },
     {
       key: 'duration_seconds',
       header: 'Duración',
-      render: (call: ActiveCall) => formatDuration(call.duration_seconds ?? call.duration ?? 0),
+      render: (call: ActiveCall) => (
+        <span className="font-mono text-sm tabular-nums">
+          {formatDuration(call.duration_seconds ?? call.duration ?? 0)}
+        </span>
+      ),
       className: 'text-right',
     },
     {
@@ -193,394 +286,284 @@ export default function Dashboard() {
     {
       key: 'estimated_cost',
       header: 'Costo Est.',
-      render: (call: ActiveCall) =>
-        call.estimated_cost ? `S/${call.estimated_cost.toFixed(4)}` : '-',
-      className: 'text-right',
-    },
-  ]
-
-  const reservationColumns = [
-    {
-      key: 'call_uuid',
-      header: 'Llamada',
-      render: (r: Reservation) => (
-        <span className="font-mono text-xs">{r.call_uuid.slice(0, 8)}...</span>
-      ),
-    },
-    {
-      key: 'account_id',
-      header: 'Cuenta',
-    },
-    {
-      key: 'destination_prefix',
-      header: 'Destino',
-    },
-    {
-      key: 'reserved_amount',
-      header: 'Reservado',
-      render: (r: Reservation) => (
-        <span className="text-blue-600 font-medium">
-          S/{r.reserved_amount.toFixed(4)}
+      render: (call: ActiveCall) => (
+        <span className="font-mono text-sm font-medium text-[var(--color-text-secondary)]">
+          {call.estimated_cost ? `S/${call.estimated_cost.toFixed(4)}` : '-'}
         </span>
       ),
       className: 'text-right',
     },
-    {
-      key: 'consumed_amount',
-      header: 'Consumido',
-      render: (r: Reservation) => (
-        <span className="text-green-600">S/{r.consumed_amount.toFixed(4)}</span>
-      ),
-      className: 'text-right',
-    },
-    {
-      key: 'expires_at',
-      header: 'Expira',
-      render: (r: Reservation) =>
-        formatDistanceToNow(new Date(r.expires_at), {
-          addSuffix: true,
-          locale: es,
-        }),
-    },
   ]
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Panel de Control</h1>
-          <p className="text-slate-500">Monitor en tiempo real del sistema de facturación</p>
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">Panel de Control</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">Monitor en tiempo real del sistema de facturación</p>
         </div>
-        <div className="flex items-center space-x-2 text-sm text-slate-500">
-          <Activity className="w-4 h-4" />
-          <span>Última actualización: {new Date().toLocaleTimeString('es-ES')}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border-primary)] shadow-sm">
+            {statsRefetching && (
+              <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+            )}
+            {!statsRefetching && (
+              <Activity className="w-4 h-4 text-emerald-500" />
+            )}
+            <span className="text-sm font-medium text-[var(--color-text-secondary)]">
+              {currentTime.toLocaleTimeString('es-ES')}
+            </span>
+          </div>
         </div>
       </div>
 
       {/* Stats Grid */}
       {statsLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {[...Array(4)].map((_, i) => (
-            <div
-              key={i}
-              className="bg-white rounded-xl shadow-sm p-6 h-32 animate-pulse"
-            />
-          ))}
-        </div>
+        <LoadingPulse />
       ) : stats ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Cuentas Activas"
             value={stats.active_accounts}
-            subtitle={`${stats.total_accounts} total`}
+            subtitle={`de ${stats.total_accounts} cuentas totales`}
             icon={Users}
             color="blue"
           />
           <StatCard
             title="Llamadas Activas"
             value={stats.active_calls || activeCalls.length}
-            icon={Phone}
+            icon={PhoneCall}
             color="green"
+            sparklineData={callsSparkline}
           />
           <StatCard
-            title="Saldo Total"
-            value={`S/${stats.total_balance.toLocaleString('es-ES', {
-              minimumFractionDigits: 2,
-            })}`}
-            icon={DollarSign}
-            color="purple"
+            title="Tráfico Entrante"
+            value={`${Number(trafficData?.inbound?.total_minutes ?? 0).toFixed(1)} min`}
+            subtitle={`S/${Number(trafficData?.inbound?.total_revenue ?? 0).toFixed(2)} | ${trafficData?.inbound?.total_calls ?? 0} llamadas`}
+            icon={ArrowDownLeft}
+            color="cyan"
           />
           <StatCard
-            title="Ingresos Hoy"
-            value={`S/${(stats.revenue_today ?? 0).toFixed(2)}`}
-            subtitle={`${stats.cdrs_today ?? stats.calls_today ?? 0} llamadas`}
-            icon={TrendingUp}
-            color="green"
+            title="Tráfico Saliente"
+            value={`${Number(trafficData?.outbound?.total_minutes ?? 0).toFixed(1)} min`}
+            subtitle={`S/${Number(trafficData?.outbound?.total_revenue ?? 0).toFixed(2)} | ${trafficData?.outbound?.total_calls ?? 0} llamadas`}
+            icon={ArrowUpRight}
+            color="indigo"
           />
         </div>
       ) : (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
-          <p className="text-yellow-800">
-            No se pudieron cargar las estadísticas. Verifica que el motor de facturación esté activo.
-          </p>
-        </div>
-      )}
-
-      {/* Secondary Stats */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard
-            title="Reservas Activas"
-            value={stats.active_reservations || reservations.length}
-            subtitle={`S/${(stats.reserved_amount ?? 0).toFixed(2)} reservado`}
-            icon={Clock}
-            color="yellow"
-          />
-          <StatCard
-            title="Tráfico Entrante (Hoy)"
-            value={`${Number(trafficData?.inbound?.total_minutes ?? 0).toFixed(1)} min`}
-            subtitle={`S/${Number(trafficData?.inbound?.total_revenue ?? 0).toFixed(2)} | ${trafficData?.inbound?.total_calls ?? 0} llamadas`}
-            icon={Phone}
-            color="green"
-          />
-          <StatCard
-            title="Tráfico Saliente (Hoy)"
-            value={`${Number(trafficData?.outbound?.total_minutes ?? 0).toFixed(1)} min`}
-            subtitle={`S/${Number(trafficData?.outbound?.total_revenue ?? 0).toFixed(2)} | ${trafficData?.outbound?.total_calls ?? 0} llamadas`}
-            icon={Phone}
-            color="blue"
-          />
-        </div>
-      )}
-
-      {/* Gráficos Interactivos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Gráfico de Líneas: Llamadas por Hora */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Llamadas por Hora</h3>
-            <BarChart3 className="w-5 h-5 text-slate-400" />
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-6">
+          <div className="flex items-start gap-4">
+            <div className="p-2 bg-amber-500/20 rounded-lg">
+              <Activity className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-amber-600">Sistema de estadísticas inactivo</h3>
+              <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                No se pudieron cargar las estadísticas. Verifica que el motor de facturación esté activo.
+              </p>
+            </div>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
+        </div>
+      )}
+
+      {/* Charts Grid - Row 1 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartCard title="Llamadas por Hora (Hoy)" icon={BarChart3}>
+          <ResponsiveContainer width="100%" height={280}>
             <LineChart data={llamadasPorHora}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <defs>
+                <linearGradient id="callsGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={CHART_COLORS.primary} stopOpacity={0.2}/>
+                  <stop offset="95%" stopColor={CHART_COLORS.primary} stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" vertical={false} />
               <XAxis
                 dataKey="hora"
-                tick={{ fontSize: 12 }}
-                stroke="#64748b"
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={{ stroke: 'var(--color-border-primary)' }}
+                tickLine={false}
               />
-              <YAxis tick={{ fontSize: 12 }} stroke="#64748b" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                }}
+              <YAxis
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Area
+                type="monotone"
+                dataKey="llamadas"
+                stroke="transparent"
+                fill="url(#callsGradient)"
               />
               <Line
                 type="monotone"
                 dataKey="llamadas"
-                stroke="#2563eb"
-                strokeWidth={2}
-                dot={{ fill: '#2563eb', r: 4 }}
-                activeDot={{ r: 6 }}
+                name="Llamadas"
+                stroke={CHART_COLORS.primary}
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={{ r: 6, fill: CHART_COLORS.primary, strokeWidth: 2, stroke: '#fff' }}
               />
             </LineChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        {/* Gráfico de Barras: Ingresos por Día */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Ingresos por Día</h3>
-            <TrendingUp className="w-5 h-5 text-slate-400" />
-          </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={ingresosPorDia}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <ChartCard title="Consumo de los últimos 7 días" icon={TrendingUp}>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={consumoPorDia} barSize={32}>
+              <defs>
+                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={CHART_COLORS.secondary} />
+                  <stop offset="100%" stopColor="#059669" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" vertical={false} />
               <XAxis
                 dataKey="dia"
-                tick={{ fontSize: 12 }}
-                stroke="#64748b"
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={{ stroke: 'var(--color-border-primary)' }}
+                tickLine={false}
               />
-              <YAxis tick={{ fontSize: 12 }} stroke="#64748b" />
+              <YAxis
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={false}
+                tickLine={false}
+                width={50}
+                tickFormatter={(value) => `S/${value}`}
+              />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
-                }}
-                formatter={(value) => `S/${value}`}
+                content={<CustomTooltip formatter={(value: number) => `S/${value.toFixed(2)}`} />}
               />
               <Bar
-                dataKey="ingresos"
-                fill="#10b981"
-                radius={[8, 8, 0, 0]}
+                dataKey="consumo"
+                name="Consumo"
+                fill="url(#barGradient)"
+                radius={[6, 6, 0, 0]}
               />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
+      </div>
 
-        {/* Gráfico de Dona: Distribución por Tipo de Llamadas Activas */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Llamadas Activas por Tipo</h3>
-            <Activity className="w-5 h-5 text-slate-400" />
-          </div>
-          {activeCalls.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={distribucionTipoLlamada}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={5}
-                  dataKey="valor"
-                  nameKey="nombre"
-                  label
-                >
-                  {distribucionTipoLlamada.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                  formatter={(value) => value}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
-              <Activity className="w-12 h-12 mb-2" />
-              <p className="text-sm">No hay llamadas activas en este momento</p>
-            </div>
-          )}
-        </div>
-
-        {/* Gráfico de Área: Tendencia de Saldos */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Tendencia de Saldos (30 días)</h3>
-            <DollarSign className="w-5 h-5 text-slate-400" />
-          </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={tendenciaSaldos}>
-              <defs>
-                <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8}/>
-                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.1}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis
-                dataKey="dia"
-                tick={{ fontSize: 12 }}
-                stroke="#64748b"
-              />
-              <YAxis tick={{ fontSize: 12 }} stroke="#64748b" />
+      {/* Charts Grid - Row 2 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartCard
+          title="Llamadas por Tipo (7 días)"
+          icon={BarChart3}
+          isEmpty={llamadasPorTipo.length === 0}
+          emptyIcon={BarChart3}
+          emptyMessage="No hay datos de llamadas por tipo"
+        >
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie
+                data={llamadasPorTipo}
+                cx="50%"
+                cy="50%"
+                innerRadius={70}
+                outerRadius={100}
+                paddingAngle={4}
+                dataKey="valor"
+                nameKey="nombre"
+                strokeWidth={0}
+              >
+                {llamadasPorTipo.map((_, index) => (
+                  <Cell key={`cell-type-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                ))}
+              </Pie>
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#fff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '8px',
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null
+                  const data = payload[0].payload
+                  return (
+                    <div className="bg-[var(--color-bg-card)] backdrop-blur-sm border border-[var(--color-border-primary)] rounded-xl shadow-xl p-3">
+                      <p className="text-sm font-semibold text-[var(--color-text-primary)]">{data.nombre}</p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">{data.valor} llamadas ({data.porcentaje}%)</p>
+                    </div>
+                  )
                 }}
-                formatter={(value) => `S/${Number(value).toFixed(2)}`}
               />
-              <Area
-                type="monotone"
-                dataKey="saldo"
-                stroke="#8b5cf6"
-                strokeWidth={2}
-                fillOpacity={1}
-                fill="url(#colorSaldo)"
+              <Legend
+                verticalAlign="bottom"
+                height={36}
+                iconType="circle"
+                formatter={(value) => <span className="text-sm text-[var(--color-text-secondary)]">{value}</span>}
               />
-            </AreaChart>
+            </PieChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
-        {/* Gráfico de Dona: Llamadas por Tipo (últimos 30 días) */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Llamadas por Tipo (30 días)</h3>
-            <BarChart3 className="w-5 h-5 text-slate-400" />
-          </div>
-          {llamadasPorTipo.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={llamadasPorTipo}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={5}
-                  dataKey="valor"
-                  nameKey="nombre"
-                  label
-                >
-                  {llamadasPorTipo.map((_, index) => (
-                    <Cell key={`cell-type-${index}`} fill={TIPO_COLORS[index % TIPO_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value, _, props) => [
-                    `${value} llamadas (${props.payload.porcentaje}%)`,
-                    props.payload.nombre
-                  ]}
-                />
-                <Legend
-                  verticalAlign="bottom"
-                  height={36}
-                  formatter={(value) => value}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
-              <BarChart3 className="w-12 h-12 mb-2" />
-              <p className="text-sm">No hay datos de llamadas por tipo</p>
-            </div>
-          )}
-        </div>
-
-        {/* Gráfico de Barras Horizontales: Llamadas por Zona (Top 10) */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-slate-900">Llamadas por Zona (Top 10)</h3>
-            <Activity className="w-5 h-5 text-slate-400" />
-          </div>
-          {llamadasPorZona.length > 0 ? (
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={llamadasPorZona} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis type="number" tick={{ fontSize: 12 }} stroke="#64748b" />
-                <YAxis
-                  dataKey="zona"
-                  type="category"
-                  width={120}
-                  tick={{ fontSize: 11 }}
-                  stroke="#64748b"
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '8px',
-                  }}
-                  formatter={(value, _, props) => [
-                    `${value} llamadas (${props.payload.porcentaje}%)`,
-                    'Llamadas'
-                  ]}
-                />
-                <Bar
-                  dataKey="llamadas"
-                  fill="#3b82f6"
-                  radius={[0, 8, 8, 0]}
-                >
-                  {llamadasPorZona.map((_, index) => (
-                    <Cell key={`cell-zone-${index}`} fill={ZONA_COLORS[index % ZONA_COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
-              <Activity className="w-12 h-12 mb-2" />
-              <p className="text-sm">No hay datos de llamadas por zona</p>
-            </div>
-          )}
-        </div>
+        <ChartCard
+          title="Llamadas por Zona (Top 10)"
+          icon={Globe}
+          isEmpty={llamadasPorZona.length === 0}
+          emptyIcon={Globe}
+          emptyMessage="No hay datos de llamadas por zona"
+        >
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={llamadasPorZona} layout="vertical" barSize={16}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-primary)" horizontal={false} />
+              <XAxis
+                type="number"
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={{ stroke: 'var(--color-border-primary)' }}
+                tickLine={false}
+              />
+              <YAxis
+                dataKey="zona"
+                type="category"
+                width={100}
+                tick={{ fontSize: 11, fill: 'var(--color-text-tertiary)' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null
+                  const data = payload[0].payload
+                  return (
+                    <div className="bg-[var(--color-bg-card)] backdrop-blur-sm border border-[var(--color-border-primary)] rounded-xl shadow-xl p-3">
+                      <p className="text-sm font-semibold text-[var(--color-text-primary)]">{data.zona}</p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">{data.llamadas} llamadas ({data.porcentaje}%)</p>
+                    </div>
+                  )
+                }}
+              />
+              <Bar
+                dataKey="llamadas"
+                radius={[0, 4, 4, 0]}
+              >
+                {llamadasPorZona.map((_, index) => (
+                  <Cell key={`cell-zone-${index}`} fill={ZONE_COLORS[index % ZONE_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
       </div>
 
       {/* Active Calls Table */}
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">
-          Llamadas Activas ({activeCalls.length})
-        </h2>
+      <div className="bg-[var(--color-bg-card)] rounded-2xl shadow-sm border border-[var(--color-border-primary)] p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-emerald-500/10 rounded-lg">
+              <PhoneCall className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Llamadas Activas</h2>
+              <p className="text-sm text-[var(--color-text-tertiary)]">{activeCalls.length} llamadas en curso</p>
+            </div>
+          </div>
+          {activeCalls.length > 0 && (
+            <Badge variant="success" className="animate-pulse">
+              En vivo
+            </Badge>
+          )}
+        </div>
         <DataTable
           columns={callColumns}
           data={activeCalls}
@@ -590,17 +573,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Active Reservations Table */}
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">
-          Reservas de Saldo ({reservations.length})
-        </h2>
-        <DataTable
-          columns={reservationColumns}
-          data={reservations.slice(0, 10)}
-          emptyMessage="No hay reservas activas"
-        />
-      </div>
     </div>
   )
 }

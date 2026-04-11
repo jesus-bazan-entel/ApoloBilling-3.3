@@ -91,7 +91,7 @@ export default function RatesPage() {
       key: 'destination_prefix',
       header: 'Prefijo',
       render: (rate: RateCard) => (
-        <span className="font-mono font-bold text-slate-900">
+        <span className="font-mono font-bold text-[var(--color-text-primary)]">
           {rate.destination_prefix}
         </span>
       ),
@@ -100,7 +100,7 @@ export default function RatesPage() {
       key: 'destination_name',
       header: 'Destino',
       render: (rate: RateCard) => (
-        <span className="font-medium text-slate-900">
+        <span className="font-medium text-[var(--color-text-primary)]">
           {rate.destination_name}
         </span>
       ),
@@ -119,7 +119,7 @@ export default function RatesPage() {
       key: 'billing_increment',
       header: 'Incremento (seg)',
       render: (rate: RateCard) => (
-        <span className="font-mono text-slate-700">{rate.billing_increment}</span>
+        <span className="font-mono text-[var(--color-text-secondary)]">{rate.billing_increment}</span>
       ),
       className: 'text-center',
     },
@@ -127,7 +127,7 @@ export default function RatesPage() {
       key: 'connection_fee',
       header: 'Cargo Conexión',
       render: (rate: RateCard) => (
-        <span className="font-mono text-slate-700">
+        <span className="font-mono text-[var(--color-text-secondary)]">
           S/{Number(rate.connection_fee).toFixed(4)}
         </span>
       ),
@@ -185,17 +185,17 @@ export default function RatesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">
             Gestión de Tarifas
           </h1>
-          <p className="text-slate-500">
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
             Configura tarifas por destino con algoritmo LPM (Longest Prefix Match)
           </p>
         </div>
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setShowLookup(true)}
-            className="flex items-center px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+            className="flex items-center px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)] transition-colors"
           >
             <Search className="w-5 h-5 mr-2" />
             Consultar Tarifa
@@ -212,19 +212,19 @@ export default function RatesPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Total Tarifas</p>
-              <p className="text-2xl font-bold text-slate-900">{rates.length}</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Total Tarifas</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{rates.length}</p>
             </div>
             <Settings className="w-8 h-8 text-blue-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Tarifa Promedio/Min</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Tarifa Promedio/Min</p>
               <p className="text-2xl font-bold text-green-600">
                 S/
                 {rates.length > 0
@@ -238,10 +238,10 @@ export default function RatesPage() {
             <Settings className="w-8 h-8 text-green-500" />
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-slate-500">Vigentes</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Vigentes</p>
               <p className="text-2xl font-bold text-blue-600">
                 {rates.filter((r) => !r.effective_end).length}
               </p>
@@ -394,14 +394,14 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
             {rate ? 'Editar Tarifa' : 'Nueva Tarifa'}
           </h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -416,7 +416,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Prefijo de Destino *
               </label>
               <input
@@ -427,22 +427,22 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                   setFormData({ ...formData, destination_prefix: e.target.value })
                 }
                 placeholder="Ej: 51, 519, 51987"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
               />
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 Solo números, sin símbolos
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Zona de Destino *
               </label>
               <select
                 required
                 value={formData.zone_id || ''}
                 onChange={(e) => handleZoneChange(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Seleccionar zona...</option>
                 {zones.map((zone) => (
@@ -459,7 +459,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Tarifa por Minuto (S/) *
               </label>
               <input
@@ -474,12 +474,12 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     rate_per_minute: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Incremento de Facturación (seg) *
               </label>
               <input
@@ -493,15 +493,15 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     billing_increment: parseInt(e.target.value) || 60,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 Típico: 60 seg (1 min) o 6 seg
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Cargo de Conexión (S/)
               </label>
               <input
@@ -515,12 +515,12 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     connection_fee: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Prioridad
               </label>
               <input
@@ -534,13 +534,13 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     priority: parseInt(e.target.value) || 1,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p className="text-xs text-slate-500 mt-1">1 = más alta</p>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">1 = más alta</p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Fecha Inicio *
               </label>
               <input
@@ -550,12 +550,12 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                 onChange={(e) =>
                   setFormData({ ...formData, effective_start: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Fecha Fin (opcional)
               </label>
               <input
@@ -567,16 +567,16 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     effective_end: e.target.value || null,
                   })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
@@ -606,12 +606,12 @@ interface DeleteConfirmModalProps {
 function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, error }: DeleteConfirmModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-md w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -624,13 +624,13 @@ function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, err
             </div>
           )}
 
-          <p className="text-slate-600">{message}</p>
+          <p className="text-[var(--color-text-secondary)]">{message}</p>
 
           <div className="flex justify-end space-x-3 mt-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
@@ -672,14 +672,14 @@ function LookupModal({ onClose }: LookupModalProps) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-lg w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
             Consultar Tarifa (LPM)
           </h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -687,7 +687,7 @@ function LookupModal({ onClose }: LookupModalProps) {
 
         <div className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Número de Destino
             </label>
             <div className="flex space-x-2">
@@ -696,7 +696,7 @@ function LookupModal({ onClose }: LookupModalProps) {
                 value={destination}
                 onChange={(e) => setDestination(e.target.value)}
                 placeholder="Ej: 51987654321"
-                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="flex-1 px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
               />
               <button
                 onClick={handleLookup}
@@ -717,31 +717,31 @@ function LookupModal({ onClose }: LookupModalProps) {
                   </p>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
-                      <span className="text-slate-600">Prefijo:</span>
+                      <span className="text-[var(--color-text-secondary)]">Prefijo:</span>
                       <span className="font-mono font-bold ml-2">
                         {result.destination_prefix}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-600">Destino:</span>
+                      <span className="text-[var(--color-text-secondary)]">Destino:</span>
                       <span className="font-medium ml-2">
                         {result.destination_name}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-600">Tarifa/Min:</span>
+                      <span className="text-[var(--color-text-secondary)]">Tarifa/Min:</span>
                       <span className="font-mono font-bold text-green-600 ml-2">
                         S/{Number(result.rate_per_minute).toFixed(4)}
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-600">Incremento:</span>
+                      <span className="text-[var(--color-text-secondary)]">Incremento:</span>
                       <span className="font-mono ml-2">
                         {result.billing_increment}s
                       </span>
                     </div>
                     <div>
-                      <span className="text-slate-600">Cargo Conexión:</span>
+                      <span className="text-[var(--color-text-secondary)]">Cargo Conexión:</span>
                       <span className="font-mono ml-2">
                         S/{Number(result.connection_fee).toFixed(4)}
                       </span>
@@ -759,10 +759,10 @@ function LookupModal({ onClose }: LookupModalProps) {
           )}
         </div>
 
-        <div className="p-6 border-t border-slate-200">
+        <div className="p-6 border-t border-[var(--color-border-primary)]">
           <button
             onClick={onClose}
-            className="w-full px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+            className="w-full px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
           >
             Cerrar
           </button>

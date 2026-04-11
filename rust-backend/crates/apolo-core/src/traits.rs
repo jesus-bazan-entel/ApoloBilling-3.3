@@ -3,7 +3,7 @@
 //! Defines abstractions for database access and business logic.
 
 use crate::error::AppError;
-use crate::models::{Account, BalanceReservation, Cdr, RateCard, User};
+use crate::models::{Account, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::{de::DeserializeOwned, Serialize};
@@ -192,6 +192,51 @@ pub struct ConsumeResult {
     pub consumed: Decimal,
     pub released: Decimal,
     pub deficit: Option<Decimal>,
+}
+
+/// SIP Device repository trait with specialized methods
+#[async_trait]
+pub trait SipDeviceRepository: Repository<SipDevice, i32> {
+    /// Find SIP device by username and domain
+    async fn find_by_username_domain(
+        &self,
+        username: &str,
+        domain: &str,
+    ) -> Result<Option<SipDevice>, AppError>;
+
+    /// Find all devices for an account
+    async fn find_by_account(&self, account_id: i32) -> Result<Vec<SipDevice>, AppError>;
+
+    /// List devices with filtering
+    async fn list_filtered(
+        &self,
+        account_id: Option<i32>,
+        enabled: Option<bool>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<SipDevice>, i64), AppError>;
+
+    /// Check if username exists in domain
+    async fn username_exists(&self, username: &str, domain: &str) -> Result<bool, AppError>;
+
+    /// Update password (encrypted + a1_hash)
+    async fn update_password(
+        &self,
+        id: i32,
+        password_encrypted: &[u8],
+        password_nonce: &[u8],
+        a1_hash: &str,
+    ) -> Result<(), AppError>;
+}
+
+/// FreeSWITCH allowed IP repository trait
+#[async_trait]
+pub trait FreeswitchIpRepository: Repository<FreeswitchAllowedIp, i32> {
+    /// Check if IP is allowed
+    async fn is_ip_allowed(&self, ip: &str) -> Result<bool, AppError>;
+
+    /// Find all enabled IPs
+    async fn find_enabled(&self) -> Result<Vec<FreeswitchAllowedIp>, AppError>;
 }
 
 /// Cache service trait

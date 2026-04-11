@@ -34,3 +34,9 @@ tracing = { workspace = true }
 
 # Concurrency
 parking_lot = "0.12"
+
+# Encryption for SIP passwords
+aes-gcm = "0.10"
+rand = "0.8"
+hex = "0.4"
+md-5 = "0.10"

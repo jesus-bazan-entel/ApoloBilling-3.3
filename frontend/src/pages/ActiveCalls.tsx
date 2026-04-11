@@ -40,7 +40,7 @@ export default function ActiveCalls() {
       key: 'call_uuid',
       header: 'UUID',
       render: (call: ActiveCall) => (
-        <span className="font-mono text-xs text-slate-500">
+        <span className="font-mono text-xs text-[var(--color-text-tertiary)]">
           {call.call_uuid.slice(0, 8)}...
         </span>
       ),
@@ -50,11 +50,11 @@ export default function ActiveCalls() {
       header: 'Origen',
       render: (call: ActiveCall) => (
         <div>
-          <span className="font-mono font-medium text-slate-900">
+          <span className="font-mono font-medium text-[var(--color-text-primary)]">
             {call.caller_number}
           </span>
           {call.account_id && (
-            <span className="text-xs text-slate-500 ml-2">
+            <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
               (Cuenta: {call.account_id})
             </span>
           )}
@@ -66,9 +66,9 @@ export default function ActiveCalls() {
       header: 'Destino',
       render: (call: ActiveCall) => (
         <div>
-          <span className="font-mono text-slate-700">{call.callee_number}</span>
+          <span className="font-mono text-[var(--color-text-secondary)]">{call.callee_number}</span>
           {call.zone_name && (
-            <span className="text-xs text-slate-500 block">{call.zone_name}</span>
+            <span className="text-xs text-[var(--color-text-tertiary)] block">{call.zone_name}</span>
           )}
         </div>
       ),
@@ -153,7 +153,7 @@ export default function ActiveCalls() {
         const rate = call.rate_per_minute || 0
         const cost = (durationSec / 60) * rate
         return (
-          <span className="font-mono tabular-nums text-slate-700">
+          <span className="font-mono tabular-nums text-[var(--color-text-secondary)]">
             {rate > 0 ? `S/${cost.toFixed(4)}` : '-'}
           </span>
         )
@@ -166,8 +166,8 @@ export default function ActiveCalls() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Llamadas Activas</h1>
-          <p className="text-slate-500">
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">Llamadas Activas</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
             Monitoreo en tiempo real de llamadas en curso
           </p>
         </div>
@@ -195,26 +195,26 @@ export default function ActiveCalls() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
-          <p className="text-sm text-slate-500">Salientes</p>
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
+          <p className="text-sm text-[var(--color-text-tertiary)]">Salientes</p>
           <p className="text-2xl font-bold text-blue-600">
             {calls.filter((c) => c.direction === 'outbound').length}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
-          <p className="text-sm text-slate-500">Entrantes</p>
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
+          <p className="text-sm text-[var(--color-text-tertiary)]">Entrantes</p>
           <p className="text-2xl font-bold text-green-600">
             {calls.filter((c) => c.direction === 'inbound').length}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
-          <p className="text-sm text-slate-500">Internas</p>
-          <p className="text-2xl font-bold text-slate-600">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
+          <p className="text-sm text-[var(--color-text-tertiary)]">Internas</p>
+          <p className="text-2xl font-bold text-[var(--color-text-secondary)]">
             {calls.filter((c) => c.direction === 'internal').length}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
-          <p className="text-sm text-slate-500">Costo Total Est.</p>
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
+          <p className="text-sm text-[var(--color-text-tertiary)]">Costo Total Est.</p>
           <p className="text-2xl font-bold tabular-nums text-purple-600">
             S/
             {calls
@@ -237,8 +237,8 @@ export default function ActiveCalls() {
         loading={isLoading}
         emptyMessage={
           <div className="flex flex-col items-center py-8">
-            <PhoneOff className="w-12 h-12 text-slate-300 mb-4" />
-            <p className="text-slate-500">No hay llamadas activas en este momento</p>
+            <PhoneOff className="w-12 h-12 text-[var(--color-text-muted)] mb-4" />
+            <p className="text-[var(--color-text-tertiary)]">No hay llamadas activas en este momento</p>
           </div>
         }
         searchable={true}

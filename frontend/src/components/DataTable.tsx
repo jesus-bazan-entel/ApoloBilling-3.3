@@ -87,10 +87,10 @@ export default function DataTable<T extends { id?: number | string }>({
 
   if (loading) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] p-8">
         <div className="flex items-center justify-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-          <span className="ml-3 text-slate-500">Cargando...</span>
+          <span className="ml-3 text-[var(--color-text-tertiary)]">Cargando...</span>
         </div>
       </div>
     )
@@ -99,32 +99,32 @@ export default function DataTable<T extends { id?: number | string }>({
   return (
     <div className="space-y-4">
       {searchable && (
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)] p-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[var(--color-text-tertiary)]" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors placeholder:text-[var(--color-text-muted)]"
             />
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
+          <table className="min-w-full divide-y divide-[var(--color-border-primary)]">
+            <thead className="bg-[var(--color-bg-tertiary)]">
               <tr>
                 {columns.map((col) => (
                   <th
                     key={String(col.key)}
                     onClick={() => col.sortable !== false && handleSort(String(col.key))}
                     className={cn(
-                      'px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider',
-                      col.sortable !== false && 'cursor-pointer hover:bg-slate-100 transition-colors',
+                      'px-6 py-3 text-left text-xs font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider',
+                      col.sortable !== false && 'cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors',
                       col.className
                     )}
                   >
@@ -140,12 +140,12 @@ export default function DataTable<T extends { id?: number | string }>({
                 ))}
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-slate-200">
+            <tbody className="bg-[var(--color-bg-card)] divide-y divide-[var(--color-border-primary)]">
               {filteredAndSortedData.length === 0 ? (
                 <tr>
                   <td
                     colSpan={columns.length}
-                    className="px-6 py-12 text-center text-slate-500"
+                    className="px-6 py-12 text-center text-[var(--color-text-tertiary)]"
                   >
                     {emptyMessage}
                   </td>
@@ -156,7 +156,7 @@ export default function DataTable<T extends { id?: number | string }>({
                     key={item.id ?? index}
                     onClick={() => onRowClick?.(item)}
                     className={cn(
-                      'hover:bg-slate-50 transition-colors',
+                      'hover:bg-[var(--color-bg-hover)] transition-colors',
                       onRowClick && 'cursor-pointer'
                     )}
                   >
@@ -181,22 +181,22 @@ export default function DataTable<T extends { id?: number | string }>({
         </div>
 
         {pagination && pagination.totalPages > 1 && (
-          <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between bg-slate-50">
-            <span className="text-sm text-slate-500">
+          <div className="px-6 py-4 border-t border-[var(--color-border-primary)] flex items-center justify-between bg-[var(--color-bg-tertiary)]">
+            <span className="text-sm text-[var(--color-text-tertiary)]">
               Página {pagination.page} de {pagination.totalPages}
             </span>
             <div className="flex space-x-2">
               <button
                 onClick={() => pagination.onPageChange(pagination.page - 1)}
                 disabled={pagination.page <= 1}
-                className="p-2 rounded-lg border border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white transition-colors"
+                className="p-2 rounded-lg border border-[var(--color-border-primary)] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-bg-card)] transition-colors text-[var(--color-text-secondary)]"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={() => pagination.onPageChange(pagination.page + 1)}
                 disabled={pagination.page >= pagination.totalPages}
-                className="p-2 rounded-lg border border-slate-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white transition-colors"
+                className="p-2 rounded-lg border border-[var(--color-border-primary)] disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-bg-card)] transition-colors text-[var(--color-text-secondary)]"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>

@@ -272,3 +272,148 @@ CI requires PostgreSQL 15 + Redis 7 services for Rust tests.
 - `rust-backend/crates/apolo-api/ARCHITECTURE.md` - CDR API architecture, performance targets, caching strategy
 - `README_DEPLOYMENT.md` - Production deployment guide
 - `rust-billing-engine/docs/CALL_SIMULATOR.md` - Testing with call simulator
+- `INSTALL.md` - Complete installation guide for Debian 12 (PostgreSQL, MySQL, Kamailio, FreeSWITCH, RTPEngine, Nginx)
+
+---
+
+## Kamailio Integration (dSIPRouter)
+
+ApoloBilling integrates with Kamailio/dSIPRouter for SIP routing and carrier management.
+
+### Kamailio Database (MySQL)
+
+Optional connection via `KAMAILIO_DATABASE_URL` environment variable. Tables managed:
+
+| Table | Purpose |
+|-------|---------|
+| `dr_gateways` | SIP gateways (type=8 carriers, type=9 PBX) |
+| `dr_gw_lists` | Gateway groups for failover |
+| `dr_rules` | Outbound routing rules (prefix matching) |
+| `address` | IP-based ACL (trusted peers) |
+| `dsip_gw2gwgroup` | Gateway to group mapping |
+| `dsip_call_settings` | Call limits per group |
+
+### Gateway Types
+
+- **type=8**: Carrier/trunk (external providers like VOIPSWITCH)
+- **type=9**: PBX endpoint (FreeSWITCH internal)
+
+### Kamailio Reload Commands
+
+```bash
+kamcmd drouting.reload           # Reload gateways and routes
+kamcmd permissions.addressReload # Reload IP ACL
+kamcmd htable.reload gw2gwgroup  # Reload gateway mappings
+```
+
+### Kamailio API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/v1/kamailio-dialplan/groups` | Carrier group management |
+| `/api/v1/kamailio-dialplan/carriers` | Individual carrier CRUD |
+| `/api/v1/kamailio-dialplan/routes` | Outbound routing rules |
+| `/api/v1/kamailio-endpoints` | PBX endpoint management (type=9) |
+
+---
+
+## FreeSWITCH ↔ Kamailio Architecture
+
+### Network Topology
+
+```
+                              INTERNET / PSTN
+                                    │
+                                    ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                           SERVIDOR (ej: 10.10.22.4)                           │
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                      KAMAILIO / dSIPRouter                              │  │
+│  │                           :5060 (SBC)                                   │  │
+│  │                                                                         │  │
+│  │   Carriers externos (type=8):                                           │  │
+│  │   - VOIPSWITCH_IN  (setid=13) ← recibe de 190.105.250.x                │  │
+│  │   - VOIPSWITCH_OUT (setid=14) → envía a 172.16.1.25                    │  │
+│  │                                                                         │  │
+│  │   PBX interno (type=9):                                                 │  │
+│  │   - FreeSWITCH (gwid=100) → 127.0.0.1:5080                             │  │
+│  │                                                                         │  │
+│  └────────────────────────────┬────────────────────────────────────────────┘  │
+│                               │ SIP (UDP)                                     │
+│  ┌────────────────────────────▼────────────────────────────────────────────┐  │
+│  │                         FREESWITCH                                      │  │
+│  │                                                                         │  │
+│  │   Internal Profile (:5080)     External Profile (:5062)                 │  │
+│  │   - contexto: from-pbx         - contexto: public                       │  │
+│  │   - Llamadas de Kamailio       - Llamadas a Kamailio (troncales)        │  │
+│  │   - Dispositivos SIP           - Gateway kamailio configurado           │  │
+│  │                                                                         │  │
+│  │   mod_xml_curl → http://127.0.0.1:8000/api/v1/freeswitch/directory     │  │
+│  │   (autenticación dinámica de dispositivos SIP)                          │  │
+│  │                                                                         │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Call Flow: Inbound (PSTN → Extension)
+
+```
+PSTN → VOIPSWITCH (190.105.250.x) → Kamailio :5060 → FreeSWITCH :5080 → Extension
+```
+
+1. Carrier sends INVITE to Kamailio
+2. Kamailio looks up `dr_gateways` (type=9, gwid=100)
+3. Routes to FreeSWITCH internal profile (:5080)
+4. FreeSWITCH uses `from-pbx` context, finds extension
+
+### Call Flow: Outbound (Extension → PSTN)
+
+```
+Extension → FreeSWITCH :5080 → Kamailio :5060 → VOIPSWITCH (172.16.1.25) → PSTN
+```
+
+1. Extension calls via FreeSWITCH
+2. Dialplan bridges to Kamailio gateway
+3. Kamailio applies drouting rules
+4. Selects carrier from `dr_gw_lists` (setid=14)
+
+### FreeSWITCH Directory Endpoint
+
+`POST /api/v1/freeswitch/directory` - Dynamic SIP user authentication
+
+- IP whitelist security (no JWT required)
+- Returns XML with A1 hash, codecs, caller ID
+- Used by mod_xml_curl during REGISTER
+
+### Internal Routes (PostgreSQL)
+
+Tables for managing FreeSWITCH ↔ Kamailio interconnection:
+
+- `system_endpoints` - FreeSWITCH/Kamailio connection points
+- `internal_routes` - Route definitions (fs_to_kamailio, kamailio_to_fs)
+- `routing_trunks` - Unified trunk management (private/public)
+- `routing_sip_status_log` - SIP OPTIONS monitoring
+
+### Trunk Types
+
+- **private** (trunk_type='private'): Internal FreeSWITCH trunks
+- **public** (trunk_type='public'): External carriers via Kamailio
+
+---
+
+## Production Ports Summary
+
+| Port | Service | Protocol | Description |
+|------|---------|----------|-------------|
+| 80/443 | Nginx | TCP | Web frontend + API proxy |
+| 5060 | Kamailio | UDP/TCP | SIP signaling (SBC) |
+| 5080 | FreeSWITCH | UDP/TCP | Internal SIP profile |
+| 5062 | FreeSWITCH | UDP/TCP | External SIP profile |
+| 8000 | Rust Backend | TCP | REST API |
+| 9000 | Billing Engine | TCP | Real-time billing API |
+| 8021 | FreeSWITCH ESL | TCP | Event Socket Layer |
+| 5432 | PostgreSQL | TCP | Main database |
+| 3306 | MySQL | TCP | Kamailio database |
+| 6379 | Redis | TCP | Cache |
+| 10000-20000 | RTPEngine | UDP | Media relay |

@@ -139,9 +139,9 @@ export default function Users() {
       case 'admin':
         return 'bg-blue-100 text-blue-800 border-blue-200'
       case 'operator':
-        return 'bg-gray-100 text-gray-800 border-gray-200'
+        return 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] border-[var(--color-border-primary)]'
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-200'
+        return 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] border-[var(--color-border-primary)]'
     }
   }
 
@@ -188,7 +188,7 @@ export default function Users() {
           className={`px-2 py-1 rounded-full text-xs font-medium ${
             user.activo
               ? 'bg-green-100 text-green-800 border border-green-200'
-              : 'bg-gray-100 text-gray-800 border border-gray-200'
+              : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] border border-[var(--color-border-primary)]'
           }`}
         >
           {user.activo ? 'Activo' : 'Inactivo'}
@@ -231,8 +231,8 @@ export default function Users() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Gestión de Usuarios</h1>
-          <p className="text-sm text-slate-600">Administrar usuarios del sistema (solo superadmin)</p>
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">Gestión de Usuarios</h1>
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">Administrar usuarios del sistema (solo superadmin)</p>
         </div>
         <button
           onClick={handleCreate}
@@ -245,19 +245,19 @@ export default function Users() {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-4 border border-slate-200">
+        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center gap-3">
-            <UserIcon className="w-8 h-8 text-slate-600" />
+            <UserIcon className="w-8 h-8 text-[var(--color-text-secondary)]" />
             <div>
-              <p className="text-sm text-slate-600">Total Usuarios</p>
-              <p className="text-2xl font-bold text-slate-900">{data?.total || 0}</p>
+              <p className="text-sm text-[var(--color-text-secondary)]">Total Usuarios</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{data?.total || 0}</p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)]">
         <DataTable
           data={data?.users || []}
           columns={columns}
@@ -273,9 +273,9 @@ export default function Users() {
       {/* Create/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-900">
+          <div className="bg-[var(--color-bg-card)] rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-[var(--color-bg-card)] border-b border-[var(--color-border-primary)] px-6 py-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">
                 {editingUser ? 'Editar Usuario' : 'Nuevo Usuario'}
               </h3>
               <button
@@ -284,7 +284,7 @@ export default function Users() {
                   setEditingUser(null)
                   resetForm()
                 }}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -298,7 +298,7 @@ export default function Users() {
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                   Usuario *
                 </label>
                 <input
@@ -306,64 +306,64 @@ export default function Users() {
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   disabled={!!editingUser}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-[var(--color-bg-secondary)]"
                   required={!editingUser}
                 />
               </div>
 
               {!editingUser && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                  <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                     Contraseña *
                   </label>
                   <input
                     type="password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
                     minLength={6}
                   />
-                  <p className="text-xs text-slate-500 mt-1">Mínimo 6 caracteres</p>
+                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">Mínimo 6 caracteres</p>
                 </div>
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nombre</label>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Nombre</label>
                 <input
                   type="text"
                   value={formData.nombre}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Apellido</label>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Apellido</label>
                 <input
                   type="text"
                   value={formData.apellido}
                   onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Email</label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Rol *</label>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Rol *</label>
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
                 >
                   <option value="operator">Operador</option>
@@ -380,7 +380,7 @@ export default function Users() {
                     setEditingUser(null)
                     resetForm()
                   }}
-                  className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+                  className="flex-1 px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)] transition-colors"
                 >
                   Cancelar
                 </button>
@@ -404,9 +404,9 @@ export default function Users() {
       {/* Delete Confirmation Modal */}
       {deletingUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Confirmar Eliminación</h3>
-            <p className="text-slate-600 mb-6">
+          <div className="bg-[var(--color-bg-card)] rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">Confirmar Eliminación</h3>
+            <p className="text-[var(--color-text-secondary)] mb-6">
               ¿Estás seguro de eliminar al usuario <strong>{deletingUser.username}</strong>?
               <br />
               Esta acción no se puede deshacer.
@@ -414,7 +414,7 @@ export default function Users() {
             <div className="flex gap-3">
               <button
                 onClick={() => setDeletingUser(null)}
-                className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+                className="flex-1 px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
               >
                 Cancelar
               </button>

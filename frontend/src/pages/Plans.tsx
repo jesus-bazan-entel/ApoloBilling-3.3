@@ -100,7 +100,7 @@ export default function PlansPage() {
         return (
           <span className="font-mono">
             S/{Number(amount).toFixed(2)}
-            <span className="text-xs text-slate-500 ml-1">
+            <span className="text-xs text-[var(--color-text-tertiary)] ml-1">
               {isPrepaid ? 'inicial' : 'límite'}
             </span>
           </span>
@@ -128,14 +128,14 @@ export default function PlansPage() {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => handleEdit(plan)}
-            className="p-1 hover:bg-slate-100 rounded"
+            className="p-1 hover:bg-[var(--color-bg-secondary)] rounded"
             title="Editar"
           >
-            <Edit className="w-4 h-4 text-slate-600" />
+            <Edit className="w-4 h-4 text-[var(--color-text-secondary)]" />
           </button>
           <button
             onClick={() => setDeletingPlan(plan)}
-            className="p-1 hover:bg-slate-100 rounded"
+            className="p-1 hover:bg-[var(--color-bg-secondary)] rounded"
             title="Eliminar"
           >
             <Trash2 className="w-4 h-4 text-red-600" />
@@ -149,11 +149,11 @@ export default function PlansPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 flex items-center">
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)] flex items-center">
             <FileText className="w-8 h-8 mr-3 text-blue-600" />
             Planes
           </h1>
-          <p className="text-slate-600 mt-1">
+          <p className="text-[var(--color-text-secondary)] mt-1">
             Gestión de planes prepago y postpago
           </p>
         </div>
@@ -234,12 +234,12 @@ function PlanModal({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--color-bg-card)] rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold">
             {plan ? 'Editar Plan' : 'Nuevo Plan'}
           </h2>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded">
+          <button onClick={onClose} className="p-1 hover:bg-[var(--color-bg-secondary)] rounded">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -254,7 +254,7 @@ function PlanModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Nombre del Plan *
               </label>
               <input
@@ -269,7 +269,7 @@ function PlanModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Código *
               </label>
               <input
@@ -280,13 +280,13 @@ function PlanModal({
                 onChange={(e) =>
                   setFormData({ ...formData, plan_code: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Tipo de Cuenta *
             </label>
             <select
@@ -296,7 +296,7 @@ function PlanModal({
               onChange={(e) =>
                 setFormData({ ...formData, account_type: e.target.value as AccountType })
               }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
             >
               <option value="PREPAID">Prepago</option>
               <option value="POSTPAID">Postpago</option>
@@ -305,7 +305,7 @@ function PlanModal({
 
           {isPrepaid ? (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Saldo Inicial * (debe ser &gt; 0)
               </label>
               <input
@@ -322,13 +322,13 @@ function PlanModal({
                 }
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 El saldo inicial no puede ser cero (sin planes ilimitados)
               </p>
             </div>
           ) : (
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Límite de Crédito * (debe ser &gt; 0)
               </label>
               <input
@@ -345,14 +345,14 @@ function PlanModal({
                 }
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 El límite de crédito no puede ser cero (sin planes ilimitados)
               </p>
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Llamadas Concurrentes *
             </label>
             <input
@@ -372,7 +372,7 @@ function PlanModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Descripción
             </label>
             <textarea
@@ -394,7 +394,7 @@ function PlanModal({
               }
               className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
             />
-            <label className="ml-2 text-sm font-medium text-slate-700">
+            <label className="ml-2 text-sm font-medium text-[var(--color-text-secondary)]">
               Plan activo
             </label>
           </div>
@@ -403,7 +403,7 @@ function PlanModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
@@ -431,19 +431,19 @@ function DeleteModal({
 }) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+      <div className="bg-[var(--color-bg-card)] rounded-lg p-6 max-w-md w-full mx-4">
         <h3 className="text-lg font-bold mb-2">Eliminar Plan</h3>
-        <p className="text-slate-600 mb-4">
+        <p className="text-[var(--color-text-secondary)] mb-4">
           ¿Estás seguro de eliminar el plan <strong>{plan.plan_name}</strong>?
         </p>
-        <p className="text-sm text-slate-500 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Esta acción no se puede deshacer. Las cuentas existentes creadas con
           este plan no se verán afectadas.
         </p>
         <div className="flex justify-end space-x-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 border rounded-lg hover:bg-slate-50"
+            className="px-4 py-2 border rounded-lg hover:bg-[var(--color-bg-secondary)]"
           >
             Cancelar
           </button>

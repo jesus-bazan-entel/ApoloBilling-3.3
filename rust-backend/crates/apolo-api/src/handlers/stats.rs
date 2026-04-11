@@ -272,7 +272,7 @@ pub async fn get_calls_by_type(
     debug!("Fetching calls by type statistics");
 
     let now = Utc::now();
-    let start_time = now - Duration::days(30);
+    let start_time = now - Duration::days(7);
 
     let rows = sqlx::query(
         r#"

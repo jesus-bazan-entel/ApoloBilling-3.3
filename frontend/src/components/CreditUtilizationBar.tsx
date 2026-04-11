@@ -19,14 +19,14 @@ export default function CreditUtilizationBar({
 
   return (
     <div className="w-full">
-      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+      <div className="h-2 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
         <div
           className={`h-full ${bgColor} transition-all duration-300`}
           style={{ width: `${percent}%` }}
         />
       </div>
       {showLabel && (
-        <div className="text-xs text-slate-600 mt-1 text-right">
+        <div className="text-xs text-[var(--color-text-secondary)] mt-1 text-right">
           {formatUtilization(percent)} usado
         </div>
       )}

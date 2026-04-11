@@ -29,6 +29,7 @@ pub mod billing_sync;
 // pub mod cdr_generator;
 pub mod rating;
 pub mod reservation_manager;
+pub mod sip_device;
 // pub mod user_service;
 
 // pub use account_service::AccountService;
@@ -37,6 +38,7 @@ pub use billing_sync::BillingSyncService;
 // pub use cdr_generator::CdrGenerator;
 pub use rating::RatingServiceImpl;
 pub use reservation_manager::ReservationManager;
+pub use sip_device::SipDeviceService;
 // pub use user_service::UserService;
 
 /// Business logic constants

@@ -7,12 +7,16 @@ use actix_cors::Cors;
 use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
-    configure_dashboard, configure_dialplan, configure_management, configure_plans,
-    configure_rate_cards, configure_rates, configure_reservations, configure_settings,
-    configure_stats, configure_users, create_cdr, ws_handler,
+    configure_dashboard, configure_dialplan, configure_freeswitch_directory,
+    configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
+    configure_management, configure_plans, configure_rate_cards, configure_rates,
+    configure_reservations, configure_settings, configure_sip_devices, configure_stats,
+    configure_unified_routing, configure_users, create_cdr, ws_handler,
 };
 use apolo_auth::{JwtService, PasswordService};
 use apolo_db::create_pool;
+use apolo_services::SipDeviceService;
+use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 use std::sync::Arc;
 use tracing::{info, warn, Level};
@@ -59,8 +63,20 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_management)
             // Dialplan FreeSWITCH management (superadmin only)
             .configure(configure_dialplan)
+            // Kamailio Dialplan management (superadmin only)
+            .configure(configure_kamailio_dialplan)
             // System settings (read: authenticated; write: superadmin only)
             .configure(configure_settings)
+            // SIP Device management
+            .configure(configure_sip_devices)
+            // Unified Routing management (superadmin only)
+            .configure(configure_unified_routing)
+            // Internal routing (FreeSWITCH <-> Kamailio)
+            .service(configure_internal_routes())
+            // Kamailio Endpoints (PBX) - direct DB access
+            .configure(configure_kamailio_endpoints)
+            // FreeSWITCH mod_xml_curl directory (IP whitelist protected, no JWT)
+            .configure(configure_freeswitch_directory)
             // CDR endpoints - high-volume operations
             .service(
                 web::scope("/cdrs")
@@ -149,15 +165,58 @@ async fn main() -> std::io::Result<()> {
     let cors_origins = env::var("CORS_ORIGINS")
         .unwrap_or_else(|_| "http://localhost:3000,http://127.0.0.1:3000".to_string());
 
-    info!("Connecting to database...");
+    // SIP Device encryption service (optional - if key not set, SIP device features will error)
+    let sip_service = match env::var("SIP_ENCRYPTION_KEY") {
+        Ok(key) => {
+            match SipDeviceService::new(&key) {
+                Ok(service) => {
+                    info!("SIP Device service initialized with encryption");
+                    Some(Arc::new(service))
+                }
+                Err(e) => {
+                    warn!("Failed to initialize SIP Device service: {}. SIP device features will be unavailable.", e);
+                    None
+                }
+            }
+        }
+        Err(_) => {
+            info!("SIP_ENCRYPTION_KEY not set. Generate with: openssl rand -hex 32");
+            info!("SIP device management features will be unavailable until configured.");
+            None
+        }
+    };
+
+    info!("Connecting to PostgreSQL database...");
     let pool = create_pool(&database_url, Some(max_connections))
         .await
         .expect("Failed to create database pool");
 
     info!(
-        "Database connection established with {} max connections",
+        "PostgreSQL connection established with {} max connections",
         max_connections
     );
+
+    // Kamailio MySQL database (optional)
+    let kamailio_mysql_pool = if let Ok(kamailio_url) = env::var("KAMAILIO_DATABASE_URL") {
+        info!("Connecting to Kamailio MySQL database...");
+        match MySqlPoolOptions::new()
+            .max_connections(5)
+            .connect(&kamailio_url)
+            .await
+        {
+            Ok(mysql_pool) => {
+                info!("Kamailio MySQL connection established");
+                Some(mysql_pool)
+            }
+            Err(e) => {
+                warn!("Failed to connect to Kamailio MySQL database: {}. Kamailio dialplan features will be disabled.", e);
+                None
+            }
+        }
+    } else {
+        info!("KAMAILIO_DATABASE_URL not set, Kamailio dialplan features disabled");
+        None
+    };
 
     let bind_addr = format!("{}:{}", host, port);
     info!(
@@ -168,6 +227,8 @@ async fn main() -> std::io::Result<()> {
     // Clone services for closure
     let jwt_service_clone = jwt_service.clone();
     let password_service_clone = password_service.clone();
+    let kamailio_mysql_pool_clone = kamailio_mysql_pool.clone();
+    let sip_service_clone = sip_service.clone();
 
     // Create and run server
     HttpServer::new(move || {
@@ -192,12 +253,24 @@ async fn main() -> std::io::Result<()> {
             .supports_credentials()
             .max_age(3600);
 
-        App::new()
+        let mut app = App::new()
             // Add database pool to app data
             .app_data(web::Data::new(pool.clone()))
             // Add auth services
             .app_data(web::Data::new(jwt_service_clone.clone()))
-            .app_data(web::Data::new(password_service_clone.clone()))
+            .app_data(web::Data::new(password_service_clone.clone()));
+
+        // Add Kamailio MySQL pool if available
+        if let Some(ref mysql_pool) = kamailio_mysql_pool_clone {
+            app = app.app_data(web::Data::new(mysql_pool.clone()));
+        }
+
+        // Add SIP Device service if available
+        if let Some(ref sip_svc) = sip_service_clone {
+            app = app.app_data(web::Data::new(sip_svc.clone()));
+        }
+
+        app
             // Configure payload limits for large exports
             .app_data(web::PayloadConfig::new(10 * 1024 * 1024)) // 10MB max payload
             .app_data(web::QueryConfig::default().error_handler(|err, _req| {

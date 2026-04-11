@@ -12,7 +12,7 @@ const variantClasses = {
   warning: 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-600/20',
   error: 'bg-red-100 text-red-800 ring-1 ring-red-600/20',
   info: 'bg-blue-100 text-blue-800 ring-1 ring-blue-600/20',
-  default: 'bg-slate-100 text-slate-800 ring-1 ring-slate-600/20',
+  default: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] ring-1 ring-slate-600/20',
 }
 
 const sizeClasses = {

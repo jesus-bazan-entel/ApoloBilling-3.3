@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { ThemeProvider } from './contexts/ThemeContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import ActiveCalls from './pages/ActiveCalls'
@@ -11,7 +12,9 @@ import Rates from './pages/Rates'
 import Plans from './pages/Plans'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
-import Dialplan from './pages/Dialplan'
+import UnifiedRouting from './pages/UnifiedRouting'
+import InternalRouting from './pages/InternalRouting'
+import SipDevices from './pages/SipDevices'
 import Login from './pages/Login'
 import { getCurrentUser } from './api/client'
 import type { UserRole } from './types'
@@ -116,10 +119,26 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/dialplan"
+                  path="/routing"
                   element={
                     <ProtectedRoute requiredRole="superadmin">
-                      <Dialplan />
+                      <UnifiedRouting />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/internal-routing"
+                  element={
+                    <ProtectedRoute requiredRole="superadmin">
+                      <InternalRouting />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/sip-devices"
+                  element={
+                    <ProtectedRoute requiredRole="superadmin">
+                      <SipDevices />
                     </ProtectedRoute>
                   }
                 />
@@ -136,9 +155,11 @@ function AppRoutes() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <ThemeProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }

@@ -61,28 +61,28 @@ export default function ZonesPage() {
       key: 'id',
       header: 'ID',
       render: (zone: Zone) => (
-        <span className="font-mono text-slate-600">{zone.id}</span>
+        <span className="font-mono text-[var(--color-text-secondary)]">{zone.id}</span>
       ),
     },
     {
       key: 'zone_name',
       header: 'Nombre de Zona',
       render: (zone: Zone) => (
-        <span className="font-medium text-slate-900">{zone.zone_name}</span>
+        <span className="font-medium text-[var(--color-text-primary)]">{zone.zone_name}</span>
       ),
     },
     {
       key: 'zone_code',
       header: 'Código',
       render: (zone: Zone) => (
-        <span className="font-mono text-slate-600">{zone.zone_code || '-'}</span>
+        <span className="font-mono text-[var(--color-text-secondary)]">{zone.zone_code || '-'}</span>
       ),
     },
     {
       key: 'description',
       header: 'Descripción',
       render: (zone: Zone) => (
-        <span className="text-slate-600">{zone.description || '-'}</span>
+        <span className="text-[var(--color-text-secondary)]">{zone.description || '-'}</span>
       ),
     },
     {
@@ -133,10 +133,10 @@ export default function ZonesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
             Gestión de Zonas Geográficas
           </h1>
-          <p className="text-slate-500">
+          <p className="text-[var(--color-text-tertiary)]">
             Define zonas para organizar tarifas por destino
           </p>
         </div>
@@ -150,12 +150,12 @@ export default function ZonesPage() {
       </div>
 
       {/* Summary Card */}
-      <div className="bg-white rounded-lg shadow-sm p-6 border border-slate-200">
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-6 border border-[var(--color-border-primary)]">
         <div className="flex items-center">
           <Globe className="w-8 h-8 text-blue-500 mr-4" />
           <div>
-            <p className="text-sm text-slate-500">Total de Zonas</p>
-            <p className="text-3xl font-bold text-slate-900">{zones.length}</p>
+            <p className="text-sm text-[var(--color-text-tertiary)]">Total de Zonas</p>
+            <p className="text-3xl font-bold text-[var(--color-text-primary)]">{zones.length}</p>
           </div>
         </div>
       </div>
@@ -243,12 +243,12 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -262,7 +262,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Nombre de Zona *
             </label>
             <input
@@ -273,12 +273,12 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, zone_name: e.target.value })
               }
               placeholder="Ej: Peru_Lima, USA_NewYork"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Código de Zona
             </label>
             <input
@@ -288,12 +288,12 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, zone_code: e.target.value })
               }
               placeholder="Ej: PE-LIM, US-NYC"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Descripción
             </label>
             <textarea
@@ -303,13 +303,13 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, description: e.target.value })
               }
               placeholder="Descripción de la zona"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Tipo de Zona
               </label>
               <select
@@ -317,7 +317,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 onChange={(e) =>
                   setFormData({ ...formData, zone_type: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="GEOGRAPHIC">Geográfica</option>
                 <option value="MOBILE">Móvil</option>
@@ -326,7 +326,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Región
               </label>
               <input
@@ -336,7 +336,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                   setFormData({ ...formData, region_name: e.target.value })
                 }
                 placeholder="Ej: Sudamérica"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
@@ -349,18 +349,18 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+              className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
             />
-            <label htmlFor="enabled" className="ml-2 text-sm text-slate-700">
+            <label htmlFor="enabled" className="ml-2 text-sm text-[var(--color-text-secondary)]">
               Zona activa
             </label>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
@@ -390,12 +390,12 @@ interface DeleteConfirmModalProps {
 function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, error }: DeleteConfirmModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-md w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -408,13 +408,13 @@ function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, err
             </div>
           )}
 
-          <p className="text-slate-600">{message}</p>
+          <p className="text-[var(--color-text-secondary)]">{message}</p>
 
           <div className="flex justify-end space-x-3 mt-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>

@@ -36,10 +36,10 @@ export default function CDRPage() {
       header: 'Fecha/Hora',
       render: (cdr: CDR) => (
         <div>
-          <div className="text-slate-900">
+          <div className="text-[var(--color-text-primary)]">
             {new Date(cdr.start_time).toLocaleDateString('es-PE')}
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-[var(--color-text-tertiary)]">
             {new Date(cdr.start_time).toLocaleTimeString('es-PE')}
           </div>
         </div>
@@ -49,7 +49,7 @@ export default function CDRPage() {
       key: 'caller',
       header: 'Origen',
       render: (cdr: CDR) => (
-        <span className="font-mono text-slate-900">{cdr.caller || cdr.caller_number || '-'}</span>
+        <span className="font-mono text-[var(--color-text-primary)]">{cdr.caller || cdr.caller_number || '-'}</span>
       ),
     },
     {
@@ -57,9 +57,9 @@ export default function CDRPage() {
       header: 'Destino',
       render: (cdr: CDR) => (
         <div>
-          <span className="font-mono text-slate-700">{cdr.callee || cdr.callee_number || '-'}</span>
+          <span className="font-mono text-[var(--color-text-secondary)]">{cdr.callee || cdr.callee_number || '-'}</span>
           {cdr.destination && (
-            <span className="text-xs text-slate-500 block">{cdr.destination}</span>
+            <span className="text-xs text-[var(--color-text-tertiary)] block">{cdr.destination}</span>
           )}
         </div>
       ),
@@ -103,7 +103,7 @@ export default function CDRPage() {
       render: (cdr: CDR) => {
         const cost = parseFloat(String(cdr.total_cost ?? cdr.cost ?? 0)) || 0
         return (
-          <span className="font-mono font-medium text-slate-900">
+          <span className="font-mono font-medium text-[var(--color-text-primary)]">
             S/{cost.toFixed(4)}
           </span>
         )
@@ -146,10 +146,10 @@ export default function CDRPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">
             Registros de Llamadas (CDR)
           </h1>
-          <p className="text-slate-500">
+          <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
             Historial detallado de todas las llamadas procesadas
           </p>
         </div>
@@ -159,7 +159,7 @@ export default function CDRPage() {
             className={`flex items-center px-4 py-2 rounded-lg border transition-colors ${
               showFilters || hasActiveFilters
                 ? 'bg-blue-50 border-blue-300 text-blue-700'
-                : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+                : 'border-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
             }`}
           >
             <Filter className="w-4 h-4 mr-2" />
@@ -182,9 +182,9 @@ export default function CDRPage() {
 
       {/* Filters Panel */}
       {showFilters && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-900">Filtros de Búsqueda</h3>
+            <h3 className="font-semibold text-[var(--color-text-primary)]">Filtros de Búsqueda</h3>
             {hasActiveFilters && (
               <button
                 onClick={clearFilters}
@@ -197,7 +197,7 @@ export default function CDRPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Fecha Inicio
               </label>
               <input
@@ -206,11 +206,11 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, start_date: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Fecha Fin
               </label>
               <input
@@ -219,15 +219,15 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, end_date: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Número Origen
               </label>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   value={filters.caller || ''}
@@ -235,16 +235,16 @@ export default function CDRPage() {
                     setFilters({ ...filters, caller: e.target.value })
                   }
                   placeholder="Ej: 1001"
-                  className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Número Destino
               </label>
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   value={filters.callee || ''}
@@ -252,12 +252,12 @@ export default function CDRPage() {
                     setFilters({ ...filters, callee: e.target.value })
                   }
                   placeholder="Ej: 51987654321"
-                  className="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Dirección
               </label>
               <select
@@ -265,7 +265,7 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, direction: e.target.value || undefined })
                 }
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Todas</option>
                 <option value="outbound">Saliente</option>
@@ -274,7 +274,7 @@ export default function CDRPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Costo Mínimo
               </label>
               <input
@@ -288,11 +288,11 @@ export default function CDRPage() {
                   })
                 }
                 placeholder="S/0.00"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Costo Máximo
               </label>
               <input
@@ -306,7 +306,7 @@ export default function CDRPage() {
                   })
                 }
                 placeholder="S/100.00"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
@@ -315,14 +315,14 @@ export default function CDRPage() {
 
       {/* Summary */}
       {data && (
-        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm border border-slate-200 p-4">
+        <div className="flex items-center justify-between bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)] p-4">
           <div className="flex items-center">
-            <FileText className="w-5 h-5 text-slate-400 mr-2" />
-            <span className="text-slate-600">
+            <FileText className="w-5 h-5 text-[var(--color-text-muted)] mr-2" />
+            <span className="text-[var(--color-text-secondary)]">
               Mostrando {(data.data ?? data.items ?? []).length} de {data.total} registros
             </span>
           </div>
-          <div className="text-sm text-slate-500">
+          <div className="text-sm text-[var(--color-text-tertiary)]">
             Total facturado: S/
             {(data.data ?? data.items ?? []).reduce((sum, cdr) => sum + (parseFloat(String(cdr.total_cost ?? cdr.cost ?? 0)) || 0), 0).toFixed(2)}
           </div>

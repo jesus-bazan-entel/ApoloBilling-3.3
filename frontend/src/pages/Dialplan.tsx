@@ -85,21 +85,21 @@ export default function DialplanPage() {
       key: 'priority',
       header: 'Prioridad',
       render: (route: DialplanRoute) => (
-        <span className="font-semibold text-slate-900">{route.priority}</span>
+        <span className="font-semibold text-[var(--color-text-primary)]">{route.priority}</span>
       ),
     },
     {
       key: 'name',
       header: 'Nombre',
       render: (route: DialplanRoute) => (
-        <span className="font-medium text-slate-900">{route.name}</span>
+        <span className="font-medium text-[var(--color-text-primary)]">{route.name}</span>
       ),
     },
     {
       key: 'prefix_pattern',
       header: 'Patrón',
       render: (route: DialplanRoute) => (
-        <span className="font-mono text-sm text-slate-600">{route.prefix_pattern}</span>
+        <span className="font-mono text-sm text-[var(--color-text-secondary)]">{route.prefix_pattern}</span>
       ),
     },
     {
@@ -107,7 +107,7 @@ export default function DialplanPage() {
       header: 'Destino (Bridge)',
       render: (route: DialplanRoute) => (
         <div className="space-y-0.5">
-          <span className="font-mono text-sm text-slate-800">
+          <span className="font-mono text-sm text-[var(--color-text-primary)]">
             {route.destination_ip}:{route.destination_port}
           </span>
           {route.failover_destinations?.length > 0 && (
@@ -170,10 +170,10 @@ export default function DialplanPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
             Configuración Dialplan FreeSWITCH
           </h1>
-          <p className="text-slate-500">
+          <p className="text-[var(--color-text-tertiary)]">
             Gestiona rutas de llamadas entrantes y salientes
           </p>
         </div>
@@ -195,15 +195,15 @@ export default function DialplanPage() {
       )}
 
       {/* Tabs */}
-      <div className="bg-white rounded-lg shadow-sm border border-slate-200">
-        <div className="border-b border-slate-200">
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)]">
+        <div className="border-b border-[var(--color-border-primary)]">
           <nav className="flex -mb-px">
             <button
               onClick={() => setActiveTab('from_pbx')}
               className={`px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'from_pbx'
                   ? 'border-b-2 border-blue-500 text-blue-600'
-                  : 'text-slate-500 hover:text-slate-700'
+                  : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
               }`}
             >
               Rutas Salientes (from-pbx)
@@ -213,7 +213,7 @@ export default function DialplanPage() {
               className={`px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'to_kamailio'
                   ? 'border-b-2 border-blue-500 text-blue-600'
-                  : 'text-slate-500 hover:text-slate-700'
+                  : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
               }`}
             >
               Rutas Entrantes (to-kamailio)
@@ -226,8 +226,8 @@ export default function DialplanPage() {
             <div className="flex items-center">
               <Network className="w-8 h-8 text-blue-500 mr-4" />
               <div>
-                <p className="text-sm text-slate-500">Total de Rutas</p>
-                <p className="text-3xl font-bold text-slate-900">{routes.length}</p>
+                <p className="text-sm text-[var(--color-text-tertiary)]">Total de Rutas</p>
+                <p className="text-3xl font-bold text-[var(--color-text-primary)]">{routes.length}</p>
               </div>
             </div>
             <button
@@ -356,12 +356,12 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -375,7 +375,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Nombre de Ruta *
             </label>
             <input
@@ -386,13 +386,13 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                 setFormData({ ...formData, name: e.target.value })
               }
               placeholder="Ej: Ruta Principal, Backup Carrier"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Prioridad *
               </label>
               <input
@@ -403,12 +403,12 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, priority: parseInt(e.target.value) || 100 })
                 }
                 placeholder="100"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Patrón de Destino *
               </label>
               <input
@@ -419,14 +419,14 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, prefix_pattern: e.target.value })
                 }
                 placeholder="^(.+)$"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 IP Destino *
               </label>
               <input
@@ -437,12 +437,12 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, destination_ip: e.target.value })
                 }
                 placeholder="192.168.1.100"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Puerto *
               </label>
               <input
@@ -453,7 +453,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, destination_port: parseInt(e.target.value) || 5060 })
                 }
                 placeholder="5060"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
@@ -461,7 +461,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
           {/* Failover Destinations */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-slate-700">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)]">
                 Destinos Failover (pipe)
               </label>
               <button
@@ -484,7 +484,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                       value={fo.ip}
                       onChange={(e) => updateFailover(idx, 'ip', e.target.value)}
                       placeholder="IP destino failover"
-                      className="flex-1 px-2 py-1.5 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                      className="flex-1 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
                     />
                     <input
                       type="number"
@@ -492,7 +492,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                       value={fo.port}
                       onChange={(e) => updateFailover(idx, 'port', parseInt(e.target.value) || 5060)}
                       placeholder="5060"
-                      className="w-24 px-2 py-1.5 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      className="w-24 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                     />
                     <button
                       type="button"
@@ -506,12 +506,12 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-slate-400 italic">Sin failover — solo destino principal</p>
+              <p className="text-xs text-[var(--color-text-muted)] italic">Sin failover — solo destino principal</p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Perfil SIP *
             </label>
             <select
@@ -519,7 +519,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
               onChange={(e) =>
                 setFormData({ ...formData, sip_profile: e.target.value })
               }
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="internal">internal</option>
               <option value="external">external</option>
@@ -535,9 +535,9 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, bypass_media: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
                 />
-                <span className="ml-2 text-sm text-slate-700">Bypass Media</span>
+                <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Bypass Media</span>
               </label>
 
               <label className="flex items-center">
@@ -547,9 +547,9 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, inherit_codec: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
                 />
-                <span className="ml-2 text-sm text-slate-700">Heredar Codec</span>
+                <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Heredar Codec</span>
               </label>
             </div>
 
@@ -561,9 +561,9 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, enable_100rel: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
                 />
-                <span className="ml-2 text-sm text-slate-700">100rel</span>
+                <span className="ml-2 text-sm text-[var(--color-text-secondary)]">100rel</span>
               </label>
 
               <label className="flex items-center">
@@ -573,16 +573,16 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, ignore_early_media: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
                 />
-                <span className="ml-2 text-sm text-slate-700">Ignorar Early Media</span>
+                <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Ignorar Early Media</span>
               </label>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                 Timeout (segundos)
               </label>
               <input
@@ -592,13 +592,13 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, call_timeout: e.target.value ? parseInt(e.target.value) : undefined })
                 }
                 placeholder="120"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
             {context === 'to_kamailio' && (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                   Filtro IP Origen
                 </label>
                 <input
@@ -608,7 +608,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                     setFormData({ ...formData, source_ip_filter: e.target.value })
                   }
                   placeholder="^10\.10\.22\.18$"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
                 />
               </div>
             )}
@@ -622,18 +622,18 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+              className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
             />
-            <label htmlFor="enabled" className="ml-2 text-sm text-slate-700">
+            <label htmlFor="enabled" className="ml-2 text-sm text-[var(--color-text-secondary)]">
               Ruta habilitada
             </label>
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+          <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
@@ -663,12 +663,12 @@ interface DeleteConfirmModalProps {
 function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, error }: DeleteConfirmModalProps) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-slate-200">
-          <h2 className="text-xl font-bold text-slate-900">{title}</h2>
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-md w-full mx-4">
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
           >
             <X className="w-6 h-6" />
           </button>
@@ -681,13 +681,13 @@ function DeleteConfirmModal({ title, message, onClose, onConfirm, isLoading, err
             </div>
           )}
 
-          <p className="text-slate-600">{message}</p>
+          <p className="text-[var(--color-text-secondary)]">{message}</p>
 
           <div className="flex justify-end space-x-3 mt-6">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50"
+              className="px-4 py-2 border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] rounded-lg hover:bg-[var(--color-bg-secondary)]"
             >
               Cancelar
             </button>
