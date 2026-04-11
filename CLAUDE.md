@@ -18,19 +18,27 @@ ApoloBilling is a real-time telecommunications billing platform for FreeSWITCH P
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Rust Backend (:8000)                        │
 │  - Auth (JWT + Argon2)        - CDRs (queries, export, stats)   │
-│  - Accounts CRUD + Topup      - Active Calls                    │
-│  - Rate Cards CRUD + LPM      - Reservations                    │
-│  - Zones/Prefixes/Tariffs     - Dashboard Stats                 │
-│  - Plans / Users / Audit      - Dialplan Management             │
+│  - Accounts CRUD + Topup      - Active Calls & Reservations     │
+│  - Rate Cards CRUD + LPM      - Dashboard Stats                 │
+│  - Zones/Prefixes/Tariffs     - Dialplan Management             │
+│  - Plans / Users / Audit      - Unified Routing (In/Outbound)   │
+│  - SIP Devices + Directory    - SIP OPTIONS Monitoring          │
+│  - Kamailio Integration       - Internal Routes                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────────┐     ┌─────────────────────────────┐
-│   Rust Billing Engine       │     │   PostgreSQL + Redis        │
-│        (:9000)              │     │                             │
-│   ESL, real-time billing    │     │                             │
-└─────────────────────────────┘     └─────────────────────────────┘
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌──────────────────┐  ┌──────────────┐  ┌──────────────────┐
+│ Billing Engine   │  │  PostgreSQL  │  │  MySQL/MariaDB   │
+│    (:9000)       │  │   (:5432)    │  │    (:3306)       │
+│ ESL, real-time   │  │ apolo_billing│  │   kamailio DB    │
+└──────────────────┘  └──────────────┘  └──────────────────┘
+                              │
+                              ▼
+                      ┌──────────────┐
+                      │    Redis     │
+                      │   (:6379)    │
+                      └──────────────┘
 ```
 
 **Three main components:**
@@ -85,13 +93,38 @@ rust-backend/
 ├── src/main.rs               # Server setup, all route configuration, middleware
 └── crates/
     ├── apolo-api/            # HTTP handlers and DTOs
-    │   ├── handlers/         # Endpoint handlers (auth, account, cdr, rate_card, dialplan, etc.)
-    │   └── dto/              # Request/response types
+    │   ├── handlers/
+    │   │   ├── auth.rs               # Login, logout, password change
+    │   │   ├── account.rs            # Account CRUD + topup
+    │   │   ├── cdr.rs                # CDR queries, export, stats
+    │   │   ├── rate_card.rs          # Rate cards + LPM search
+    │   │   ├── dialplan.rs           # FreeSWITCH dialplan
+    │   │   ├── unified_routing.rs    # Trunks, inbound/outbound routes
+    │   │   ├── sip_device.rs         # SIP devices CRUD
+    │   │   ├── freeswitch_directory.rs # mod_xml_curl endpoint
+    │   │   ├── kamailio_dialplan.rs  # Kamailio carriers/groups
+    │   │   ├── kamailio_endpoints.rs # PBX endpoints (type=9)
+    │   │   ├── internal_routes.rs    # FS ↔ Kamailio routes
+    │   │   └── ...
+    │   └── dto/
+    │       ├── routing.rs            # Trunk, route DTOs
+    │       ├── sip_device.rs         # SIP device DTOs
+    │       ├── internal_route.rs     # Internal route DTOs
+    │       └── ...
     ├── apolo-db/             # PostgreSQL repositories (SQLx 0.8)
+    │   └── repositories/
+    │       ├── sip_device_repo.rs    # SIP device queries
+    │       ├── internal_route_repo.rs # Internal route queries
+    │       └── ...
     ├── apolo-auth/           # JWT (HTTP-only cookies) + Argon2 authentication
     ├── apolo-cache/          # Redis caching layer
     ├── apolo-core/           # Shared models, traits, error handling, configuration
+    │   └── models/
+    │       ├── sip_device.rs         # SIP device model
+    │       ├── internal_route.rs     # Internal route model
+    │       └── ...
     ├── apolo-services/       # Business logic services
+    │   └── sip_device.rs             # SIP OPTIONS monitoring service
     └── apolo-esl/            # FreeSWITCH Event Socket Layer integration
 ```
 
@@ -113,8 +146,26 @@ rust-billing-engine/src/
 ### Frontend
 ```
 frontend/src/
-├── pages/                    # Route components (Dashboard, CDR, Accounts, Rates, Dialplan, etc.)
-├── components/               # Reusable UI (Layout, DataTable, StatCard)
+├── pages/
+│   ├── Dashboard.tsx         # Main dashboard with stats
+│   ├── Accounts.tsx          # Account management
+│   ├── CDR.tsx               # Call detail records
+│   ├── ActiveCalls.tsx       # Live calls
+│   ├── Balance.tsx           # Balance transactions
+│   ├── Rates.tsx             # Rate cards
+│   ├── Zones.tsx             # Rate zones
+│   ├── Plans.tsx             # Account plans
+│   ├── SipDevices.tsx        # SIP device management (NEW)
+│   ├── UnifiedRouting.tsx    # Inbound/outbound routes (NEW)
+│   ├── InternalRouting.tsx   # FS ↔ Kamailio routes (NEW)
+│   ├── KamailioDialplan.tsx  # Kamailio carriers/groups (NEW)
+│   ├── Dialplan.tsx          # FreeSWITCH dialplan
+│   ├── Users.tsx             # User management
+│   ├── AuditLogs.tsx         # Audit trail
+│   └── Login.tsx             # Authentication
+├── components/               # Reusable UI (Layout, DataTable, StatCard, Badge)
+├── contexts/
+│   └── ThemeContext.tsx      # Dark mode support
 ├── api/client.ts             # Axios client with all API endpoints
 ├── hooks/                    # Custom hooks (useWebSocket, etc.)
 └── types/index.ts            # TypeScript interfaces
@@ -127,9 +178,19 @@ frontend/src/
 - `frontend/src/api/client.ts` - All API client functions, WebSocket message types
 - `rust-billing-engine/src/main.rs` - Billing engine initialization (dual-mode ESL)
 
+### Key Handler Files
+
+- `unified_routing.rs` - All routing CRUD (trunks, groups, inbound/outbound routes, SIP status)
+- `sip_device.rs` - SIP device management
+- `freeswitch_directory.rs` - Dynamic authentication endpoint for mod_xml_curl
+- `kamailio_dialplan.rs` - Kamailio carrier and group management
+- `internal_routes.rs` - FreeSWITCH ↔ Kamailio interconnection
+
 ## Database Schema (PostgreSQL)
 
 Core tables in `apolo_billing` database:
+
+### Billing & Accounts
 - `accounts` - Customer accounts (prepaid/postpaid, balance, credit_limit, plan_id)
 - `plans` - Account creation templates (initial_balance, credit_limit, max_concurrent_calls)
 - `rate_cards` - Destination rates by prefix (LPM matching)
@@ -137,9 +198,34 @@ Core tables in `apolo_billing` database:
 - `balance_reservations` - Active call balance holds
 - `balance_transactions` - Recharges, consumptions, refunds
 - `active_calls` - Currently ongoing calls
+
+### Users & Audit
 - `usuarios` - System users with roles (superadmin, admin, operator)
-- `zonas`, `prefijos`, `tarifas` - Rate management hierarchy
 - `audit_logs` - System audit trail
+
+### Rate Management
+- `zonas` - Rate zones (e.g., "Argentina Mobile")
+- `prefijos` - Prefixes per zone (e.g., "5411")
+- `tarifas` - Rates per prefix
+
+### Unified Routing System
+- `routing_trunks` - SIP trunks (public=Kamailio, private=FreeSWITCH)
+- `routing_trunk_groups` - Trunk groups for failover
+- `routing_trunk_group_members` - Trunk to group mapping with priority/weight
+- `routing_outbound_routes` - Outbound routing rules (prefix → trunk group)
+- `routing_inbound_routes` - Inbound routing rules (DID pattern → destination)
+- `routing_sip_status_log` - SIP OPTIONS monitoring results
+
+### SIP Devices
+- `sip_devices` - SIP extensions/devices (username, password, codecs, account)
+- `freeswitch_allowed_ips` - IP whitelist for directory endpoint
+
+### Internal Routes
+- `system_endpoints` - FreeSWITCH/Kamailio connection points
+- `internal_routes` - Route definitions (fs_to_kamailio, kamailio_to_fs)
+
+### System Configuration
+- `system_settings` - Key-value system settings (sip_options_enabled, etc.)
 
 ## Billing Flow
 
@@ -170,6 +256,8 @@ max_duration = (total / rate_per_minute) × 60 seconds
 
 All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 
+### Core Endpoints
+
 | Endpoint | Method | Description | Access |
 |----------|--------|-------------|--------|
 | `/health` | GET | Health check | Public |
@@ -192,8 +280,52 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/reservations/*` | CRUD | Balance reservations | Authenticated |
 | `/stats` | GET | Dashboard statistics | Authenticated |
 | `/dialplan/*` | CRUD | FreeSWITCH dialplan | Superadmin |
-| `/rates/*` (zonas, prefijos, tarifas) | CRUD | Rate management hierarchy | Authenticated |
+| `/rates/*` | CRUD | Rate management (zonas, prefijos, tarifas) | Authenticated |
+| `/settings` | GET/PUT | System settings | Superadmin |
 | `/ws` | WebSocket | Real-time updates | Authenticated |
+
+### Unified Routing Endpoints
+
+| Endpoint | Method | Description | Access |
+|----------|--------|-------------|--------|
+| `/routing/trunks` | GET/POST | List/create trunks | Admin |
+| `/routing/trunks/{id}` | GET/PUT/DELETE | CRUD individual trunk | Admin |
+| `/routing/trunk-groups` | GET/POST | Trunk groups for failover | Admin |
+| `/routing/trunk-groups/{id}` | GET/PUT/DELETE | CRUD trunk group | Admin |
+| `/routing/trunk-groups/{id}/members` | GET/POST/DELETE | Group members | Admin |
+| `/routing/outbound-routes` | GET/POST | Outbound routing rules | Admin |
+| `/routing/outbound-routes/{id}` | GET/PUT/DELETE | CRUD outbound route | Admin |
+| `/routing/inbound-routes` | GET/POST | Inbound routing rules | Admin |
+| `/routing/inbound-routes/{id}` | GET/PUT/DELETE | CRUD inbound route | Admin |
+| `/routing/sip-status` | GET | SIP OPTIONS peer status | Admin |
+| `/routing/sync-kamailio` | POST | Sync trunks to Kamailio | Admin |
+
+### SIP Devices Endpoints
+
+| Endpoint | Method | Description | Access |
+|----------|--------|-------------|--------|
+| `/sip-devices` | GET/POST | List/create SIP devices | Admin |
+| `/sip-devices/{id}` | GET/PUT/DELETE | CRUD individual device | Admin |
+| `/sip-devices/{id}/status` | GET | Device registration status | Admin |
+| `/freeswitch/directory` | POST | Dynamic auth (mod_xml_curl) | IP Whitelist |
+| `/freeswitch/allowed-ips` | GET/POST | Manage IP whitelist | Superadmin |
+
+### Kamailio Integration Endpoints
+
+| Endpoint | Method | Description | Access |
+|----------|--------|-------------|--------|
+| `/kamailio-dialplan/groups` | GET/POST | Carrier groups (dr_gw_lists) | Superadmin |
+| `/kamailio-dialplan/carriers` | GET/POST | Carriers (dr_gateways type=8) | Superadmin |
+| `/kamailio-dialplan/routes` | GET/POST | Routing rules (dr_rules) | Superadmin |
+| `/kamailio-endpoints` | GET/POST | PBX endpoints (type=9) | Superadmin |
+
+### Internal Routes Endpoints
+
+| Endpoint | Method | Description | Access |
+|----------|--------|-------------|--------|
+| `/internal-routes` | GET/POST | FS ↔ Kamailio routes | Admin |
+| `/internal-routes/{id}` | GET/PUT/DELETE | CRUD internal route | Admin |
+| `/internal-routes/endpoints` | GET/POST | System endpoints | Admin |
 
 ## Billing Engine Modes
 
@@ -204,9 +336,14 @@ The billing engine operates in two modes based on `FREESWITCH_SERVERS` env var:
 ## Environment Variables
 
 ```bash
-# Database
+# Database (PostgreSQL - Main)
 DATABASE_URL=postgresql://apolo_user:PASSWORD@localhost:5432/apolo_billing
 DATABASE_MAX_CONNECTIONS=20
+
+# Database (MySQL - Kamailio, optional)
+KAMAILIO_DATABASE_URL=mysql://kamailio:PASSWORD@localhost:3306/kamailio
+
+# Redis
 REDIS_URL=redis://localhost:6379
 
 # Rust Backend
@@ -228,6 +365,16 @@ FREESWITCH_SERVERS=            # Empty = testing mode; "host:port:password" = pr
 # Logging
 RUST_LOG=apolo_billing=info,apolo_api=info,actix_web=info
 ```
+
+### System Settings (stored in database)
+
+These settings are stored in the `system_settings` table and can be modified via API:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `sip_options_enabled` | `false` | Enable SIP OPTIONS health monitoring |
+| `sip_options_interval` | `30` | Interval (seconds) between SIP OPTIONS checks |
+| `outbound_auth_enabled` | `true` | Enable outbound call authorization |
 
 ## Important Patterns
 
@@ -266,6 +413,29 @@ GitHub Actions workflows in `.github/workflows/`:
 - **deploy.yml** - On push to main: SSH deploy, builds all components, restarts systemd services, health check on `/api/v1/health`
 
 CI requires PostgreSQL 15 + Redis 7 services for Rust tests.
+
+## Database Migrations
+
+Migrations are located in `database/migrations/` and should be run in order:
+
+| Migration | Description |
+|-----------|-------------|
+| 002_add_plans_table.sql | Account plans table |
+| 003_add_sip_devices.sql | SIP devices and base tables |
+| 003_add_missing_tables.sql | Additional missing tables |
+| 004_unified_routing.sql | Unified routing system (trunks, groups, routes) |
+| 005_trunk_type_and_sip_status.sql | Trunk types (public/private) and SIP OPTIONS logging |
+| 006_internal_routes.sql | Internal routes and system endpoints |
+| 007_inbound_route_transformation.sql | destination_transform field |
+| 008_inbound_route_trunk_destination.sql | trunk_destination_id field |
+| 009_inbound_early_media.sql | early_media field for inbound routes |
+
+Run migrations:
+```bash
+for f in database/migrations/*.sql; do
+    psql -U apolo_user -d apolo_billing -f "$f"
+done
+```
 
 ## Additional Documentation
 
@@ -399,6 +569,154 @@ Tables for managing FreeSWITCH ↔ Kamailio interconnection:
 
 - **private** (trunk_type='private'): Internal FreeSWITCH trunks
 - **public** (trunk_type='public'): External carriers via Kamailio
+
+---
+
+## Unified Routing System
+
+The unified routing system provides centralized management for all inbound and outbound call routing.
+
+### Trunks
+
+Trunks represent SIP connections to carriers or internal systems:
+
+```rust
+// Trunk types
+enum TrunkType {
+    Public,   // External carrier via Kamailio (syncs to dr_gateways)
+    Private,  // Internal FreeSWITCH trunk
+}
+
+// Key fields
+struct Trunk {
+    name: String,
+    trunk_type: TrunkType,
+    host: String,
+    port: u16,
+    username: Option<String>,
+    password: Option<String>,
+    transport: String,  // udp, tcp, tls
+    codecs: String,
+    enabled: bool,
+}
+```
+
+### Trunk Groups
+
+Groups provide failover capability with priority and weight distribution:
+
+```sql
+-- Example: Create trunk group with 2 carriers
+INSERT INTO routing_trunk_groups (name, description) VALUES ('Primary Carriers', '...');
+INSERT INTO routing_trunk_group_members (trunk_group_id, trunk_id, priority, weight)
+VALUES (1, 1, 10, 100), (1, 2, 20, 100);  -- Trunk 1 has higher priority
+```
+
+### Outbound Routes
+
+Outbound routes match by prefix and route to trunk groups:
+
+```sql
+-- Example: Route Argentina mobile to primary carriers
+INSERT INTO routing_outbound_routes (name, prefix, trunk_group_id, priority, enabled)
+VALUES ('Argentina Mobile', '5411', 1, 10, true);
+```
+
+### Inbound Routes
+
+Inbound routes match by DID pattern and route to destinations:
+
+```sql
+-- Example: Route DID to extension with number transformation
+INSERT INTO routing_inbound_routes (
+    name, did_pattern, destination, destination_type,
+    destination_transform, early_media, enabled
+)
+VALUES (
+    'Main DID', '541155550XXX', '100', 'extension',
+    '', false, true
+);
+```
+
+**Pattern matching:**
+- `X` = any digit 0-9
+- `N` = any digit 2-9
+- `.` = any number of digits
+- `[abc]` = any of a, b, c
+
+### SIP OPTIONS Monitoring
+
+The system can monitor trunk health via SIP OPTIONS:
+
+```rust
+// Status values
+enum SipStatus {
+    Online,   // 200 OK received
+    Offline,  // No response or error
+    Unknown,  // Not yet checked
+}
+
+// Results stored in routing_sip_status_log
+struct SipStatusLog {
+    trunk_id: i32,
+    sip_status: SipStatus,
+    last_check: DateTime<Utc>,
+    response_time_ms: Option<i32>,
+    error_message: Option<String>,
+}
+```
+
+### Kamailio Synchronization
+
+Public trunks are automatically synchronized to Kamailio tables:
+
+1. `routing_trunks` → `dr_gateways` (type=8)
+2. `routing_trunk_groups` → `dr_gw_lists`
+3. `routing_outbound_routes` → `dr_rules`
+
+Use `POST /api/v1/routing/sync-kamailio` to trigger manual sync.
+
+---
+
+## SIP Devices
+
+SIP devices are managed in PostgreSQL and authenticated dynamically via mod_xml_curl.
+
+### Device Registration Flow
+
+1. Device sends REGISTER to FreeSWITCH (:5080)
+2. FreeSWITCH calls `POST /api/v1/freeswitch/directory`
+3. Backend validates IP whitelist
+4. Backend looks up device in `sip_devices` table
+5. Backend returns XML with A1 hash and configuration
+6. FreeSWITCH completes authentication
+
+### Device Model
+
+```rust
+struct SipDevice {
+    username: String,           // Extension number (e.g., "1001")
+    password: String,           // Stored as A1 hash (MD5)
+    domain: String,             // SIP domain
+    display_name: String,       // Caller ID name
+    account_id: Option<i32>,    // Linked billing account
+    enabled: bool,
+    codecs: String,             // "PCMA,PCMU,G729"
+    max_calls: i32,             // Max concurrent calls
+    nat_handling: bool,
+    record_calls: bool,
+}
+```
+
+### A1 Hash Calculation
+
+```rust
+// A1 hash for SIP digest authentication
+fn calculate_a1_hash(username: &str, realm: &str, password: &str) -> String {
+    let input = format!("{}:{}:{}", username, realm, password);
+    format!("{:x}", md5::compute(input))
+}
+```
 
 ---
 
