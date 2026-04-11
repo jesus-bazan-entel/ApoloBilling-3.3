@@ -19,7 +19,10 @@
 11. [Nginx](#11-nginx)
 12. [Servicios Systemd](#12-servicios-systemd)
 13. [Integración Final](#13-integración-final)
-14. [Verificación](#14-verificación)
+14. [Sistema de Routing Unificado](#14-sistema-de-routing-unificado)
+15. [Dispositivos SIP y Monitoreo](#15-dispositivos-sip-y-monitoreo)
+16. [Rutas Internas](#16-rutas-internas)
+17. [Verificación](#17-verificación)
 
 ---
 
@@ -478,11 +481,23 @@ cd /opt/ApoloBilling
 # Schema principal
 sudo -u postgres psql -d apolo_billing -f database/schema.sql
 
-# Migraciones
+# Migraciones (en orden)
+# 002 - Planes de cuenta
+# 003 - Dispositivos SIP y tablas adicionales
+# 004 - Sistema de routing unificado (trunks, inbound/outbound routes)
+# 005 - Tipos de trunk (public/private) y estado SIP OPTIONS
+# 006 - Rutas internas (FreeSWITCH ↔ Kamailio)
+# 007 - Transformación de números en rutas inbound
+# 008 - Destino de trunk en rutas inbound
+# 009 - Early media en rutas inbound
+
 for f in database/migrations/*.sql; do
     echo "Ejecutando: $f"
     sudo -u postgres psql -d apolo_billing -f "$f"
 done
+
+# Datos base (opcional - solo para instalación nueva)
+sudo -u postgres psql -d apolo_billing -f database/seeds/base_data.sql
 ```
 
 ### 8.5 Crear usuario administrador
@@ -809,9 +824,253 @@ fs_cli -x "sofia profile external rescan"
 
 ---
 
-## 14. Verificación
+## 14. Sistema de Routing Unificado
 
-### 14.1 Script de verificación completa
+El sistema de routing unificado permite gestionar rutas inbound y outbound desde una única interfaz, con soporte para múltiples trunks y failover automático.
+
+### 14.1 Conceptos Clave
+
+**Tipos de Trunk:**
+- **Public (Kamailio)**: Carriers externos gestionados via dr_gateways (type=8)
+- **Private (FreeSWITCH)**: Trunks internos configurados en FreeSWITCH
+
+**Grupos de Trunks:**
+- Permiten agrupar múltiples trunks para failover
+- Priorización configurable (menor número = mayor prioridad)
+- Peso para distribución de carga
+
+### 14.2 Configurar Rutas Outbound
+
+Las rutas outbound determinan cómo se enrutan las llamadas salientes basándose en prefijos.
+
+```bash
+# Acceder via API o desde el frontend en /routing/outbound
+
+# Ejemplo de ruta outbound via API:
+curl -X POST http://localhost:8000/api/v1/routing/outbound-routes \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=..." \
+  -d '{
+    "name": "Argentina Mobile",
+    "prefix": "5411",
+    "trunk_group_id": 1,
+    "priority": 10,
+    "strip_digits": 0,
+    "prepend_digits": "",
+    "enabled": true
+  }'
+```
+
+### 14.3 Configurar Rutas Inbound
+
+Las rutas inbound determinan cómo se procesan las llamadas entrantes según el DID.
+
+```bash
+# Características de rutas inbound:
+# - Pattern matching con wildcards (X = 0-9, N = 2-9, . = cualquier cantidad)
+# - Transformación de número (destination_transform)
+# - Destino a trunk específico o grupo
+# - Early media configurable
+
+# Ejemplo via API:
+curl -X POST http://localhost:8000/api/v1/routing/inbound-routes \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=..." \
+  -d '{
+    "name": "DID Principal",
+    "did_pattern": "5411XXXXXXXX",
+    "destination": "100",
+    "destination_type": "extension",
+    "destination_transform": "",
+    "early_media": false,
+    "enabled": true
+  }'
+```
+
+### 14.4 Sincronizar con Kamailio
+
+Los trunks públicos se sincronizan automáticamente con las tablas de Kamailio:
+
+```bash
+# Las tablas afectadas son:
+# - dr_gateways (gateways/carriers)
+# - dr_gw_lists (grupos de gateways)
+# - dr_rules (reglas de routing)
+# - address (ACL por IP)
+
+# Recargar Kamailio después de cambios manuales:
+kamcmd drouting.reload
+kamcmd permissions.addressReload
+kamcmd htable.reload gw2gwgroup
+```
+
+### 14.5 Endpoints API de Routing
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/routing/trunks` | GET/POST | Listar/crear trunks |
+| `/api/v1/routing/trunks/{id}` | GET/PUT/DELETE | CRUD trunk individual |
+| `/api/v1/routing/trunk-groups` | GET/POST | Grupos de trunks |
+| `/api/v1/routing/trunk-groups/{id}/members` | GET/POST | Miembros del grupo |
+| `/api/v1/routing/outbound-routes` | GET/POST | Rutas outbound |
+| `/api/v1/routing/inbound-routes` | GET/POST | Rutas inbound |
+| `/api/v1/routing/sip-status` | GET | Estado SIP de peers |
+| `/api/v1/routing/sync-kamailio` | POST | Sincronizar con Kamailio |
+
+---
+
+## 15. Dispositivos SIP y Monitoreo
+
+### 15.1 Gestión de Dispositivos SIP
+
+Los dispositivos SIP (extensiones, softphones, ATAs) se gestionan desde el frontend en `/sip-devices`.
+
+```bash
+# Crear dispositivo SIP via API:
+curl -X POST http://localhost:8000/api/v1/sip-devices \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth_token=..." \
+  -d '{
+    "username": "1001",
+    "password": "SecurePass123!",
+    "domain": "pbx.example.com",
+    "display_name": "Recepción",
+    "account_id": 1,
+    "enabled": true,
+    "codecs": "PCMA,PCMU,G729",
+    "max_calls": 2
+  }'
+```
+
+### 15.2 Autenticación Dinámica con mod_xml_curl
+
+FreeSWITCH consulta al backend para autenticar dispositivos:
+
+```bash
+# El endpoint /api/v1/freeswitch/directory responde con XML:
+# - Soporta REGISTER y INVITE
+# - Usa A1 hash (MD5) para autenticación
+# - Retorna configuración de codecs y caller ID
+
+# Verificar funcionamiento:
+curl -X POST http://localhost:8000/api/v1/freeswitch/directory \
+  -d "action=sip_auth&user=1001&domain=pbx.example.com&sip_auth_method=REGISTER"
+```
+
+### 15.3 Monitoreo SIP OPTIONS
+
+El sistema puede monitorear el estado de los peers SIP usando SIP OPTIONS:
+
+```bash
+# Configurar monitoreo en system_settings:
+sudo -u postgres psql -d apolo_billing << 'EOF'
+INSERT INTO system_settings (key, value, description)
+VALUES
+  ('sip_options_enabled', 'true', 'Habilitar monitoreo SIP OPTIONS'),
+  ('sip_options_interval', '30', 'Intervalo en segundos entre verificaciones')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+EOF
+```
+
+**Estados de SIP:**
+- `online`: Peer respondió OK (200)
+- `offline`: Sin respuesta o timeout
+- `unknown`: No verificado aún
+
+### 15.4 Verificar Estado de Peers
+
+```bash
+# Ver estado actual de todos los peers:
+curl -s http://localhost:8000/api/v1/routing/sip-status | jq
+
+# El estado se guarda en routing_sip_status_log con:
+# - trunk_id
+# - sip_status (online/offline/unknown)
+# - last_check
+# - response_time_ms
+# - error_message (si aplica)
+```
+
+### 15.5 Lista de IPs Permitidas para FreeSWITCH
+
+```bash
+# Agregar IP a la whitelist del endpoint directory:
+sudo -u postgres psql -d apolo_billing << 'EOF'
+INSERT INTO freeswitch_allowed_ips (ip_address, description, enabled)
+VALUES ('10.0.0.100', 'FreeSWITCH Primary', true);
+EOF
+```
+
+---
+
+## 16. Rutas Internas
+
+Las rutas internas definen la interconexión entre FreeSWITCH y Kamailio dentro del sistema.
+
+### 16.1 System Endpoints
+
+Los endpoints del sistema representan los puntos de conexión internos:
+
+```bash
+# Crear endpoint de sistema:
+sudo -u postgres psql -d apolo_billing << 'EOF'
+INSERT INTO system_endpoints (name, endpoint_type, host, port, transport, enabled, description)
+VALUES
+  ('FreeSWITCH Internal', 'freeswitch', '127.0.0.1', 5080, 'udp', true, 'FreeSWITCH internal profile'),
+  ('FreeSWITCH External', 'freeswitch', '127.0.0.1', 5062, 'udp', true, 'FreeSWITCH external profile'),
+  ('Kamailio SBC', 'kamailio', '127.0.0.1', 5060, 'udp', true, 'Kamailio SIP proxy');
+EOF
+```
+
+### 16.2 Rutas Internas
+
+```bash
+# Ejemplo de ruta: FreeSWITCH → Kamailio
+sudo -u postgres psql -d apolo_billing << 'EOF'
+INSERT INTO internal_routes (
+  name,
+  route_type,
+  source_endpoint_id,
+  destination_endpoint_id,
+  context,
+  match_pattern,
+  priority,
+  enabled
+)
+VALUES (
+  'Outbound to Kamailio',
+  'fs_to_kamailio',
+  1,  -- FreeSWITCH Internal
+  3,  -- Kamailio SBC
+  'from-pbx',
+  '^[0-9]+$',
+  10,
+  true
+);
+EOF
+```
+
+### 16.3 Tipos de Rutas
+
+| Tipo | Descripción |
+|------|-------------|
+| `fs_to_kamailio` | Llamadas de FreeSWITCH hacia carriers via Kamailio |
+| `kamailio_to_fs` | Llamadas entrantes de Kamailio hacia FreeSWITCH |
+| `fs_internal` | Llamadas internas dentro de FreeSWITCH |
+
+### 16.4 API de Rutas Internas
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/internal-routes` | GET/POST | Listar/crear rutas |
+| `/api/v1/internal-routes/{id}` | GET/PUT/DELETE | CRUD individual |
+| `/api/v1/internal-routes/endpoints` | GET/POST | Endpoints del sistema |
+
+---
+
+## 17. Verificación
+
+### 17.1 Script de verificación completa
 
 ```bash
 #!/bin/bash
@@ -846,13 +1105,27 @@ curl -s http://localhost:9000/api/v1/health | grep -q ok && echo "✓ Billing En
 echo -e "\n[9] Nginx..."
 curl -sI http://localhost | grep -q "200\|301\|302" && echo "✓ Nginx OK" || echo "✗ Nginx FAIL"
 
+echo -e "\n[10] Routing System..."
+curl -s http://localhost:8000/api/v1/routing/trunks -H "Cookie: auth_token=$TOKEN" | grep -q "data" && echo "✓ Routing OK" || echo "✗ Routing FAIL (need auth)"
+
+echo -e "\n[11] SIP Devices..."
+curl -s http://localhost:8000/api/v1/sip-devices -H "Cookie: auth_token=$TOKEN" | grep -q "data" && echo "✓ SIP Devices OK" || echo "✗ SIP Devices FAIL (need auth)"
+
+echo -e "\n[12] FreeSWITCH Directory Endpoint..."
+curl -s -X POST http://localhost:8000/api/v1/freeswitch/directory -d "action=sip_auth" | grep -q "xml" && echo "✓ FS Directory OK" || echo "✗ FS Directory FAIL"
+
 echo -e "\n=========================================="
 echo "  PUERTOS EN USO"
 echo "=========================================="
 ss -tlnp | grep -E '(5060|5080|5062|8000|9000|80|443|3306|5432|6379|8021)'
+
+echo -e "\n=========================================="
+echo "  TABLAS DE ROUTING"
+echo "=========================================="
+sudo -u postgres psql -d apolo_billing -c "SELECT 'routing_trunks' as tabla, count(*) FROM routing_trunks UNION ALL SELECT 'routing_inbound_routes', count(*) FROM routing_inbound_routes UNION ALL SELECT 'routing_outbound_routes', count(*) FROM routing_outbound_routes UNION ALL SELECT 'sip_devices', count(*) FROM sip_devices;"
 ```
 
-### 14.2 Logs útiles
+### 17.2 Logs útiles
 
 ```bash
 # Ver todos los logs en tiempo real
@@ -871,7 +1144,7 @@ tail -f /var/log/freeswitch/freeswitch.log
 tail -f /var/log/kamailio/kamailio.log
 ```
 
-### 14.3 Acceder al sistema
+### 17.3 Acceder al sistema
 
 1. Abrir navegador: `http://TU_IP_SERVIDOR`
 2. Login: `admin` / `admin123`
@@ -1015,6 +1288,145 @@ curl -X POST http://localhost:8000/api/v1/freeswitch/directory \
 tail -f /var/log/freeswitch/freeswitch.log | grep -i "auth\|register"
 ```
 
+### Rutas outbound no funcionan
+
+```bash
+# Verificar que existen rutas configuradas
+sudo -u postgres psql -d apolo_billing -c "SELECT name, prefix, enabled FROM routing_outbound_routes;"
+
+# Verificar grupos de trunk
+sudo -u postgres psql -d apolo_billing -c "SELECT tg.name, t.name as trunk, t.enabled FROM routing_trunk_groups tg JOIN routing_trunk_group_members m ON tg.id = m.trunk_group_id JOIN routing_trunks t ON m.trunk_id = t.id;"
+
+# Verificar sincronización con Kamailio
+kamcmd drouting.list
+
+# Forzar sincronización
+curl -X POST http://localhost:8000/api/v1/routing/sync-kamailio -H "Cookie: auth_token=..."
+```
+
+### SIP OPTIONS no funciona
+
+```bash
+# Verificar configuración
+sudo -u postgres psql -d apolo_billing -c "SELECT * FROM system_settings WHERE key LIKE 'sip_options%';"
+
+# Verificar estado de peers
+sudo -u postgres psql -d apolo_billing -c "SELECT t.name, s.sip_status, s.last_check FROM routing_trunks t LEFT JOIN routing_sip_status_log s ON t.id = s.trunk_id;"
+
+# Verificar logs del backend
+journalctl -u apolo-backend -f | grep -i "sip\|options"
+```
+
+### Dispositivos SIP no aparecen en FreeSWITCH
+
+```bash
+# Verificar que el dispositivo existe y está habilitado
+sudo -u postgres psql -d apolo_billing -c "SELECT username, domain, enabled FROM sip_devices;"
+
+# Verificar IP whitelist
+sudo -u postgres psql -d apolo_billing -c "SELECT * FROM freeswitch_allowed_ips WHERE enabled = true;"
+
+# Probar endpoint manualmente
+curl -X POST http://localhost:8000/api/v1/freeswitch/directory \
+    -d "action=sip_auth&user=1001&domain=pbx.example.com&sip_auth_method=REGISTER"
+
+# Verificar respuesta XML válida
+# Debe contener <document type="freeswitch/xml">
+```
+
+---
+
+---
+
+## Endpoints API Completos
+
+### Autenticación y Usuarios
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/auth/login` | POST | Login (retorna JWT en cookie) |
+| `/api/v1/auth/logout` | POST | Logout |
+| `/api/v1/auth/me` | GET | Usuario actual |
+| `/api/v1/auth/change-password` | POST | Cambiar password |
+| `/api/v1/users` | GET/POST | Listar/crear usuarios |
+
+### Cuentas y Billing
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/accounts` | GET/POST | Listar/crear cuentas |
+| `/api/v1/accounts/{id}` | GET/PUT | Ver/actualizar cuenta |
+| `/api/v1/accounts/{id}/topup` | POST | Recargar saldo |
+| `/api/v1/plans` | GET/POST | Planes de cuenta |
+| `/api/v1/reservations` | GET | Reservas activas |
+
+### CDRs y Llamadas
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/cdrs` | GET | Lista de CDRs (paginado) |
+| `/api/v1/cdrs/export` | GET | Exportar CSV/JSON |
+| `/api/v1/cdrs/stats` | GET | Estadísticas |
+| `/api/v1/active-calls` | GET | Llamadas en curso |
+
+### Tarifas
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/rate-cards` | GET/POST | Tarjetas de tarifa |
+| `/api/v1/rate-cards/search/{phone}` | GET | Búsqueda LPM |
+| `/api/v1/rates/zonas` | GET/POST | Zonas de tarifa |
+| `/api/v1/rates/prefijos` | GET/POST | Prefijos |
+| `/api/v1/rates/tarifas` | GET/POST | Tarifas |
+
+### Routing Unificado
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/routing/trunks` | GET/POST | Trunks (públicos/privados) |
+| `/api/v1/routing/trunks/{id}` | GET/PUT/DELETE | CRUD trunk |
+| `/api/v1/routing/trunk-groups` | GET/POST | Grupos de trunk |
+| `/api/v1/routing/trunk-groups/{id}` | GET/PUT/DELETE | CRUD grupo |
+| `/api/v1/routing/trunk-groups/{id}/members` | GET/POST/DELETE | Miembros |
+| `/api/v1/routing/outbound-routes` | GET/POST | Rutas outbound |
+| `/api/v1/routing/outbound-routes/{id}` | GET/PUT/DELETE | CRUD outbound |
+| `/api/v1/routing/inbound-routes` | GET/POST | Rutas inbound |
+| `/api/v1/routing/inbound-routes/{id}` | GET/PUT/DELETE | CRUD inbound |
+| `/api/v1/routing/sip-status` | GET | Estado SIP OPTIONS |
+| `/api/v1/routing/sync-kamailio` | POST | Sincronizar Kamailio |
+
+### Dispositivos SIP
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/sip-devices` | GET/POST | Listar/crear dispositivos |
+| `/api/v1/sip-devices/{id}` | GET/PUT/DELETE | CRUD dispositivo |
+| `/api/v1/sip-devices/{id}/status` | GET | Estado de registro |
+
+### FreeSWITCH
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/freeswitch/directory` | POST | Autenticación dinámica (mod_xml_curl) |
+| `/api/v1/freeswitch/allowed-ips` | GET/POST | IPs permitidas |
+
+### Rutas Internas
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/internal-routes` | GET/POST | Rutas internas |
+| `/api/v1/internal-routes/{id}` | GET/PUT/DELETE | CRUD ruta |
+| `/api/v1/internal-routes/endpoints` | GET/POST | Endpoints del sistema |
+
+### Kamailio Dialplan
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/kamailio-dialplan/groups` | GET/POST | Grupos de carrier |
+| `/api/v1/kamailio-dialplan/carriers` | GET/POST | Carriers (gateways) |
+| `/api/v1/kamailio-dialplan/routes` | GET/POST | Reglas de routing |
+| `/api/v1/kamailio-endpoints` | GET/POST | Endpoints PBX (type=9) |
+
+### Sistema
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/api/v1/health` | GET | Health check |
+| `/api/v1/stats` | GET | Dashboard stats |
+| `/api/v1/settings` | GET/PUT | Configuración sistema |
+| `/api/v1/audit-logs` | GET | Logs de auditoría |
+| `/ws` | WebSocket | Updates en tiempo real |
+
 ---
 
 ## Comandos Útiles
@@ -1037,4 +1449,63 @@ rtpengine-ctl list numsessions
 
 # Monitorear tráfico SIP
 ngrep -d any -W byline port 5060
+
+# Ver trunks configurados
+sudo -u postgres psql -d apolo_billing -c "SELECT name, trunk_type, host, port, enabled FROM routing_trunks;"
+
+# Ver rutas outbound
+sudo -u postgres psql -d apolo_billing -c "SELECT name, prefix, priority, enabled FROM routing_outbound_routes ORDER BY priority;"
+
+# Ver dispositivos SIP
+sudo -u postgres psql -d apolo_billing -c "SELECT username, domain, display_name, enabled FROM sip_devices;"
+
+# Ver estado SIP OPTIONS
+sudo -u postgres psql -d apolo_billing -c "SELECT t.name, s.sip_status, s.last_check, s.response_time_ms FROM routing_trunks t LEFT JOIN routing_sip_status_log s ON t.id = s.trunk_id ORDER BY s.last_check DESC;"
+
+# Forzar recarga de Kamailio
+kamcmd drouting.reload && kamcmd permissions.addressReload
+
+# Ver registros activos en FreeSWITCH
+fs_cli -x "sofia status profile internal reg"
+
+# Debug de autenticación FreeSWITCH
+fs_cli -x "sofia loglevel all 9"
+tail -f /var/log/freeswitch/freeswitch.log | grep -i auth
 ```
+
+---
+
+## Páginas del Frontend
+
+| Ruta | Descripción | Rol Mínimo |
+|------|-------------|------------|
+| `/` | Dashboard con estadísticas | operator |
+| `/accounts` | Gestión de cuentas/clientes | operator |
+| `/cdr` | Registros de llamadas (CDR) | operator |
+| `/active-calls` | Llamadas en curso | operator |
+| `/balance` | Movimientos de saldo | operator |
+| `/rates` | Gestión de tarifas | operator |
+| `/zones` | Zonas de tarificación | operator |
+| `/plans` | Planes de cuenta | admin |
+| `/sip-devices` | **Dispositivos SIP** | admin |
+| `/routing` | **Routing Unificado** (Inbound/Outbound) | admin |
+| `/internal-routing` | **Rutas Internas** | admin |
+| `/kamailio-dialplan` | **Dialplan Kamailio** | superadmin |
+| `/dialplan` | Dialplan FreeSWITCH | superadmin |
+| `/users` | Gestión de usuarios | superadmin |
+| `/audit-logs` | Logs de auditoría | superadmin |
+
+---
+
+## Changelog de Migraciones
+
+| Migración | Descripción |
+|-----------|-------------|
+| 002 | Tabla de planes de cuenta |
+| 003 | Dispositivos SIP y tablas base adicionales |
+| 004 | Sistema routing unificado (trunks, grupos, rutas inbound/outbound) |
+| 005 | Tipos de trunk (public/private) y log de SIP OPTIONS |
+| 006 | Rutas internas y endpoints del sistema |
+| 007 | Campo destination_transform en rutas inbound |
+| 008 | Campo trunk_destination_id en rutas inbound |
+| 009 | Campo early_media en rutas inbound |
