@@ -845,6 +845,7 @@ import type {
   RoutingSyncStatus,
   RoutingReloadResult,
   RoutingMigrationResult,
+  SyncToKamailioResult,
   CreateTrunkRequest,
   UpdateTrunkRequest,
   CreateTrunkGroupRequest,
@@ -971,6 +972,18 @@ export const reloadRouting = async (): Promise<RoutingReloadResult> => {
 
 export const migrateRouting = async (): Promise<RoutingMigrationResult> => {
   const { data } = await api.post('/routing/migrate')
+  return data.data || data
+}
+
+// Sync pending routes to Kamailio
+export const syncToKamailio = async (): Promise<SyncToKamailioResult> => {
+  const { data } = await api.post('/routing/sync-to-kamailio')
+  return data.data || data
+}
+
+// Force re-sync all routes to Kamailio
+export const forceSyncToKamailio = async (): Promise<SyncToKamailioResult> => {
+  const { data } = await api.post('/routing/force-sync-kamailio')
   return data.data || data
 }
 

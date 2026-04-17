@@ -17,8 +17,8 @@ import {
   createRoutingInboundRoute,
   updateRoutingInboundRoute,
   deleteRoutingInboundRoute,
-  reloadRouting,
   migrateRouting,
+  syncToKamailio,
   checkTrunkSipStatus,
   checkAllTrunksSipStatus,
 } from '../api/client'
@@ -114,13 +114,6 @@ export default function UnifiedRouting() {
   })
 
   // Mutations
-  const reloadMutation = useMutation({
-    mutationFn: reloadRouting,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['routing-sync-status'] })
-    },
-  })
-
   const migrateMutation = useMutation({
     mutationFn: migrateRouting,
     onSuccess: () => {
@@ -129,6 +122,16 @@ export default function UnifiedRouting() {
       queryClient.invalidateQueries({ queryKey: ['routing-outbound'] })
       queryClient.invalidateQueries({ queryKey: ['routing-inbound'] })
       setShowMigrateModal(false)
+    },
+  })
+
+  const syncMutation = useMutation({
+    mutationFn: syncToKamailio,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['routing-trunks'] })
+      queryClient.invalidateQueries({ queryKey: ['routing-trunk-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['routing-outbound'] })
+      queryClient.invalidateQueries({ queryKey: ['routing-sync-status'] })
     },
   })
 
@@ -289,14 +292,15 @@ export default function UnifiedRouting() {
             Migrar
           </button>
 
-          {/* Reload Button */}
+          {/* Sync to Kamailio Button */}
           <button
-            onClick={() => reloadMutation.mutate()}
-            disabled={reloadMutation.isPending}
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
             className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-hover)] text-white hover:shadow-lg hover:shadow-[var(--color-primary)]/30 transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer font-medium"
+            title="Sincronizar rutas a Kamailio y recargar"
           >
-            <RefreshCw className={`w-4 h-4 ${reloadMutation.isPending ? 'animate-spin' : ''}`} />
-            Recargar
+            <RefreshCw className={`w-4 h-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
+            Sincronizar
           </button>
         </div>
       </div>

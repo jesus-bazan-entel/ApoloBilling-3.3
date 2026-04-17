@@ -528,6 +528,19 @@ pub struct ReloadResult {
     pub freeswitch_message: Option<String>,
 }
 
+/// Sync to Kamailio result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncToKamailioResult {
+    pub trunks_synced: i64,
+    pub trunks_failed: i64,
+    pub trunk_groups_synced: i64,
+    pub trunk_groups_failed: i64,
+    pub outbound_routes_synced: i64,
+    pub outbound_routes_failed: i64,
+    pub kamailio_reloaded: bool,
+    pub errors: Vec<String>,
+}
+
 // ============================================================================
 // Default value functions
 // ============================================================================

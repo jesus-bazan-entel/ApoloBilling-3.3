@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="to-kamailio">
+    <extension name="test-ivr">
+      <condition field="destination_number" expression="^(672217402000)$">
+        <action application="log" data="INFO Inbound Test IVR: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="original_destination=${destination_number}"/>
+        <action application="set" data="transformed_number=17402001${destination_number:12}"/>
+        <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
+        <action application="set" data="call_timeout=120"/>
+        <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="ringback=${us-ring}"/>
+        <action application="set" data="instant_ringback=true"/>
+        <action application="pre_answer"/>
+        <action application="bridge" data="sofia/gateway/pbx-fibertel/${transformed_number}"/>
+      </condition>
+    </extension>
+    <extension name="to-pbx-fibertel">
+      <condition field="destination_number" expression="^(672217402001)$">
+        <action application="log" data="INFO Inbound To PBX Fibertel: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="original_destination=${destination_number}"/>
+        <action application="set" data="transformed_number=${destination_number:4}"/>
+        <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
+        <action application="set" data="call_timeout=120"/>
+        <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="ringback=${us-ring}"/>
+        <action application="set" data="instant_ringback=true"/>
+        <action application="pre_answer"/>
+        <action application="bridge" data="sofia/gateway/pbx-fibertel/${transformed_number}"/>
+      </condition>
+    </extension>
+    <extension name="from-integratel-rn-22">
+      <condition field="destination_number" expression="^(6722.+)$">
+        <action application="log" data="INFO Inbound From Integratel RN 22: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="original_destination=${destination_number}"/>
+        <action application="set" data="transformed_number=${destination_number:4}"/>
+        <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
+        <action application="set" data="call_timeout=120"/>
+        <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="ringback=${us-ring}"/>
+        <action application="set" data="instant_ringback=true"/>
+        <action application="pre_answer"/>
+        <action application="bridge" data="user/${transformed_number}@10.10.22.4"/>
+      </condition>
+    </extension>
+    <extension name="fallback-reject">
+      <condition field="destination_number" expression="^(.+)$">
+        <action application="log" data="WARNING Rejecting call from unknown source: ${network_addr}"/>
+        <action application="respond" data="403 Forbidden"/>
+      </condition>
+    </extension>
+  </context>
+</include>

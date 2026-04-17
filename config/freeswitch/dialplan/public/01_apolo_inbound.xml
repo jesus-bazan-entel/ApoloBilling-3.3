@@ -1,0 +1,22 @@
+<include>
+  <!-- Mapeo de DIDs entrantes de ApoloBilling -->
+  
+  <!-- DID 16440479 -> Extension interna -->
+  <extension name="did_16440479">
+    <condition field="destination_number" expression="^16440479$">
+      <action application="set" data="domain_name=$${domain}"/>
+      <action application="log" data="INFO Inbound call to DID 16440479"/>
+      <!-- Transferir al contexto default para buscar el usuario registrado -->
+      <action application="transfer" data="16440479 XML default"/>
+    </condition>
+  </extension>
+  
+  <!-- Catch-all: Cualquier otro DID -> transferir al default -->
+  <extension name="did_catchall">
+    <condition field="destination_number" expression="^(\d{8,15})$">
+      <action application="set" data="domain_name=$${domain}"/>
+      <action application="log" data="INFO Inbound call to DID $1"/>
+      <action application="transfer" data="$1 XML default"/>
+    </condition>
+  </extension>
+</include>

@@ -1,0 +1,25 @@
+<include>
+  <!-- Gateway: Kamailio Internal - Troncal interna FS <-> Kamailio -->
+  <gateway name="kamailio-internal">
+    <!-- Kamailio escucha en la IP interna puerto 5080 -->
+    <param name="realm" value="10.10.22.4"/>
+    <param name="proxy" value="10.10.22.4:5080"/>
+    <param name="register" value="false"/>
+
+    <!-- Sin autenticación para troncal interna -->
+    <param name="username" value="freeswitch"/>
+    <param name="password" value=""/>
+
+    <!-- Configuración de transporte -->
+    <param name="register-transport" value="udp"/>
+    <param name="caller-id-in-from" value="true"/>
+
+    <!-- Monitoreo de disponibilidad -->
+    <param name="ping" value="25"/>
+    <param name="ping-max" value="3"/>
+    <param name="ping-min" value="1"/>
+
+    <!-- Reintentos -->
+    <param name="retry-seconds" value="10"/>
+  </gateway>
+</include>

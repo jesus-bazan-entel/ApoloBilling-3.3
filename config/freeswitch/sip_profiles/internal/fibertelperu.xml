@@ -1,0 +1,12 @@
+<include>
+  <gateway name="fibertelperu">
+    <param name="username" value="demo_best"/>
+    <param name="password" value="YOUR_GATEWAY_PASSWORD"/>
+    <param name="realm" value="sip.fibertelperu.com"/>
+    <param name="proxy" value="sip.fibertelperu.com"/>
+    <param name="register" value="true"/>
+    <param name="expire-seconds" value="3600"/>
+    <param name="retry-seconds" value="30"/>
+    <param name="ping" value="25"/>
+  </gateway>
+</include>

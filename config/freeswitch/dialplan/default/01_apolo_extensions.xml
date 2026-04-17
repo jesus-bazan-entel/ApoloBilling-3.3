@@ -1,0 +1,16 @@
+<include>
+  <!-- ApoloBilling - Extensiones registradas dinámicamente -->
+  
+  <extension name="Apolo_Local_Extension">
+    <!-- Matchea números de 8+ dígitos que corresponden a usuarios registrados -->
+    <condition field="destination_number" expression="^(\d{8,15})$">
+      <action application="set" data="dialed_extension=$1"/>
+      <action application="export" data="dialed_extension=$1"/>
+      <action application="set" data="call_timeout=30"/>
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="set" data="continue_on_fail=true"/>
+      <action application="log" data="INFO Routing call to local extension $1"/>
+      <action application="bridge" data="user/${dialed_extension}@${domain_name}"/>
+    </condition>
+  </extension>
+</include>

@@ -1,0 +1,38 @@
+<include>
+  <profile name="internal">
+    <settings>
+      <param name="sip-ip" value="10.10.22.4"/>
+      <param name="sip-port" value="5080"/>
+      <param name="rtp-ip" value="10.10.22.4"/>
+
+      <param name="context" value="from-pbx"/>
+      <param name="dialplan" value="XML"/>
+
+      <!-- Habilitar registro para softphones -->
+      <param name="disable-register" value="false"/>
+      <param name="auth-calls" value="true"/>
+      <param name="auth-all-packets" value="false"/>
+      <!-- bypass-media deshabilitado: RTPEngine (via Kamailio) es el media relay autoritativo.
+           Con bypass-media=true, FS generaba re-INVITEs post-bridge que desincronizaban los
+           legs de RTPEngine causando one-way streams y entrecorte de llamadas. -->
+      <param name="inbound-bypass-media" value="false"/>
+      <param name="bypass-media-after-bridge" value="false"/>
+
+      <!-- 100rel/PRACK -->
+      <param name="enable-100rel" value="false"/>
+
+      <!-- Session Timers -->
+      <param name="enable-timer" value="true"/>
+      <param name="session-timeout" value="1800"/>
+      <param name="minimum-session-expires" value="120"/>
+
+      <!-- <param name="apply-inbound-acl" value="pbx-acl"/> -->
+
+      <param name="local-network-acl" value="localnet.auto"/>
+      <param name="manage-presence" value="false"/>
+
+      <param name="debug" value="0"/>
+      <param name="sip-trace" value="no"/>
+    </settings>
+  </profile>
+</include>

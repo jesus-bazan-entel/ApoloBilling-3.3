@@ -513,6 +513,18 @@ export interface RoutingMigrationResult {
   errors: string[]
 }
 
+// Sync to Kamailio result
+export interface SyncToKamailioResult {
+  trunks_synced: number
+  trunks_failed: number
+  trunk_groups_synced: number
+  trunk_groups_failed: number
+  outbound_routes_synced: number
+  outbound_routes_failed: number
+  kamailio_reloaded: boolean
+  errors: string[]
+}
+
 // Request types
 export interface CreateTrunkRequest {
   name: string

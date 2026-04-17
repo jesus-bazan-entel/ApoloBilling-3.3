@@ -1093,7 +1093,7 @@ pub async fn create_outbound_route(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    // Sync to Kamailio
+    // Sync to Kamailio immediately
     if let Some(mysql) = mysql_pool {
         match sync_outbound_route_to_kamailio(&pool, &mysql, &route).await {
             Ok(ruleid) => {
@@ -1104,6 +1104,11 @@ pub async fn create_outbound_route(
                 )
                 .execute(pool.get_ref())
                 .await;
+
+                // Reload Kamailio to apply changes
+                if let Err(e) = reload_kamailio().await {
+                    warn!("Failed to reload Kamailio after creating route: {}", e);
+                }
 
                 log_sync_operation(&pool, "create", "outbound_route", Some(route.id), "kamailio", "success", None).await;
             }
@@ -1195,9 +1200,10 @@ pub async fn update_outbound_route(
 
     let route = route.ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
 
-    // Sync to Kamailio
+    // Sync to Kamailio immediately
     if let Some(mysql) = mysql_pool {
         if let Some(ruleid) = route.kamailio_ruleid {
+            // Update existing rule in Kamailio
             match update_outbound_route_in_kamailio(&pool, &mysql, ruleid, &route).await {
                 Ok(_) => {
                     let _ = sqlx::query!(
@@ -1206,6 +1212,43 @@ pub async fn update_outbound_route(
                     )
                     .execute(pool.get_ref())
                     .await;
+
+                    // Reload Kamailio to apply changes
+                    if let Err(e) = reload_kamailio().await {
+                        warn!("Failed to reload Kamailio after updating route: {}", e);
+                    }
+
+                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "success", None).await;
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    let _ = sqlx::query!(
+                        "UPDATE routing_outbound_routes SET sync_status = 'error', sync_error = $1 WHERE id = $2",
+                        &error_msg,
+                        route.id
+                    )
+                    .execute(pool.get_ref())
+                    .await;
+
+                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "error", Some(&error_msg)).await;
+                }
+            }
+        } else {
+            // Route doesn't exist in Kamailio yet, create it
+            match sync_outbound_route_to_kamailio(&pool, &mysql, &route).await {
+                Ok(new_ruleid) => {
+                    let _ = sqlx::query!(
+                        "UPDATE routing_outbound_routes SET kamailio_ruleid = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+                        new_ruleid,
+                        route.id
+                    )
+                    .execute(pool.get_ref())
+                    .await;
+
+                    // Reload Kamailio to apply changes
+                    if let Err(e) = reload_kamailio().await {
+                        warn!("Failed to reload Kamailio after creating route: {}", e);
+                    }
 
                     log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "success", None).await;
                 }
@@ -1266,6 +1309,10 @@ pub async fn delete_outbound_route(
             if let Err(e) = delete_outbound_route_from_kamailio(&mysql, ruleid).await {
                 warn!(error = %e, "Failed to delete outbound route from Kamailio");
             } else {
+                // Reload Kamailio to apply changes
+                if let Err(e) = reload_kamailio().await {
+                    warn!("Failed to reload Kamailio after deleting route: {}", e);
+                }
                 log_sync_operation(&pool, "delete", "outbound_route", Some(route_id), "kamailio", "success", None).await;
             }
         }
@@ -1936,6 +1983,311 @@ pub async fn migrate_routes(
     Ok(HttpResponse::Ok().json(ApiResponse::success(result)))
 }
 
+/// Sync all pending/error routes from PostgreSQL to Kamailio
+///
+/// POST /api/v1/routing/sync-to-kamailio
+#[instrument(skip(pool, mysql_pool, admin))]
+pub async fn sync_to_kamailio(
+    pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
+    admin: SuperadminUser,
+) -> Result<HttpResponse, AppError> {
+    info!("Syncing routes to Kamailio");
+
+    let mysql = mysql_pool.ok_or_else(|| {
+        AppError::Internal("Kamailio MySQL not configured".to_string())
+    })?;
+
+    let mut result = SyncToKamailioResult {
+        trunks_synced: 0,
+        trunks_failed: 0,
+        trunk_groups_synced: 0,
+        trunk_groups_failed: 0,
+        outbound_routes_synced: 0,
+        outbound_routes_failed: 0,
+        kamailio_reloaded: false,
+        errors: Vec::new(),
+    };
+
+    // Step 1: Sync trunks that are pending, error, or not synced
+    let trunks = sqlx::query_as!(
+        Trunk,
+        r#"
+        SELECT id, name, description, host, port, transport,
+               auth_username, auth_password_encrypted, auth_password_nonce, strip_digits,
+               prefix_to_add, enabled, trunk_type, freeswitch_gateway_name,
+               kamailio_gwid, sync_status, sync_error,
+               sip_status, sip_status_message, last_options_check,
+               last_options_latency_ms, last_options_response_code,
+               created_at, updated_at
+        FROM routing_trunks
+        WHERE trunk_type = 'public' AND (sync_status != 'synced' OR kamailio_gwid IS NULL)
+        "#
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    for trunk in trunks {
+        match sync_trunk_to_kamailio(&pool, &mysql, &trunk).await {
+            Ok(gwid) => {
+                let _ = sqlx::query!(
+                    "UPDATE routing_trunks SET kamailio_gwid = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+                    gwid,
+                    trunk.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.trunks_synced += 1;
+            }
+            Err(e) => {
+                let error_msg = format!("Trunk {}: {}", trunk.name, e);
+                let _ = sqlx::query!(
+                    "UPDATE routing_trunks SET sync_status = 'error', sync_error = $1 WHERE id = $2",
+                    &error_msg,
+                    trunk.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.trunks_failed += 1;
+                result.errors.push(error_msg);
+            }
+        }
+    }
+
+    // Step 2: Sync trunk groups that are pending, error, or not synced
+    let groups = sqlx::query_as!(
+        TrunkGroup,
+        r#"
+        SELECT id, name, description, failover_strategy,
+               kamailio_group_id, sync_status, sync_error,
+               created_at, updated_at
+        FROM routing_trunk_groups
+        WHERE sync_status != 'synced' OR kamailio_group_id IS NULL
+        "#
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    for group in groups {
+        // Get trunk IDs for this group
+        let trunk_ids: Vec<Uuid> = sqlx::query_scalar!(
+            "SELECT trunk_id FROM routing_trunk_group_members WHERE group_id = $1 ORDER BY priority",
+            group.id
+        )
+        .fetch_all(pool.get_ref())
+        .await
+        .unwrap_or_default();
+
+        match sync_trunk_group_to_kamailio(&pool, &mysql, &group, &trunk_ids).await {
+            Ok(group_id) => {
+                let _ = sqlx::query!(
+                    "UPDATE routing_trunk_groups SET kamailio_group_id = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+                    group_id,
+                    group.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.trunk_groups_synced += 1;
+            }
+            Err(e) => {
+                let error_msg = format!("Trunk group {}: {}", group.name, e);
+                let _ = sqlx::query!(
+                    "UPDATE routing_trunk_groups SET sync_status = 'error', sync_error = $1 WHERE id = $2",
+                    &error_msg,
+                    group.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.trunk_groups_failed += 1;
+                result.errors.push(error_msg);
+            }
+        }
+    }
+
+    // Step 3: Sync outbound routes that are pending, error, or not synced
+    let routes = sqlx::query_as!(
+        OutboundRoute,
+        r#"
+        SELECT id, name, description, prefix_pattern, priority,
+               trunk_group_id, NULL as trunk_group_name,
+               trunk_id, NULL as trunk_name,
+               time_schedule, time_schedule_enabled, enabled,
+               kamailio_ruleid, sync_status, sync_error,
+               created_at, updated_at
+        FROM routing_outbound_routes
+        WHERE sync_status != 'synced' OR kamailio_ruleid IS NULL
+        "#
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    for route in routes {
+        match sync_outbound_route_to_kamailio(&pool, &mysql, &route).await {
+            Ok(ruleid) => {
+                let _ = sqlx::query!(
+                    "UPDATE routing_outbound_routes SET kamailio_ruleid = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+                    ruleid,
+                    route.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.outbound_routes_synced += 1;
+            }
+            Err(e) => {
+                let error_msg = format!("Route {}: {}", route.name, e);
+                let _ = sqlx::query!(
+                    "UPDATE routing_outbound_routes SET sync_status = 'error', sync_error = $1 WHERE id = $2",
+                    &error_msg,
+                    route.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.outbound_routes_failed += 1;
+                result.errors.push(error_msg);
+            }
+        }
+    }
+
+    // Step 4: Reload Kamailio drouting
+    match reload_kamailio().await {
+        Ok(_) => {
+            result.kamailio_reloaded = true;
+        }
+        Err(e) => {
+            result.errors.push(format!("Kamailio reload failed: {}", e));
+        }
+    }
+
+    log_sync_operation(&pool, "sync_to_kamailio", "system", None, "kamailio", "success", Some(&format!("{:?}", result))).await;
+
+    // Audit log
+    if let Ok(audit) = AuditLogBuilder::default()
+        .username(admin.username.clone())
+        .action("sync_to_kamailio")
+        .entity_type("routing")
+        .entity_id("sync".to_string())
+        .details(json!(result))
+        .build()
+    {
+        audit.insert(pool.get_ref()).await;
+    }
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(result)))
+}
+
+/// Force re-sync all routes to Kamailio (deletes and re-creates)
+///
+/// POST /api/v1/routing/force-sync-kamailio
+#[instrument(skip(pool, mysql_pool, admin))]
+pub async fn force_sync_to_kamailio(
+    pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
+    admin: SuperadminUser,
+) -> Result<HttpResponse, AppError> {
+    info!("Force syncing all routes to Kamailio");
+
+    let mysql = mysql_pool.ok_or_else(|| {
+        AppError::Internal("Kamailio MySQL not configured".to_string())
+    })?;
+
+    let mut result = SyncToKamailioResult {
+        trunks_synced: 0,
+        trunks_failed: 0,
+        trunk_groups_synced: 0,
+        trunk_groups_failed: 0,
+        outbound_routes_synced: 0,
+        outbound_routes_failed: 0,
+        kamailio_reloaded: false,
+        errors: Vec::new(),
+    };
+
+    // Delete all existing outbound routes from dr_rules with groupid 8000
+    let _ = sqlx::query("DELETE FROM dr_rules WHERE groupid = '8000'")
+        .execute(mysql.get_ref())
+        .await;
+
+    // Reset sync status for all outbound routes
+    let _ = sqlx::query!(
+        "UPDATE routing_outbound_routes SET kamailio_ruleid = NULL, sync_status = 'pending', sync_error = NULL"
+    )
+    .execute(pool.get_ref())
+    .await;
+
+    // Get all enabled outbound routes
+    let routes = sqlx::query_as!(
+        OutboundRoute,
+        r#"
+        SELECT id, name, description, prefix_pattern, priority,
+               trunk_group_id, NULL as trunk_group_name,
+               trunk_id, NULL as trunk_name,
+               time_schedule, time_schedule_enabled, enabled,
+               kamailio_ruleid, sync_status, sync_error,
+               created_at, updated_at
+        FROM routing_outbound_routes
+        WHERE enabled = true
+        "#
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    for route in routes {
+        match sync_outbound_route_to_kamailio(&pool, &mysql, &route).await {
+            Ok(ruleid) => {
+                let _ = sqlx::query!(
+                    "UPDATE routing_outbound_routes SET kamailio_ruleid = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+                    ruleid,
+                    route.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.outbound_routes_synced += 1;
+            }
+            Err(e) => {
+                let error_msg = format!("Route {}: {}", route.name, e);
+                let _ = sqlx::query!(
+                    "UPDATE routing_outbound_routes SET sync_status = 'error', sync_error = $1 WHERE id = $2",
+                    &error_msg,
+                    route.id
+                )
+                .execute(pool.get_ref())
+                .await;
+                result.outbound_routes_failed += 1;
+                result.errors.push(error_msg);
+            }
+        }
+    }
+
+    // Reload Kamailio drouting
+    match reload_kamailio().await {
+        Ok(_) => {
+            result.kamailio_reloaded = true;
+        }
+        Err(e) => {
+            result.errors.push(format!("Kamailio reload failed: {}", e));
+        }
+    }
+
+    log_sync_operation(&pool, "force_sync_to_kamailio", "system", None, "kamailio", "success", Some(&format!("{:?}", result))).await;
+
+    // Audit log
+    if let Ok(audit) = AuditLogBuilder::default()
+        .username(admin.username.clone())
+        .action("force_sync_to_kamailio")
+        .entity_type("routing")
+        .entity_id("force_sync".to_string())
+        .details(json!(result))
+        .build()
+    {
+        audit.insert(pool.get_ref()).await;
+    }
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(result)))
+}
+
 // ============================================================================
 // Route Configuration
 // ============================================================================
@@ -1972,6 +2324,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/reload", web::post().to(reload_routing))
             .route("/sync-status", web::get().to(get_sync_status))
             .route("/migrate", web::post().to(migrate_routes))
+            .route("/sync-to-kamailio", web::post().to(sync_to_kamailio))
+            .route("/force-sync-kamailio", web::post().to(force_sync_to_kamailio))
             // SIP Status
             .route("/sip-status", web::get().to(check_all_trunks_sip_status))
             .route("/sip-status/{id}", web::get().to(check_trunk_sip_status))
@@ -3383,19 +3737,24 @@ fn escape_xml(s: &str) -> String {
 async fn reload_kamailio() -> Result<String, AppError> {
     use tokio::process::Command;
 
-    let output = Command::new("kamcmd")
+    info!("Executing kamcmd drouting.reload");
+
+    let output = Command::new("/usr/sbin/kamcmd")
         .args(["drouting.reload"])
         .output()
         .await
-        .map_err(|e| AppError::Internal(format!("Failed to execute kamcmd: {}", e)))?;
+        .map_err(|e| {
+            error!("Failed to execute kamcmd: {}", e);
+            AppError::Internal(format!("Failed to execute kamcmd: {}", e))
+        })?;
 
     if output.status.success() {
+        info!("Kamailio drouting reloaded successfully");
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
-        Err(AppError::Internal(format!(
-            "kamcmd failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        )))
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!("kamcmd failed: {}", stderr);
+        Err(AppError::Internal(format!("kamcmd failed: {}", stderr)))
     }
 }
 

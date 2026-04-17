@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="from-pbx">
+
+    <!-- Llamadas entrantes desde fibertelperu hacia Kamailio -->
+    <extension name="inbound-fibertelperu">
+      <condition field="${sip_gateway_name}" expression="^fibertelperu$">
+        <action application="log" data="INFO FS: Llamada ENTRANTE fibertelperu ${caller_id_number} -> ${destination_number}"/>
+
+        <!-- Bypass media para mejor rendimiento -->
+        <action application="set" data="bypass_media=true"/>
+        <action application="set" data="inherit_codec=true"/>
+
+        <!-- Habilitar 100rel -->
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+
+        <!-- Preservar caller ID original -->
+        <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
+        <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
+
+        <action application="log" data="INFO FS: Bridge a Kamailio ${destination_number}@10.10.22.4:5060"/>
+
+        <!-- Enviar a Kamailio -->
+        <action application="bridge" data="{bypass_media=true}sofia/external/${destination_number}@10.10.22.4:5060"/>
+      </condition>
+    </extension>
+
+    <!-- Llamadas a extensiones locales (softphones registrados) -->
+    <!-- Solo hace match si el usuario está activamente registrado en FreeSWITCH -->
+    <extension name="local-extensions">
+      <!-- Condición 1: El destino debe ser numérico -->
+      <condition field="destination_number" expression="^(\d+)$" break="never">
+        <action application="set" data="dialed_extension=$1"/>
+      </condition>
+      <!-- Condición 2: El usuario debe estar registrado (sofia_contact devuelve algo que empieza con sofia/) -->
+      <condition field="${sofia_contact(user/${dialed_extension}@10.10.22.4)}" expression="^sofia/">
+        <action application="log" data="INFO FS: Usuario local ${dialed_extension} REGISTRADO - conectando"/>
+
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+
+        <!-- Preservar caller ID -->
+        <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
+        <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
+
+        <!-- Conectar con el usuario registrado -->
+        <action application="bridge" data="user/${dialed_extension}@10.10.22.4"/>
+      </condition>
+    </extension>
+
+    <extension name="outbound-to-kamailio">
+      <condition field="destination_number" expression="^(.+)$">
+
+        <action application="log" data="INFO FS: Llamada desde ${network_ip} → $1"/>
+
+        <!-- IMPORTANTE: Configurar bypass ANTES de bridge -->
+        <action application="set" data="bypass_media=true"/>
+        <action application="set" data="inherit_codec=true"/>
+
+        <!-- Habilitar 100rel -->
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+
+        <!-- Headers -->
+        <action application="export" data="sip_h_P-Asserted-Identity=${sip_h_P-Asserted-Identity}"/>
+
+        <action application="log" data="INFO FS: Bridge a Kamailio $1@10.10.22.4:5060"/>
+
+        <!-- Bridge -->
+        <action application="bridge" data="{bypass_media=true}sofia/external/$1@10.10.22.4:5060"/>
+
+      </condition>
+    </extension>
+
+  </context>
+</include>
+

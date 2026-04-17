@@ -443,6 +443,7 @@ done
 - `README_DEPLOYMENT.md` - Production deployment guide
 - `rust-billing-engine/docs/CALL_SIMULATOR.md` - Testing with call simulator
 - `INSTALL.md` - Complete installation guide for Debian 12 (PostgreSQL, MySQL, Kamailio, FreeSWITCH, RTPEngine, Nginx)
+- `docs/RTP_FLOW_ARCHITECTURE.md` - **RTP flow architecture, bypass analysis, MOH/DTMF/early media configurations**
 
 ---
 
