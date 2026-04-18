@@ -3,25 +3,9 @@
 
 ● Resumen final — arquitectura nueva activa y persistida en el repo
 
-  Puertos/IPs en producción
+<img width="1355" height="357" alt="image" src="https://github.com/user-attachments/assets/b359f498-b281-439b-8dd1-2c39a92dc6dd" />
 
-  ┌─────────────────────┬───────────────────────────────────────────────┬───────────────────────────────────────────────────────────┐
-  │      Servicio       │                   IP:Puerto                   │                            Rol                            │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ FreeSWITCH internal │ 10.118.0.6:5060                               │ Clientes SIP registran aquí (context from-pbx)            │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ FreeSWITCH external │ 10.118.0.6:5062                               │ Bus FS↔Kamailio (context from-kamailio, ACL kamailio-acl) │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ Kamailio FS-face    │ 10.118.0.6:5080                               │ Recibe outbound de FS, gateway de FS apunta aquí          │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ Kamailio carrier    │ 10.124.193.41:5060                            │ Cara a Integratel                                         │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ RTPEngine           │ internal=10.118.0.6 ; external=10.124.193.169 │ Relay con media pública independiente                     │
-  ├─────────────────────┼───────────────────────────────────────────────┼───────────────────────────────────────────────────────────┤
-  │ dSIPRouter          │ masked                                        │ No puede modificar kamailio.cfg/rtpengine.conf            │
-  └─────────────────────┴───────────────────────────────────────────────┴───────────────────────────────────────────────────────────┘
-
-  Servicios — todos active
+    Servicios — todos active
 
   apolo-backend / apolo-billing-engine / apolo-frontend   active
   kamailio / freeswitch / rtpengine                       active
