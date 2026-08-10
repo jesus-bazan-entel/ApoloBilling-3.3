@@ -88,10 +88,58 @@ impl ReservationManager {
             base_amount, buffer, RESERVATION_BUFFER_PERCENT, total_reservation
         );
 
-        // Check available balance
-        let available_balance = self.get_available_balance(account_id).await?;
+        let account_id_i32 = account_id as i32;
+        let dest_prefix = &destination[..std::cmp::min(10, destination.len())];
+
+        // Race condition fix (2026-08-09): the balance check and the reservation
+        // insert must be atomic, otherwise two concurrent calls on the same
+        // account (accounts.max_concurrent_calls allows several) can both read
+        // the same "available balance" and both get authorized, over-reserving
+        // past the real balance. We now lock the account row with FOR UPDATE for
+        // the whole check-then-reserve sequence, inside one transaction - mirrors
+        // the pattern already used in consume_reservation()/consume_normal_tx().
+        let mut client = self.db_pool.get().await
+            .map_err(|e| BillingError::Internal(e.to_string()))?;
+
+        let transaction = client.transaction().await
+            .map_err(|e| BillingError::Database(e))?;
+
+        let account_row = transaction
+            .query_one(
+                "SELECT balance, COALESCE(credit_limit, 0), account_type
+                 FROM accounts WHERE id = $1 FOR UPDATE",
+                &[&account_id_i32],
+            )
+            .await
+            .map_err(|e| BillingError::Database(e))?;
+        let balance: Decimal = account_row.get(0);
+        let credit_limit: Decimal = account_row.get(1);
+        let account_type: String = account_row.get(2);
+
+        let reserved_row = transaction
+            .query_one(
+                "SELECT COALESCE(SUM(reserved_amount - consumed_amount), 0)
+                 FROM balance_reservations
+                 WHERE account_id = $1 AND status = 'active'",
+                &[&account_id_i32],
+            )
+            .await
+            .map_err(|e| BillingError::Database(e))?;
+        let total_reserved: Decimal = reserved_row.get(0);
+
+        let available_balance = if account_type.to_lowercase() == "postpaid" {
+            balance + credit_limit - total_reserved
+        } else {
+            balance - total_reserved
+        };
+
+        info!(
+            "Available balance for account {} (locked): balance=${}, credit_limit=${}, reserved=${}, available=${} (type={})",
+            account_id, balance, credit_limit, total_reserved, available_balance, account_type
+        );
 
         if available_balance < total_reservation {
+            transaction.rollback().await.ok();
             warn!(
                 "Insufficient balance: required ${}, available ${}",
                 total_reservation, available_balance
@@ -108,6 +156,7 @@ impl ReservationManager {
         // Check concurrent limits using account-specific limit
         let limit = max_concurrent_calls.unwrap_or(DEFAULT_MAX_CONCURRENT_CALLS);
         if !self.check_concurrent_limits(account_id, limit).await? {
+            transaction.rollback().await.ok();
             return Ok(ReservationResult {
                 success: false,
                 reason: "concurrent_limit_exceeded".to_string(),
@@ -120,15 +169,9 @@ impl ReservationManager {
         let reservation_id = Uuid::new_v4();
         let expires_at = Utc::now() + Duration::seconds(RESERVATION_TTL);
 
-        let account_id_i32 = account_id as i32;
-        let dest_prefix = &destination[..std::cmp::min(10, destination.len())];
-
-        let client = self.db_pool.get().await
-            .map_err(|e| BillingError::Internal(e.to_string()))?;
-
         // Use parameterized query to prevent SQL injection
         // expires_at is TIMESTAMP WITH TIME ZONE, use DateTime<Utc> directly
-        client
+        transaction
             .execute(
                 "INSERT INTO balance_reservations
                 (id, account_id, call_uuid, reserved_amount, consumed_amount, released_amount,
@@ -154,6 +197,9 @@ impl ReservationManager {
                 error!("Failed to insert reservation: {}", e);
                 BillingError::Database(e)
             })?;
+
+        transaction.commit().await
+            .map_err(|e| BillingError::Database(e))?;
 
         info!("Reservation inserted successfully: {}", reservation_id);
 
@@ -290,47 +336,11 @@ impl ReservationManager {
         })
     }
 
-    async fn get_available_balance(&self, account_id: i64) -> Result<Decimal, BillingError> {
-        let account_id_i32 = account_id as i32;
-
-        let client = self.db_pool.get().await
-            .map_err(|e| BillingError::Internal(e.to_string()))?;
-
-        // Get balance, credit_limit, and account_type
-        let account_row = client
-            .query_one(
-                "SELECT balance, COALESCE(credit_limit, 0), account_type FROM accounts WHERE id = $1",
-                &[&account_id_i32],
-            )
-            .await?;
-        let balance: Decimal = account_row.get(0);
-        let credit_limit: Decimal = account_row.get(1);
-        let account_type: String = account_row.get(2);
-
-        let reserved_row = client
-            .query_one(
-                "SELECT COALESCE(SUM(reserved_amount - consumed_amount), 0)
-                 FROM balance_reservations
-                 WHERE account_id = $1 AND status = 'active'",
-                &[&account_id_i32],
-            )
-            .await?;
-        let total_reserved: Decimal = reserved_row.get(0);
-
-        // For postpaid accounts, add credit_limit to available balance
-        let available = if account_type.to_lowercase() == "postpaid" {
-            balance + credit_limit - total_reserved
-        } else {
-            balance - total_reserved
-        };
-
-        info!(
-            "Available balance for account {}: balance=${}, credit_limit=${}, reserved=${}, available=${} (type={})",
-            account_id, balance, credit_limit, total_reserved, available, account_type
-        );
-
-        Ok(available)
-    }
+    // NOTE: the old get_available_balance() (unlocked SELECT) was removed
+    // 2026-08-09 — it was the source of the create/extend reservation race
+    // condition. Balance reads that gate a reservation write must happen
+    // inside the same locked transaction as the write; see create_reservation()
+    // and extend_reservation() above.
 
     async fn check_concurrent_limits(
         &self,
@@ -639,7 +649,7 @@ impl ReservationManager {
     ) -> Result<ExtensionResult, BillingError> {
         info!("Attempting to extend reservation for call: {}", call_uuid);
 
-        let client = self.db_pool.get().await
+        let mut client = self.db_pool.get().await
             .map_err(|e| BillingError::Internal(e.to_string()))?;
 
         let rows = client
@@ -683,9 +693,45 @@ impl ReservationManager {
             base_amount, buffer, RESERVATION_BUFFER_PERCENT, extension_amount
         );
 
-        let available_balance = self.get_available_balance(account_id).await?;
+        let account_id_i32 = account_id as i32;
+
+        // Race condition fix (2026-08-09): same fix as create_reservation() -
+        // lock the account row for the whole check-then-reserve sequence so a
+        // concurrent create/extend on the same account can't over-reserve.
+        let transaction = client.transaction().await
+            .map_err(|e| BillingError::Database(e))?;
+
+        let account_row = transaction
+            .query_one(
+                "SELECT balance, COALESCE(credit_limit, 0), account_type
+                 FROM accounts WHERE id = $1 FOR UPDATE",
+                &[&account_id_i32],
+            )
+            .await
+            .map_err(|e| BillingError::Database(e))?;
+        let acct_balance: Decimal = account_row.get(0);
+        let credit_limit: Decimal = account_row.get(1);
+        let account_type: String = account_row.get(2);
+
+        let reserved_row = transaction
+            .query_one(
+                "SELECT COALESCE(SUM(reserved_amount - consumed_amount), 0)
+                 FROM balance_reservations
+                 WHERE account_id = $1 AND status = 'active'",
+                &[&account_id_i32],
+            )
+            .await
+            .map_err(|e| BillingError::Database(e))?;
+        let total_reserved: Decimal = reserved_row.get(0);
+
+        let available_balance = if account_type.to_lowercase() == "postpaid" {
+            acct_balance + credit_limit - total_reserved
+        } else {
+            acct_balance - total_reserved
+        };
 
         if available_balance < extension_amount {
+            transaction.rollback().await.ok();
             warn!(
                 "Insufficient balance for extension: required ${}, available ${}",
                 extension_amount, available_balance
@@ -701,7 +747,7 @@ impl ReservationManager {
         let extension_id = Uuid::new_v4();
         let expires_at = Utc::now() + Duration::seconds(RESERVATION_TTL);
 
-        let dest_row = client
+        let dest_row = transaction
             .query_one(
                 "SELECT destination_prefix FROM balance_reservations WHERE id = $1",
                 &[&reservation_id],
@@ -709,12 +755,11 @@ impl ReservationManager {
             .await?;
         let destination_prefix: String = dest_row.get(0);
 
-        let account_id_i32 = account_id as i32;
         let call_uuid_str = call_uuid.to_string();
 
         // Use parameterized query
         // expires_at is TIMESTAMP WITH TIME ZONE, use DateTime<Utc> directly
-        client
+        transaction
             .execute(
                 "INSERT INTO balance_reservations
                 (id, account_id, call_uuid, reserved_amount, consumed_amount, released_amount,
@@ -740,6 +785,9 @@ impl ReservationManager {
                 error!("Failed to insert extension reservation: {}", e);
                 BillingError::Database(e)
             })?;
+
+        transaction.commit().await
+            .map_err(|e| BillingError::Database(e))?;
 
         let cache_data = serde_json::json!({
             "account_id": account_id,
