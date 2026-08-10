@@ -91,21 +91,41 @@ impl EventHandler {
         let callee = event.callee().cloned().unwrap_or_default();
 
         // 🔍 Detectar dirección de la llamada (inbound/outbound)
-        // Si el contexto es from-pbx, la llamada es OUTBOUND (usuario de PBX llamando hacia afuera)
+        //
+        // Fix 2026-08-09 (soporte, revisión completa): "context" (from-pbx/
+        // from-kamailio) NO es confiable - describe qué perfil de FreeSWITCH
+        // está *entregando* la llamada en este momento, no quién la originó
+        // (confirmado con volcado de headers en vivo: llamadas de un móvil
+        // externo hacia una extensión no registrada reportan
+        // Caller-Context=from-pbx igual que un usuario interno saliendo).
+        //
+        // FreeSWITCH SÍ trae la dirección real y confiable en headers nativos
+        // (Call-Direction / Caller-Direction / Caller-Logical-Direction /
+        // variable_direction), presentes en prácticamente todas las llamadas
+        // - solo que el código nunca los miraba primero. Se usan como señal
+        // principal; "context" queda solo de último recurso si ninguno viene.
         let context = event.get_header("Caller-Context")
             .or_else(|| event.get_header("variable_context"))
             .map(|s| s.as_str())
             .unwrap_or("unknown");
 
-        let direction = if context == "from-pbx" || context.starts_with("from-pbx") {
-            // Llamadas desde PBX siempre son salientes
-            "outbound".to_string()
-        } else {
-            event.get_header("Call-Direction")
-                .or_else(|| event.get_header("Caller-Direction"))
-                .map(|s| s.to_lowercase())
-                .unwrap_or_else(|| "outbound".to_string())
-        };
+        let native_direction = event.get_header("Call-Direction")
+            .or_else(|| event.get_header("Caller-Direction"))
+            .or_else(|| event.get_header("Caller-Logical-Direction"))
+            .or_else(|| event.get_header("variable_direction"))
+            .map(|s| s.to_lowercase())
+            .filter(|d| d == "inbound" || d == "outbound"); // descarta "leg_b" u otros valores no-direccionales
+
+        let direction = native_direction.unwrap_or_else(|| {
+            if context == "from-pbx" || context.starts_with("from-pbx") {
+                "outbound".to_string()
+            } else if context == "from-kamailio" || context.starts_with("from-kamailio") {
+                "inbound".to_string()
+            } else {
+                // Tráfico predominante de esta plataforma es entrante (carrier -> extensión)
+                "inbound".to_string()
+            }
+        });
 
         info!("📞 Context: {} → Direction: {}", context, direction);
 
@@ -293,19 +313,39 @@ impl EventHandler {
         let hangup_cause = event.hangup_cause().cloned().unwrap_or_else(|| "UNKNOWN".to_string());
 
         // 🔍 Detectar dirección real
-        // Si el contexto es from-pbx, la llamada es OUTBOUND
+        //
+        // Fix 2026-08-09 (soporte, revisión completa): mismo criterio que
+        // CHANNEL_CREATE - los headers nativos de FreeSWITCH (Call-Direction /
+        // Caller-Direction / Caller-Logical-Direction / variable_direction) son
+        // la señal confiable, "context" solo describe qué perfil está
+        // *entregando* la llamada, no quién la originó. hangup_cause=
+        // USER_NOT_REGISTERED se mantiene como red de seguridad adicional
+        // (solo le puede pasar al destino, nunca a quien origina), por si
+        // algún evento raro llegara sin ninguno de los headers nativos.
         let context = event.get_header("Caller-Context")
             .or_else(|| event.get_header("variable_context"))
             .map(|s| s.as_str())
             .unwrap_or("unknown");
 
-        let direction = if context == "from-pbx" || context.starts_with("from-pbx") {
-            "outbound".to_string()
+        let native_direction = event.get_header("Call-Direction")
+            .or_else(|| event.get_header("Caller-Direction"))
+            .or_else(|| event.get_header("Caller-Logical-Direction"))
+            .or_else(|| event.get_header("variable_direction"))
+            .map(|s| s.to_lowercase())
+            .filter(|d| d == "inbound" || d == "outbound");
+
+        let direction = if hangup_cause == "USER_NOT_REGISTERED" {
+            "inbound".to_string()
         } else {
-            event.get_header("Call-Direction")
-                .or_else(|| event.get_header("Caller-Direction"))
-                .map(|s| s.to_lowercase())
-                .unwrap_or_else(|| "outbound".to_string())
+            native_direction.unwrap_or_else(|| {
+                if context == "from-pbx" || context.starts_with("from-pbx") {
+                    "outbound".to_string()
+                } else if context == "from-kamailio" || context.starts_with("from-kamailio") {
+                    "inbound".to_string()
+                } else {
+                    "inbound".to_string()
+                }
+            })
         };
 
         info!(

@@ -167,7 +167,7 @@ export default function Login() {
       {/* Version badge */}
       <div className="mt-8 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/10">
         <span className="text-xs text-[#94A3B8] font-mono">
-          v1.0.0 • Powered by Fibertel
+          v1.0.0 • Powered by Apolo AI
         </span>
       </div>
     </div>
