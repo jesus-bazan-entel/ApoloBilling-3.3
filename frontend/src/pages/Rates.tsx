@@ -7,6 +7,7 @@ import {
   deleteRateCard,
   lookupRate,
   fetchZones,
+  getRateCardGroups,
 } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
@@ -25,6 +26,11 @@ export default function RatesPage() {
     queryKey: ['rates'],
     queryFn: fetchRateCards,
     refetchInterval: 30000,
+  })
+
+  const { data: cardGroups = ['standard'] } = useQuery({
+    queryKey: ['rate-card-groups'],
+    queryFn: getRateCardGroups,
   })
 
   const { data: zones = [] } = useQuery({
@@ -142,6 +148,15 @@ export default function RatesPage() {
         </Badge>
       ),
       className: 'text-center',
+    },
+    {
+      key: 'card_group',
+      header: 'Grupo',
+      render: (rate: RateCard) => (
+        <Badge variant={rate.card_group === 'standard' ? 'default' : 'info'}>
+          {rate.card_group || 'standard'}
+        </Badge>
+      ),
     },
     {
       key: 'effective_start',
@@ -276,6 +291,7 @@ export default function RatesPage() {
         <RateModal
           rate={editingRate}
           zones={zones}
+          cardGroups={cardGroups}
           onClose={() => {
             setShowModal(false)
             setEditingRate(null)
@@ -317,13 +333,14 @@ export default function RatesPage() {
 interface RateModalProps {
   rate: RateCard | null
   zones: Zone[]
+  cardGroups: string[]
   onClose: () => void
   onSubmit: (data: Partial<RateCard>) => void
   isLoading: boolean
   error: string | null
 }
 
-function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateModalProps) {
+function RateModal({ rate, zones, cardGroups, onClose, onSubmit, isLoading, error }: RateModalProps) {
   // Find zone_id from destination_name if editing
   const findZoneId = () => {
     if (rate?.destination_name) {
@@ -341,6 +358,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
     billing_increment: rate?.billing_increment || 60,
     connection_fee: rate?.connection_fee || 0,
     priority: rate?.priority || 1,
+    card_group: rate?.card_group || 'standard',
     effective_start: rate?.effective_start || new Date().toISOString().split('T')[0],
     effective_end: rate?.effective_end || null,
   })
@@ -378,6 +396,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
         billing_increment: formData.billing_increment,
         connection_fee: formData.connection_fee,
         priority: formData.priority,
+        card_group: formData.card_group,
         effective_end: formData.effective_end ? new Date(formData.effective_end).toISOString() : null,
       }
       onSubmit(updateData)
@@ -537,6 +556,30 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">1 = más alta</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                Grupo de Tarifa
+              </label>
+              <input
+                type="text"
+                list="card-group-options"
+                value={formData.card_group}
+                onChange={(e) =>
+                  setFormData({ ...formData, card_group: e.target.value || 'standard' })
+                }
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <datalist id="card-group-options">
+                {cardGroups.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                &quot;standard&quot; = tarifa normal de salida. Usa otro nombre (ej. &quot;overage_fibertel&quot;)
+                para un tarifario dedicado de excedente de bolsa de minutos.
+              </p>
             </div>
 
             <div>

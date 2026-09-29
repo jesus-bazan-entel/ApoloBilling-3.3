@@ -84,9 +84,7 @@ impl EslEvent {
 
     /// Get a header value or default
     pub fn get_header_or(&self, name: &str, default: &str) -> String {
-        self.get_header(name)
-            .unwrap_or(default)
-            .to_string()
+        self.get_header(name).unwrap_or(default).to_string()
     }
 
     /// Get all headers
@@ -226,8 +224,7 @@ impl EslEvent {
 
     /// Check if this is an event
     pub fn is_event(&self) -> bool {
-        self.content_type() == Some("text/event-plain")
-            || self.event_name().is_some()
+        self.content_type() == Some("text/event-plain") || self.event_name().is_some()
     }
 
     /// Check if command was successful (starts with +OK)
@@ -247,11 +244,8 @@ impl EslEvent {
     /// Get error message from -ERR response
     pub fn error_message(&self) -> Option<String> {
         if self.is_error() {
-            self.reply_text().map(|t| {
-                t.strip_prefix("-ERR ")
-                    .unwrap_or(t)
-                    .to_string()
-            })
+            self.reply_text()
+                .map(|t| t.strip_prefix("-ERR ").unwrap_or(t).to_string())
         } else {
             None
         }

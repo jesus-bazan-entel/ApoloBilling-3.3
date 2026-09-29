@@ -174,8 +174,14 @@ mod tests {
 
     #[test]
     fn test_normalize_username() {
-        assert_eq!(SipDevice::normalize_username("User-123_test"), "user-123_test");
-        assert_eq!(SipDevice::normalize_username("user@domain.com"), "userdomaincom");
+        assert_eq!(
+            SipDevice::normalize_username("User-123_test"),
+            "user-123_test"
+        );
+        assert_eq!(
+            SipDevice::normalize_username("user@domain.com"),
+            "userdomaincom"
+        );
         assert_eq!(SipDevice::normalize_username("1001"), "1001");
     }
 

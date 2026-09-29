@@ -11,6 +11,7 @@ use actix_web::{
     web::{Data, Json, Path, Query},
     HttpResponse, Result,
 };
+use apolo_auth::AuthenticatedUser;
 use apolo_core::{
     error::AppError,
     models::Cdr,
@@ -37,11 +38,16 @@ use validator::Validate;
 /// ```text
 /// GET /api/cdrs?page=1&per_page=50&account_id=123&start_date=2024-01-01
 /// ```
-#[instrument(skip(db, query))]
+#[instrument(skip(db, query, user))]
 pub async fn list_cdrs(
     query: Query<CdrFilterParams>,
     db: Data<PgPool>,
+    user: AuthenticatedUser,
 ) -> Result<Json<PaginatedResponse<CdrResponse>>> {
+    if !user.has_module("cdr") {
+        return Err(AppError::Forbidden.into());
+    }
+
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid query parameters: {}", e);
@@ -115,8 +121,16 @@ pub async fn list_cdrs(
 /// ```text
 /// GET /api/cdrs/12345
 /// ```
-#[instrument(skip(db))]
-pub async fn get_cdr(path: Path<i64>, db: Data<PgPool>) -> Result<Json<ApiResponse<CdrResponse>>> {
+#[instrument(skip(db, user))]
+pub async fn get_cdr(
+    path: Path<i64>,
+    db: Data<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<Json<ApiResponse<CdrResponse>>> {
+    if !user.has_module("cdr") {
+        return Err(AppError::Forbidden.into());
+    }
+
     let cdr_id = path.into_inner();
     debug!("Fetching CDR with id: {}", cdr_id);
 
@@ -147,8 +161,16 @@ pub async fn get_cdr(path: Path<i64>, db: Data<PgPool>) -> Result<Json<ApiRespon
 /// GET /api/cdrs/export?format=csv&account_id=123&start_date=2024-01-01&limit=100000
 /// ```
 #[allow(clippy::too_many_lines)]
-#[instrument(skip(db, query))]
-pub async fn export_cdrs(query: Query<CdrExportParams>, db: Data<PgPool>) -> Result<HttpResponse> {
+#[instrument(skip(db, query, user))]
+pub async fn export_cdrs(
+    query: Query<CdrExportParams>,
+    db: Data<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<HttpResponse> {
+    if !user.has_module("cdr") {
+        return Err(AppError::Forbidden.into());
+    }
+
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid export parameters: {}", e);
@@ -204,11 +226,16 @@ pub async fn export_cdrs(query: Query<CdrExportParams>, db: Data<PgPool>) -> Res
 /// ```text
 /// GET /api/cdrs/stats?account_id=123&start_date=2024-01-01&group_by=day
 /// ```
-#[instrument(skip(db, query))]
+#[instrument(skip(db, query, user))]
 pub async fn get_cdr_stats(
     query: Query<StatsParams>,
     db: Data<PgPool>,
+    user: AuthenticatedUser,
 ) -> Result<Json<ApiResponse<CdrStats>>> {
+    if !user.has_module("cdr") {
+        return Err(AppError::Forbidden.into());
+    }
+
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid stats parameters: {}", e);

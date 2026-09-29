@@ -14,6 +14,13 @@ use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tracing::{debug, error, instrument, warn};
 
+const RATE_CARD_COLUMNS: &str = r#"
+    id, rate_name, destination_prefix, destination_name,
+    rate_per_minute, billing_increment, connection_fee,
+    effective_start, effective_end, priority, card_group,
+    created_at, updated_at
+"#;
+
 /// PostgreSQL implementation of RateRepository
 pub struct PgRateRepository {
     pool: PgPool,
@@ -24,6 +31,69 @@ impl PgRateRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Find rate by destination using Longest Prefix Match, scoped to a specific
+    /// tariff group (e.g. "overage_fibertel"). Used to tariff minute-bucket
+    /// overage with a dedicated rate table without touching the standard LPM
+    /// path used by `find_by_destination`.
+    #[instrument(skip(self))]
+    pub async fn find_by_destination_in_group(
+        &self,
+        destination: &str,
+        card_group: &str,
+    ) -> AppResult<Option<RateCard>> {
+        let normalized = RateCard::normalize_destination(destination);
+        let prefixes = RateCard::generate_prefixes(&normalized);
+
+        if prefixes.is_empty() {
+            return Ok(None);
+        }
+
+        let query = format!(
+            r#"
+            SELECT {cols}
+            FROM rate_cards
+            WHERE destination_prefix = ANY($1)
+                AND card_group = $2
+                AND effective_start <= NOW()
+                AND (effective_end IS NULL OR effective_end > NOW())
+            ORDER BY LENGTH(destination_prefix) DESC, priority DESC
+            LIMIT 1
+            "#,
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let result = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(&prefixes)
+            .bind(card_group)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Database error finding rate for destination {} in group {}: {}",
+                    destination, card_group, e
+                );
+                AppError::Database(format!("Failed to find rate: {}", e))
+            })?;
+
+        Ok(result.map(Into::into))
+    }
+
+    /// List distinct tariff groups currently in use (for the frontend selector).
+    #[instrument(skip(self))]
+    pub async fn list_card_groups(&self) -> AppResult<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT card_group FROM rate_cards ORDER BY card_group",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error listing card groups: {}", e);
+            AppError::Database(format!("Failed to list card groups: {}", e))
+        })?;
+
+        Ok(rows.into_iter().map(|(g,)| g).collect())
+    }
 }
 
 #[async_trait]
@@ -32,25 +102,24 @@ impl Repository<RateCard, i32> for PgRateRepository {
     async fn find_by_id(&self, id: i32) -> AppResult<Option<RateCard>> {
         debug!("Finding rate card by id: {}", id);
 
-        let result = sqlx::query_as::<sqlx::Postgres, RateCardRow>(
+        let query = format!(
             r#"
-            SELECT
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            SELECT {cols}
             FROM rate_cards
             WHERE (effective_end IS NULL OR effective_end > NOW())
             AND id = $1
             "#,
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error finding rate card {}: {}", id, e);
-            AppError::Database(format!("Failed to find rate card: {}", e))
-        })?;
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let result = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("Database error finding rate card {}: {}", id, e);
+                AppError::Database(format!("Failed to find rate card: {}", e))
+            })?;
 
         Ok(result.map(Into::into))
     }
@@ -62,27 +131,26 @@ impl Repository<RateCard, i32> for PgRateRepository {
             limit, offset
         );
 
-        let rows = sqlx::query_as::<sqlx::Postgres, RateCardRow>(
+        let query = format!(
             r#"
-            SELECT
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            SELECT {cols}
             FROM rate_cards
             WHERE (effective_end IS NULL OR effective_end > NOW())
             ORDER BY priority DESC, destination_prefix
             LIMIT $1 OFFSET $2
             "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error finding rate cards: {}", e);
-            AppError::Database(format!("Failed to fetch rate cards: {}", e))
-        })?;
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let rows = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("Database error finding rate cards: {}", e);
+                AppError::Database(format!("Failed to fetch rate cards: {}", e))
+            })?;
 
         Ok(rows.into_iter().map(Into::into).collect())
     }
@@ -112,36 +180,36 @@ impl Repository<RateCard, i32> for PgRateRepository {
             .clone()
             .unwrap_or_else(|| format!("Rate {}", entity.destination_prefix));
 
-        let row = sqlx::query_as::<sqlx::Postgres, RateCardRow>(
+        let query = format!(
             r#"
             INSERT INTO rate_cards (
                 rate_name, destination_prefix, destination_name,
                 rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority
+                effective_start, effective_end, priority, card_group
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING {cols}
             "#,
-        )
-        .bind(&rate_name)
-        .bind(&entity.destination_prefix)
-        .bind(&entity.destination_name)
-        .bind(entity.rate_per_minute)
-        .bind(entity.billing_increment)
-        .bind(entity.connection_fee)
-        .bind(entity.effective_start)
-        .bind(entity.effective_end)
-        .bind(entity.priority)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error creating rate card: {}", e);
-            AppError::Database(format!("Failed to create rate card: {}", e))
-        })?;
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let row = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(&rate_name)
+            .bind(&entity.destination_prefix)
+            .bind(&entity.destination_name)
+            .bind(entity.rate_per_minute)
+            .bind(entity.billing_increment)
+            .bind(entity.connection_fee)
+            .bind(entity.effective_start)
+            .bind(entity.effective_end)
+            .bind(entity.priority)
+            .bind(&entity.card_group)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("Database error creating rate card: {}", e);
+                AppError::Database(format!("Failed to create rate card: {}", e))
+            })?;
 
         Ok(row.into())
     }
@@ -155,7 +223,7 @@ impl Repository<RateCard, i32> for PgRateRepository {
             .clone()
             .unwrap_or_else(|| format!("Rate {}", entity.destination_prefix));
 
-        let row = sqlx::query_as::<sqlx::Postgres, RateCardRow>(
+        let query = format!(
             r#"
             UPDATE rate_cards
             SET rate_name = $2,
@@ -167,31 +235,32 @@ impl Repository<RateCard, i32> for PgRateRepository {
                 effective_start = $8,
                 effective_end = $9,
                 priority = $10,
+                card_group = $11,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            RETURNING {cols}
             "#,
-        )
-        .bind(entity.id)
-        .bind(&rate_name)
-        .bind(&entity.destination_prefix)
-        .bind(&entity.destination_name)
-        .bind(entity.rate_per_minute)
-        .bind(entity.billing_increment)
-        .bind(entity.connection_fee)
-        .bind(entity.effective_start)
-        .bind(entity.effective_end)
-        .bind(entity.priority)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error updating rate card {}: {}", entity.id, e);
-            AppError::Database(format!("Failed to update rate card: {}", e))
-        })?;
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let row = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(entity.id)
+            .bind(&rate_name)
+            .bind(&entity.destination_prefix)
+            .bind(&entity.destination_name)
+            .bind(entity.rate_per_minute)
+            .bind(entity.billing_increment)
+            .bind(entity.connection_fee)
+            .bind(entity.effective_start)
+            .bind(entity.effective_end)
+            .bind(entity.priority)
+            .bind(&entity.card_group)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("Database error updating rate card {}: {}", entity.id, e);
+                AppError::Database(format!("Failed to update rate card: {}", e))
+            })?;
 
         Ok(row.into())
     }
@@ -215,14 +284,14 @@ impl Repository<RateCard, i32> for PgRateRepository {
 
 #[async_trait]
 impl RateRepository for PgRateRepository {
+    /// Longest Prefix Match scoped to the "standard" tariff group — preserves
+    /// today's behavior even after other card_group tariff sets (e.g. overage
+    /// tables) are added to the same `rate_cards` table.
     #[instrument(skip(self))]
     async fn find_by_destination(&self, destination: &str) -> AppResult<Option<RateCard>> {
         debug!("Finding rate for destination: {}", destination);
 
-        // Normalize the destination (remove non-digits)
         let normalized = RateCard::normalize_destination(destination);
-
-        // Generate all possible prefixes from longest to shortest
         let prefixes = RateCard::generate_prefixes(&normalized);
 
         if prefixes.is_empty() {
@@ -232,17 +301,12 @@ impl RateRepository for PgRateRepository {
 
         debug!("Generated {} prefixes for LPM lookup", prefixes.len());
 
-        // Use PostgreSQL's ANY() for efficient prefix matching
-        // The query will return the longest matching prefix with highest priority
-        let result = sqlx::query_as::<sqlx::Postgres, RateCardRow>(
+        let query = format!(
             r#"
-            SELECT
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            SELECT {cols}
             FROM rate_cards
             WHERE destination_prefix = ANY($1)
+                AND card_group = 'standard'
                 AND effective_start <= NOW()
                 AND (effective_end IS NULL OR effective_end > NOW())
             ORDER BY
@@ -250,17 +314,20 @@ impl RateRepository for PgRateRepository {
                 priority DESC
             LIMIT 1
             "#,
-        )
-        .bind(&prefixes)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| {
-            error!(
-                "Database error finding rate for destination {}: {}",
-                destination, e
-            );
-            AppError::Database(format!("Failed to find rate: {}", e))
-        })?;
+            cols = RATE_CARD_COLUMNS
+        );
+
+        let result = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query)
+            .bind(&prefixes)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Database error finding rate for destination {}: {}",
+                    destination, e
+                );
+                AppError::Database(format!("Failed to find rate: {}", e))
+            })?;
 
         if result.is_none() {
             debug!("No rate found for destination: {}", destination);
@@ -282,18 +349,14 @@ impl RateRepository for PgRateRepository {
             prefix, name, limit, offset
         );
 
-        // Build dynamic query based on search parameters
-        let mut query_str = String::from(
+        let mut query_str = format!(
             r#"
-            SELECT
-                id, rate_name, destination_prefix, destination_name,
-                rate_per_minute, billing_increment, connection_fee,
-                effective_start, effective_end, priority,
-                created_at, updated_at
+            SELECT {cols}
             FROM rate_cards
             WHERE (effective_end IS NULL OR effective_end > NOW())
             AND 1=1
             "#,
+            cols = RATE_CARD_COLUMNS
         );
 
         let mut count_query = String::from("SELECT COUNT(*) FROM rate_cards WHERE (effective_end IS NULL OR effective_end > NOW()) AND 1=1");
@@ -315,7 +378,6 @@ impl RateRepository for PgRateRepository {
             limit, offset
         ));
 
-        // Get total count
         let total: (i64,) = sqlx::query_as(&count_query)
             .fetch_one(&self.pool)
             .await
@@ -324,7 +386,6 @@ impl RateRepository for PgRateRepository {
                 AppError::Database(format!("Failed to count rates: {}", e))
             })?;
 
-        // Get rate cards
         let rows = sqlx::query_as::<sqlx::Postgres, RateCardRow>(&query_str)
             .fetch_all(&self.pool)
             .await
@@ -362,9 +423,9 @@ impl RateRepository for PgRateRepository {
                 INSERT INTO rate_cards (
                     rate_name, destination_prefix, destination_name,
                     rate_per_minute, billing_increment, connection_fee,
-                    effective_start, effective_end, priority
+                    effective_start, effective_end, priority, card_group
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 "#,
             )
             .bind(&rate_name)
@@ -376,6 +437,7 @@ impl RateRepository for PgRateRepository {
             .bind(rate.effective_start)
             .bind(rate.effective_end)
             .bind(rate.priority)
+            .bind(&rate.card_group)
             .execute(&mut *tx)
             .await;
 
@@ -411,6 +473,7 @@ struct RateCardRow {
     effective_start: DateTime<Utc>,
     effective_end: Option<DateTime<Utc>>,
     priority: i32,
+    card_group: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -428,6 +491,7 @@ impl From<RateCardRow> for RateCard {
             effective_start: row.effective_start,
             effective_end: row.effective_end,
             priority: row.priority,
+            card_group: row.card_group,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

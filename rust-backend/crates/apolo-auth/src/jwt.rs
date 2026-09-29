@@ -115,6 +115,28 @@ impl JwtService {
         self.create_token(&claims)
     }
 
+    /// Create a token for a user, embedding their effective module list
+    ///
+    /// # Arguments
+    ///
+    /// * `username` - The username to include in the token
+    /// * `role` - The user's role
+    /// * `modules` - Effective module keys for this session (see
+    ///   `UserRole::effective_modules`)
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::InvalidToken` if token creation fails
+    pub fn create_token_for_user_with_modules(
+        &self,
+        username: &str,
+        role: UserRole,
+        modules: Vec<String>,
+    ) -> Result<String, AppError> {
+        let claims = Claims::new_with_modules(username, role, modules);
+        self.create_token(&claims)
+    }
+
     /// Validate a JWT token and extract claims
     ///
     /// # Arguments
@@ -134,7 +156,7 @@ impl JwtService {
     /// use apolo_core::models::UserRole;
     ///
     /// let jwt_service = JwtService::new("secret", 3600);
-    /// let claims = Claims::new("user", UserRole::Operator);
+    /// let claims = Claims::new("user", UserRole::Usuario);
     /// let token = jwt_service.create_token(&claims)?;
     /// let decoded = jwt_service.validate_token(&token)?;
     /// assert_eq!(decoded.sub, "user");
@@ -243,7 +265,7 @@ mod tests {
         let jwt_service = JwtService::new(TEST_SECRET, 1);
 
         // Create token with 1 second expiration
-        let claims = Claims::with_expiration("user", UserRole::Operator, -10);
+        let claims = Claims::with_expiration("user", UserRole::Usuario, -10);
         let token = jwt_service.create_token(&claims).unwrap();
 
         // Token should be expired
@@ -264,7 +286,7 @@ mod tests {
         let jwt_service1 = JwtService::new("secret1", 3600);
         let jwt_service2 = JwtService::new("secret2", 3600);
 
-        let claims = Claims::new("user", UserRole::Operator);
+        let claims = Claims::new("user", UserRole::Usuario);
         let token = jwt_service1.create_token(&claims).unwrap();
 
         // Token created with secret1 should not validate with secret2
@@ -288,7 +310,7 @@ mod tests {
     #[test]
     fn test_token_expiration_setting() {
         let jwt_service = JwtService::new(TEST_SECRET, 7200);
-        let claims = Claims::new("user", UserRole::Operator);
+        let claims = Claims::new("user", UserRole::Usuario);
 
         let token = jwt_service.create_token(&claims).unwrap();
         let decoded = jwt_service.validate_token(&token).unwrap();

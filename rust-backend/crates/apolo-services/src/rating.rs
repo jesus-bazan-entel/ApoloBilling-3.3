@@ -114,13 +114,10 @@ impl<R: RateRepository> RatingService for RatingServiceImpl<R> {
         }
 
         // Find the rate
-        let rate = self
-            .find_rate(destination)
-            .await?
-            .ok_or_else(|| {
-                error!("No rate found for destination: {}", destination);
-                AppError::RateNotFound(destination.to_string())
-            })?;
+        let rate = self.find_rate(destination).await?.ok_or_else(|| {
+            error!("No rate found for destination: {}", destination);
+            AppError::RateNotFound(destination.to_string())
+        })?;
 
         // Calculate cost using the rate card
         let cost = rate.calculate_cost(duration_seconds);
@@ -208,6 +205,7 @@ mod tests {
             effective_start: Utc::now(),
             effective_end: None,
             priority: 1,
+            card_group: "standard".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

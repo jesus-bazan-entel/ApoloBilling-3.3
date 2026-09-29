@@ -11,6 +11,13 @@ import type {
   PaginatedResponse,
   CDRFilters,
   DialplanRoute,
+  BucketConfig,
+  PlanBucketConfig,
+  AccountBucketConfig,
+  MinuteBucketStatus,
+  MinuteBucketAddition,
+  CycleHistoryEntry,
+  MinuteBucketReportRow,
 } from '../types'
 
 const api = axios.create({
@@ -122,6 +129,106 @@ export const deletePlan = async (id: number): Promise<void> => {
   await api.delete(`/plans/${id}`)
 }
 
+// ============== MINUTE BUCKET BILLING (Plan Control / Plan Abierto) ==============
+
+export const getPlanBucketConfig = async (planId: number): Promise<PlanBucketConfig> => {
+  const { data } = await api.get(`/plans/${planId}/bucket-config`)
+  return data.data || data
+}
+
+export const updatePlanBucketConfig = async (
+  planId: number,
+  config: BucketConfig
+): Promise<PlanBucketConfig> => {
+  const { data } = await api.put(`/plans/${planId}/bucket-config`, config)
+  return data.data || data
+}
+
+export const getAccountBucketConfig = async (accountId: number): Promise<AccountBucketConfig> => {
+  const { data } = await api.get(`/accounts/${accountId}/bucket-config`)
+  return data.data || data
+}
+
+export const updateAccountBucketConfig = async (
+  accountId: number,
+  config: BucketConfig & { notification_email?: string | null }
+): Promise<AccountBucketConfig> => {
+  const { data } = await api.put(`/accounts/${accountId}/bucket-config`, config)
+  return data.data || data
+}
+
+export const getMinuteBucketStatus = async (accountId: number): Promise<MinuteBucketStatus> => {
+  const { data } = await api.get(`/accounts/${accountId}/minute-bucket`)
+  return data.data || data
+}
+
+export const updateMinuteBucketCycle = async (
+  accountId: number,
+  includedMinutes: number,
+  reason: string
+): Promise<MinuteBucketStatus> => {
+  const { data } = await api.put(`/accounts/${accountId}/minute-bucket`, {
+    included_minutes: includedMinutes,
+    reason,
+  })
+  return data.data || data
+}
+
+export const topupMinuteBucket = async (
+  accountId: number,
+  minutesAdded: number,
+  reason?: string
+): Promise<MinuteBucketAddition> => {
+  const { data } = await api.post(`/accounts/${accountId}/minute-bucket/topup`, {
+    minutes_added: minutesAdded,
+    reason,
+  })
+  return data.data || data
+}
+
+export const getMinuteBucketHistory = async (accountId: number): Promise<CycleHistoryEntry[]> => {
+  const { data } = await api.get(`/accounts/${accountId}/minute-bucket/history`)
+  return data.data || data
+}
+
+export interface MinuteBucketReportFilters {
+  month?: string // "YYYY-MM"
+  account_id?: number
+  bucket_type?: string
+}
+
+export const getMinuteBucketReport = async (
+  filters?: MinuteBucketReportFilters
+): Promise<MinuteBucketReportRow[]> => {
+  const params = new URLSearchParams()
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') {
+        params.append(key, value.toString())
+      }
+    })
+  }
+  const { data } = await api.get(`/reports/minute-bucket?${params.toString()}`)
+  return data.data || data
+}
+
+export const exportMinuteBucketReport = async (
+  filters?: MinuteBucketReportFilters
+): Promise<Blob> => {
+  const params = new URLSearchParams()
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== '') {
+        params.append(key, value.toString())
+      }
+    })
+  }
+  const { data } = await api.get(`/reports/minute-bucket/export?${params.toString()}`, {
+    responseType: 'blob',
+  })
+  return data
+}
+
 // ============== ZONES (Management) ==============
 
 export const fetchZones = async (): Promise<Zone[]> => {
@@ -177,6 +284,13 @@ export const lookupRate = async (destination: string): Promise<RateCard | null> 
   } catch {
     return null
   }
+}
+
+// Distinct tariff groups in use (e.g. "standard", "overage_fibertel") — used both
+// by the Rate Cards page and the minute-bucket overage-tariff-group selector.
+export const getRateCardGroups = async (): Promise<string[]> => {
+  const { data } = await api.get('/rate-cards/card-groups')
+  return data.data || data
 }
 
 // ============== CDRs (Call Detail Records) ==============
@@ -297,13 +411,16 @@ export interface AuthUser {
   id: number
   username: string
   role: string
+  /** Effective module keys for this session — drives menu + route guards */
+  modules: string[]
 }
 
 export const login = async (credentials: LoginCredentials): Promise<AuthUser> => {
   const { data } = await api.post('/auth/login', credentials)
-  // API returns { data: { access_token, user: {...}, ... } }
-  // Return just the user object to match getCurrentUser format
-  return data.data?.user || data.user || data.data || data
+  // API returns { data: { access_token, user: {...}, modules: [...], ... } }
+  const payload = data.data || data
+  const user = payload.user || payload
+  return { ...user, modules: payload.modules || [] }
 }
 
 export const logout = async (): Promise<void> => {
@@ -313,8 +430,10 @@ export const logout = async (): Promise<void> => {
 export const getCurrentUser = async (): Promise<AuthUser | null> => {
   try {
     const { data } = await api.get('/auth/me')
-    // API returns { data: { user: {...}, token_expires_at: ... } }
-    return data.data?.user || data.user || data.data || data
+    // API returns { data: { user: {...}, modules: [...], token_expires_at: ... } }
+    const payload = data.data || data
+    const user = payload.user || payload
+    return { ...user, modules: payload.modules || [] }
   } catch {
     return null
   }
@@ -494,9 +613,9 @@ export const fetchTrafficByDirection = async (): Promise<TrafficByDirection> => 
   return data.data || data
 }
 
-// ============== USER MANAGEMENT (Superadmin only) ==============
+// ============== USER MANAGEMENT (Admin+, hierarchy enforced server-side) ==============
 
-import type { User } from '../types'
+import type { SystemModule, User, UserModulesResponse } from '../types'
 
 export interface UserCreateRequest {
   username: string
@@ -539,7 +658,28 @@ export const deleteUser = async (id: number): Promise<void> => {
   await api.delete(`/users/${id}`)
 }
 
-// ============== AUDIT LOGS (Superadmin only) ==============
+// ============== MODULE VISIBILITY (Admin+) ==============
+// Catalog of assignable modules, and per-user (role=usuario) grants.
+
+export const fetchModuleCatalog = async (): Promise<SystemModule[]> => {
+  const { data } = await api.get('/modules')
+  return data.data || data
+}
+
+export const fetchUserModules = async (id: number): Promise<UserModulesResponse> => {
+  const { data } = await api.get(`/users/${id}/modules`)
+  return data.data || data
+}
+
+export const updateUserModules = async (
+  id: number,
+  modules: string[]
+): Promise<UserModulesResponse> => {
+  const { data } = await api.put(`/users/${id}/modules`, { modules })
+  return data.data || data
+}
+
+// ============== AUDIT LOGS (Admin+) ==============
 
 export interface AuditLogFilters {
   username?: string
@@ -852,8 +992,8 @@ import type {
   UpdateTrunkGroupRequest,
   CreateOutboundRouteRequest,
   UpdateOutboundRouteRequest,
-  CreateInboundRouteRequest,
-  UpdateInboundRouteRequest,
+  CreateRoutingInboundRouteRequest,
+  UpdateRoutingInboundRouteRequest,
   SipStatusCheck,
   BulkSipStatusResult,
   SipStatusLogEntry,
@@ -945,12 +1085,12 @@ export const fetchRoutingInboundRoute = async (id: string): Promise<RoutingInbou
   return data.data || data
 }
 
-export const createRoutingInboundRoute = async (route: CreateInboundRouteRequest): Promise<RoutingInboundRoute> => {
+export const createRoutingInboundRoute = async (route: CreateRoutingInboundRouteRequest): Promise<RoutingInboundRoute> => {
   const { data } = await api.post('/routing/inbound', route)
   return data.data || data
 }
 
-export const updateRoutingInboundRoute = async (id: string, route: UpdateInboundRouteRequest): Promise<RoutingInboundRoute> => {
+export const updateRoutingInboundRoute = async (id: string, route: UpdateRoutingInboundRouteRequest): Promise<RoutingInboundRoute> => {
   const { data } = await api.put(`/routing/inbound/${id}`, route)
   return data.data || data
 }
@@ -1003,6 +1143,387 @@ export const getTrunkSipHistory = async (
   limit = 20
 ): Promise<SipStatusLogEntry[]> => {
   const { data } = await api.get(`/routing/sip-status/${id}/history?limit=${limit}`)
+  return data.data || data
+}
+
+// ============== INBOUND ROUTING (Simplified) ==============
+
+import type {
+  InboundRoute,
+  CreateInboundRouteRequest,
+  UpdateInboundRouteRequestNew,
+  // Deprecated types kept for backward compatibility
+  Carrier,
+  CarrierSummary,
+  DidOverride,
+  CreateCarrierRequest,
+  UpdateCarrierRequest,
+  CreateDidOverrideRequest,
+  UpdateDidOverrideRequest,
+} from '../types'
+
+// Inbound Routes (new simplified API)
+export const fetchInboundRoutes = async (): Promise<InboundRoute[]> => {
+  const { data } = await api.get('/inbound-routing')
+  return data.data?.data || data.data || data
+}
+
+export const fetchInboundRoute = async (id: string): Promise<InboundRoute> => {
+  const { data } = await api.get(`/inbound-routing/${id}`)
+  return data.data || data
+}
+
+export const createInboundRoute = async (
+  route: CreateInboundRouteRequest
+): Promise<InboundRoute> => {
+  const { data } = await api.post('/inbound-routing', route)
+  return data.data || data
+}
+
+export const updateInboundRoute = async (
+  id: string,
+  route: UpdateInboundRouteRequestNew
+): Promise<InboundRoute> => {
+  const { data } = await api.put(`/inbound-routing/${id}`, route)
+  return data.data || data
+}
+
+export const deleteInboundRoute = async (id: string): Promise<void> => {
+  await api.delete(`/inbound-routing/${id}`)
+}
+
+export const syncInboundRoutes = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/inbound-routing/sync')
+  return data.data || data
+}
+
+// DEPRECATED: Old Carrier API - use fetchInboundRoutes instead
+export const fetchCarriers = async (): Promise<Carrier[]> => {
+  const { data } = await api.get('/inbound-routing')
+  return data.data?.data || data.data || data
+}
+
+export const fetchCarrierSummaries = async (): Promise<CarrierSummary[]> => {
+  const { data } = await api.get('/inbound-routing/summary')
+  return data.data || data
+}
+
+export const fetchCarrier = async (id: string): Promise<Carrier> => {
+  const { data } = await api.get(`/inbound-routing/${id}`)
+  return data.data || data
+}
+
+export const createCarrier = async (carrier: CreateCarrierRequest): Promise<Carrier> => {
+  const { data } = await api.post('/inbound-routing', carrier)
+  return data.data || data
+}
+
+export const updateCarrier = async (
+  id: string,
+  carrier: UpdateCarrierRequest
+): Promise<Carrier> => {
+  const { data } = await api.put(`/inbound-routing/${id}`, carrier)
+  return data.data || data
+}
+
+export const deleteCarrier = async (id: string): Promise<void> => {
+  await api.delete(`/inbound-routing/${id}`)
+}
+
+export const syncCarriers = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/inbound-routing/sync')
+  return data.data || data
+}
+
+// DEPRECATED: DID Overrides - use fetchInboundRoutes instead
+export const fetchDidOverrides = async (): Promise<DidOverride[]> => {
+  const { data } = await api.get('/inbound-routing')
+  return data.data?.data || data.data || data
+}
+
+export const fetchCarrierDids = async (carrierId: string): Promise<DidOverride[]> => {
+  const { data } = await api.get(`/inbound-routing/${carrierId}/dids`)
+  return data.data || data
+}
+
+export const createDidOverride = async (
+  didOverride: CreateDidOverrideRequest
+): Promise<{ id: string }> => {
+  const { data } = await api.post('/inbound-routing', didOverride)
+  return data.data || data
+}
+
+export const updateDidOverride = async (
+  id: string,
+  didOverride: UpdateDidOverrideRequest
+): Promise<void> => {
+  await api.put(`/inbound-routing/${id}`, didOverride)
+}
+
+export const deleteDidOverride = async (id: string): Promise<void> => {
+  await api.delete(`/inbound-routing/${id}`)
+}
+
+// ============== ENDPOINT MONITOR ==============
+
+import type {
+  EndpointStatusResponse,
+  ProbeResultsResponse,
+  ProbeResultsQuery,
+  EvidenceReportQuery,
+} from '../types'
+
+// Get latest endpoint status (dashboard cards)
+export const fetchEndpointStatus = async (): Promise<EndpointStatusResponse> => {
+  const { data } = await api.get('/monitor/endpoints')
+  return data.data || data
+}
+
+// Get probe results with downsampled series and raw rows
+export const fetchProbeResults = async (
+  query: ProbeResultsQuery
+): Promise<ProbeResultsResponse> => {
+  const params = new URLSearchParams()
+  if (query.name) params.append('name', query.name)
+  if (query.ip) params.append('ip', query.ip)
+  if (query.frm) params.append('frm', query.frm.toString())
+  if (query.to) params.append('to', query.to.toString())
+  if (query.limit) params.append('limit', query.limit.toString())
+
+  const { data } = await api.get(`/monitor/results?${params.toString()}`)
+  return data.data || data
+}
+
+// Download evidence trace for a single probe
+export const downloadEvidence = async (probeId: number): Promise<Blob> => {
+  const { data } = await api.get(`/monitor/evidence?id=${probeId}`, {
+    responseType: 'blob',
+  })
+  return data
+}
+
+// Download consolidated evidence report
+export const downloadEvidenceReport = async (
+  query: EvidenceReportQuery
+): Promise<Blob> => {
+  const params = new URLSearchParams()
+  if (query.name) params.append('name', query.name)
+  if (query.ip) params.append('ip', query.ip)
+  if (query.frm) params.append('frm', query.frm.toString())
+  if (query.to) params.append('to', query.to.toString())
+  if (query.full) params.append('full', '1')
+
+  const { data } = await api.get(`/monitor/evidence_report?${params.toString()}`, {
+    responseType: 'blob',
+  })
+  return data
+}
+
+// ============== SIMPLIFIED OUTBOUND ROUTING (dSIPRouter model) ==============
+
+import type {
+  SipCarrier,
+  SipCarrierListResponse,
+  CreateSipCarrierRequest,
+  UpdateSipCarrierRequest,
+  CarrierSipCheckResult,
+  BulkCarrierSyncResult,
+  SipEndpoint,
+  SipEndpointListResponse,
+  CreateSipEndpointRequest,
+  UpdateSipEndpointRequest,
+  CarrierGroupWithMembers,
+  CarrierGroupListResponse,
+  CreateCarrierGroupRequest,
+  UpdateCarrierGroupRequestNew,
+  AddCarrierGroupMemberRequest,
+  UpdateCarrierGroupMemberRequest,
+  OutboundRouteNew,
+  OutboundRouteListResponse,
+  CreateOutboundRouteRequestNew,
+  UpdateOutboundRouteRequestNew,
+  OutboundSyncAllResult,
+} from '../types'
+
+// ============== CARRIERS ==============
+
+export const fetchSipCarriers = async (): Promise<SipCarrierListResponse> => {
+  const { data } = await api.get('/carriers')
+  return data.data || data
+}
+
+export const fetchSipCarrier = async (id: string): Promise<SipCarrier> => {
+  const { data } = await api.get(`/carriers/${id}`)
+  return data.data || data
+}
+
+export const createSipCarrier = async (
+  carrier: CreateSipCarrierRequest
+): Promise<SipCarrier> => {
+  const { data } = await api.post('/carriers', carrier)
+  return data.data || data
+}
+
+export const updateSipCarrier = async (
+  id: string,
+  carrier: UpdateSipCarrierRequest
+): Promise<SipCarrier> => {
+  const { data } = await api.put(`/carriers/${id}`, carrier)
+  return data.data || data
+}
+
+export const deleteSipCarrier = async (id: string): Promise<void> => {
+  await api.delete(`/carriers/${id}`)
+}
+
+export const checkSipCarrierStatus = async (
+  id: string
+): Promise<CarrierSipCheckResult> => {
+  const { data } = await api.post(`/carriers/${id}/check-status`)
+  return data.data || data
+}
+
+export const syncAllSipCarriers = async (): Promise<BulkCarrierSyncResult> => {
+  const { data } = await api.post('/carriers/sync')
+  return data.data || data
+}
+
+// ============== ENDPOINTS ==============
+
+export const fetchSipEndpoints = async (): Promise<SipEndpointListResponse> => {
+  const { data } = await api.get('/endpoints')
+  return data.data || data
+}
+
+export const fetchSipEndpoint = async (id: string): Promise<SipEndpoint> => {
+  const { data } = await api.get(`/endpoints/${id}`)
+  return data.data || data
+}
+
+export const createSipEndpoint = async (
+  endpoint: CreateSipEndpointRequest
+): Promise<SipEndpoint> => {
+  const { data } = await api.post('/endpoints', endpoint)
+  return data.data || data
+}
+
+export const updateSipEndpoint = async (
+  id: string,
+  endpoint: UpdateSipEndpointRequest
+): Promise<SipEndpoint> => {
+  const { data } = await api.put(`/endpoints/${id}`, endpoint)
+  return data.data || data
+}
+
+export const deleteSipEndpoint = async (id: string): Promise<void> => {
+  await api.delete(`/endpoints/${id}`)
+}
+
+export const syncAllSipEndpoints = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/endpoints/sync')
+  return data.data || data
+}
+
+// ============== CARRIER GROUPS ==============
+
+export const fetchCarrierGroups = async (): Promise<CarrierGroupListResponse> => {
+  const { data } = await api.get('/carrier-groups')
+  return data.data || data
+}
+
+export const fetchCarrierGroup = async (
+  id: string
+): Promise<CarrierGroupWithMembers> => {
+  const { data } = await api.get(`/carrier-groups/${id}`)
+  return data.data || data
+}
+
+export const createCarrierGroup = async (
+  group: CreateCarrierGroupRequest
+): Promise<CarrierGroupWithMembers> => {
+  const { data } = await api.post('/carrier-groups', group)
+  return data.data || data
+}
+
+export const updateCarrierGroup = async (
+  id: string,
+  group: UpdateCarrierGroupRequestNew
+): Promise<CarrierGroupWithMembers> => {
+  const { data } = await api.put(`/carrier-groups/${id}`, group)
+  return data.data || data
+}
+
+export const deleteCarrierGroup = async (id: string): Promise<void> => {
+  await api.delete(`/carrier-groups/${id}`)
+}
+
+export const addCarrierGroupMember = async (
+  groupId: string,
+  member: AddCarrierGroupMemberRequest
+): Promise<CarrierGroupWithMembers> => {
+  const { data } = await api.post(`/carrier-groups/${groupId}/members`, member)
+  return data.data || data
+}
+
+export const updateCarrierGroupMember = async (
+  groupId: string,
+  memberId: string,
+  member: UpdateCarrierGroupMemberRequest
+): Promise<CarrierGroupWithMembers> => {
+  const { data } = await api.put(
+    `/carrier-groups/${groupId}/members/${memberId}`,
+    member
+  )
+  return data.data || data
+}
+
+export const removeCarrierGroupMember = async (
+  groupId: string,
+  memberId: string
+): Promise<void> => {
+  await api.delete(`/carrier-groups/${groupId}/members/${memberId}`)
+}
+
+// ============== OUTBOUND ROUTES (NEW) ==============
+
+export const fetchOutboundRoutes = async (): Promise<OutboundRouteListResponse> => {
+  const { data } = await api.get('/outbound-routing')
+  return data.data || data
+}
+
+export const fetchOutboundRoute = async (id: string): Promise<OutboundRouteNew> => {
+  const { data } = await api.get(`/outbound-routing/${id}`)
+  return data.data || data
+}
+
+export const createOutboundRoute = async (
+  route: CreateOutboundRouteRequestNew
+): Promise<OutboundRouteNew> => {
+  const { data } = await api.post('/outbound-routing', route)
+  return data.data || data
+}
+
+export const updateOutboundRoute = async (
+  id: string,
+  route: UpdateOutboundRouteRequestNew
+): Promise<OutboundRouteNew> => {
+  const { data } = await api.put(`/outbound-routing/${id}`, route)
+  return data.data || data
+}
+
+export const deleteOutboundRoute = async (id: string): Promise<void> => {
+  await api.delete(`/outbound-routing/${id}`)
+}
+
+export const syncAllOutboundRoutes = async (): Promise<{ message: string }> => {
+  const { data } = await api.post('/outbound-routing/sync')
+  return data.data || data
+}
+
+// ============== KAMAILIO SYNC ==============
+
+export const syncAllToKamailio = async (): Promise<OutboundSyncAllResult> => {
+  const { data } = await api.post('/kamailio/sync-all')
   return data.data || data
 }
 

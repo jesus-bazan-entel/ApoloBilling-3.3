@@ -104,7 +104,10 @@ impl BillingSyncService {
             AppError::Transaction(format!("Failed to commit transaction: {}", e))
         })?;
 
-        info!("Rate card synchronization completed: {} cards synced", count);
+        info!(
+            "Rate card synchronization completed: {} cards synced",
+            count
+        );
 
         Ok(count)
     }

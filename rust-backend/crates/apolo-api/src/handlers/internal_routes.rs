@@ -12,7 +12,10 @@ use crate::dto::{
 // ============ System Endpoints Handlers ============
 
 /// List all system endpoints
-pub async fn list_endpoints(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError> {
+pub async fn list_endpoints(
+    pool: web::Data<PgPool>,
+    _admin: apolo_auth::SuperadminUser,
+) -> Result<HttpResponse, AppError> {
     let endpoints = SystemEndpointRepository::list(pool.get_ref())
         .await
         .map_err(|e| AppError::Database(format!("Error listing endpoints: {}", e)))?;
@@ -24,6 +27,7 @@ pub async fn list_endpoints(pool: web::Data<PgPool>) -> Result<HttpResponse, App
 pub async fn get_endpoint(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
     let endpoint = SystemEndpointRepository::get_by_id(pool.get_ref(), id)
@@ -38,6 +42,7 @@ pub async fn get_endpoint(
 pub async fn list_endpoints_by_type(
     pool: web::Data<PgPool>,
     path: web::Path<String>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let endpoint_type = path.into_inner();
     let endpoints = SystemEndpointRepository::list_by_type(pool.get_ref(), &endpoint_type)
@@ -50,6 +55,7 @@ pub async fn list_endpoints_by_type(
 /// Create a new endpoint
 pub async fn create_endpoint(
     pool: web::Data<PgPool>,
+    _admin: apolo_auth::SuperadminUser,
     body: web::Json<CreateEndpointRequest>,
 ) -> Result<HttpResponse, AppError> {
     let req = body.into_inner();
@@ -85,6 +91,7 @@ pub async fn create_endpoint(
 pub async fn update_endpoint(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
     body: web::Json<UpdateEndpointRequest>,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
@@ -115,6 +122,7 @@ pub async fn update_endpoint(
 pub async fn delete_endpoint(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
     let deleted = SystemEndpointRepository::delete(pool.get_ref(), id)
@@ -131,7 +139,10 @@ pub async fn delete_endpoint(
 // ============ Internal Routes Handlers ============
 
 /// List all internal routes
-pub async fn list_internal_routes(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError> {
+pub async fn list_internal_routes(
+    pool: web::Data<PgPool>,
+    _admin: apolo_auth::SuperadminUser,
+) -> Result<HttpResponse, AppError> {
     let routes = InternalRouteRepository::list(pool.get_ref())
         .await
         .map_err(|e| AppError::Database(format!("Error listing internal routes: {}", e)))?;
@@ -143,6 +154,7 @@ pub async fn list_internal_routes(pool: web::Data<PgPool>) -> Result<HttpRespons
 pub async fn get_internal_route(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
     let route = InternalRouteRepository::get_by_id(pool.get_ref(), id)
@@ -157,6 +169,7 @@ pub async fn get_internal_route(
 pub async fn list_internal_routes_by_type(
     pool: web::Data<PgPool>,
     path: web::Path<String>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let route_type = path.into_inner();
     let routes = InternalRouteRepository::list_by_type(pool.get_ref(), &route_type)
@@ -169,6 +182,7 @@ pub async fn list_internal_routes_by_type(
 /// Create a new internal route
 pub async fn create_internal_route(
     pool: web::Data<PgPool>,
+    _admin: apolo_auth::SuperadminUser,
     body: web::Json<CreateInternalRouteRequest>,
 ) -> Result<HttpResponse, AppError> {
     let req = body.into_inner();
@@ -204,6 +218,7 @@ pub async fn create_internal_route(
 pub async fn update_internal_route(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
     body: web::Json<UpdateInternalRouteRequest>,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
@@ -234,6 +249,7 @@ pub async fn update_internal_route(
 pub async fn delete_internal_route(
     pool: web::Data<PgPool>,
     path: web::Path<Uuid>,
+    _admin: apolo_auth::SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let id = path.into_inner();
     let deleted = InternalRouteRepository::delete(pool.get_ref(), id)
@@ -248,7 +264,10 @@ pub async fn delete_internal_route(
 }
 
 /// Sync internal routes to FreeSWITCH and Kamailio
-pub async fn sync_internal_routes(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError> {
+pub async fn sync_internal_routes(
+    pool: web::Data<PgPool>,
+    _admin: apolo_auth::SuperadminUser,
+) -> Result<HttpResponse, AppError> {
     // Get all enabled routes
     let routes = InternalRouteRepository::list(pool.get_ref())
         .await
@@ -314,14 +333,20 @@ pub fn configure_routes() -> actix_web::Scope {
         // System endpoints
         .route("/endpoints", web::get().to(list_endpoints))
         .route("/endpoints", web::post().to(create_endpoint))
-        .route("/endpoints/type/{type}", web::get().to(list_endpoints_by_type))
+        .route(
+            "/endpoints/type/{type}",
+            web::get().to(list_endpoints_by_type),
+        )
         .route("/endpoints/{id}", web::get().to(get_endpoint))
         .route("/endpoints/{id}", web::put().to(update_endpoint))
         .route("/endpoints/{id}", web::delete().to(delete_endpoint))
         // Internal routes
         .route("/routes", web::get().to(list_internal_routes))
         .route("/routes", web::post().to(create_internal_route))
-        .route("/routes/type/{type}", web::get().to(list_internal_routes_by_type))
+        .route(
+            "/routes/type/{type}",
+            web::get().to(list_internal_routes_by_type),
+        )
         .route("/routes/{id}", web::get().to(get_internal_route))
         .route("/routes/{id}", web::put().to(update_internal_route))
         .route("/routes/{id}", web::delete().to(delete_internal_route))

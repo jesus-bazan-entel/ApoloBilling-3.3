@@ -12,9 +12,17 @@ pub struct Account {
     pub credit_limit: Decimal,
     pub currency: String,
     pub status: AccountStatus,
-    pub max_concurrent_calls: Option<i32>, 
+    pub max_concurrent_calls: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// "balance" | "minute_bucket" — see minute_bucket.rs for the bolsa-de-minutos engine
+    pub billing_model: String,
+    /// "control" | "abierto" — only meaningful when billing_model = "minute_bucket"
+    pub bucket_type: Option<String>,
+    /// Flat overage rate per minute for minute_bucket accounts, if configured
+    pub overage_flat_rate_per_minute: Option<Decimal>,
+    /// rate_cards.card_group to use for LPM overage tariffing when no flat rate is set
+    pub overage_tariff_group: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

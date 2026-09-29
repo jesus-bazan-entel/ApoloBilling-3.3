@@ -31,7 +31,7 @@ import type {
   CreateTrunkRequest,
   CreateTrunkGroupRequest,
   CreateOutboundRouteRequest,
-  CreateInboundRouteRequest,
+  CreateRoutingInboundRouteRequest,
   TrunkGroupMemberInput,
   FailoverDestination,
   TrunkType,
@@ -227,7 +227,7 @@ export default function UnifiedRouting() {
   })
 
   const updateInboundMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<CreateInboundRouteRequest> }) =>
+    mutationFn: ({ id, data }: { id: string; data: Partial<CreateRoutingInboundRouteRequest> }) =>
       updateRoutingInboundRoute(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['routing-inbound'] })
@@ -243,11 +243,10 @@ export default function UnifiedRouting() {
     },
   })
 
-  // Tabs
+  // Tabs - Inbound routes moved to Carrier Routing
   const tabs = [
     { id: 'trunks' as TabType, label: 'Trunks', icon: Server, count: trunks.length },
     { id: 'outbound' as TabType, label: 'Rutas Salientes', icon: Route, count: outboundRoutes.length },
-    { id: 'inbound' as TabType, label: 'Rutas Entrantes', icon: ArrowDownToLine, count: inboundRoutes.length },
   ]
 
   return (
@@ -261,7 +260,7 @@ export default function UnifiedRouting() {
           <div>
             <h1 className="text-3xl font-bold gradient-text tracking-tight">Rutas Externas</h1>
             <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
-              Configuración de trunks, rutas entrantes y salientes
+              Configuración de trunks y rutas salientes
             </p>
           </div>
         </div>
@@ -442,7 +441,7 @@ export default function UnifiedRouting() {
             if (editingInbound) {
               updateInboundMutation.mutate({ id: editingInbound.id, data })
             } else {
-              createInboundMutation.mutate(data as CreateInboundRouteRequest)
+              createInboundMutation.mutate(data as CreateRoutingInboundRouteRequest)
             }
           }}
           isSaving={createInboundMutation.isPending || updateInboundMutation.isPending}
@@ -1414,7 +1413,7 @@ interface InboundModalProps {
   route: RoutingInboundRoute | null
   trunks: RoutingTrunk[]
   onClose: () => void
-  onSave: (data: CreateInboundRouteRequest | Partial<CreateInboundRouteRequest>) => void
+  onSave: (data: CreateRoutingInboundRouteRequest | Partial<CreateRoutingInboundRouteRequest>) => void
   isSaving: boolean
 }
 

@@ -3,7 +3,7 @@ export type AccountType = 'prepaid' | 'postpaid' | 'PREPAID' | 'POSTPAID'
 export type AccountStatus = 'active' | 'suspended' | 'closed' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED'
 
 // User types
-export type UserRole = 'superadmin' | 'admin' | 'operator'
+export type UserRole = 'superadmin' | 'admin' | 'usuario'
 
 export interface User {
   id: number
@@ -16,6 +16,21 @@ export interface User {
   ultimo_login?: string
   created_at: string
   updated_at: string
+}
+
+// Module catalog (visibility system) types
+export interface SystemModule {
+  module_key: string
+  nombre: string
+  seccion: string
+  min_role: UserRole
+  always_visible: boolean
+  orden: number
+}
+
+export interface UserModulesResponse {
+  usuario_id: number
+  granted: string[]
 }
 
 // Audit log types
@@ -47,8 +62,106 @@ export interface Account {
   plan_id?: number              // Plan used to create this account
   consumed_credit?: number      // Postpago: crédito consumido (backend)
   utilization_percent?: number  // Postpago: % de utilización (backend)
+  // Minute-bucket billing (optional — most accounts stay on billing_model='balance')
+  billing_model?: BillingModel
+  bucket_type?: BucketType | null
+  included_minutes?: number
+  proration_mode?: ProrationMode
+  overage_flat_rate_per_minute?: number | null
+  overage_tariff_group?: string | null
+  notification_email?: string | null
   created_at: string
   updated_at: string
+}
+
+// ============== Minute Bucket Billing (Plan Control / Plan Abierto) ==============
+
+export type BillingModel = 'balance' | 'minute_bucket'
+export type BucketType = 'control' | 'abierto'
+export type ProrationMode = 'full' | 'prorated'
+
+export interface BucketConfig {
+  billing_model: BillingModel
+  bucket_type: BucketType | null
+  included_minutes: number
+  proration_mode: ProrationMode
+  overage_flat_rate_per_minute: number | null
+  overage_tariff_group: string | null
+}
+
+export interface PlanBucketConfig extends BucketConfig {
+  plan_id: number
+}
+
+export interface AccountBucketConfig extends BucketConfig {
+  account_id: number
+  notification_email: string | null
+}
+
+export interface MinuteBucketStatus {
+  account_id: number
+  account_number: string
+  billing_model: string
+  bucket_type: BucketType | null
+  cycle_start: string
+  cycle_end: string
+  included_minutes: number
+  is_prorated: boolean
+  additional_minutes: number
+  consumed_minutes: number
+  overage_minutes: number
+  overage_cost: number
+  available_minutes: number
+  utilization_percent: number
+  is_blocked: boolean
+  overage_rate_source: string
+  status: 'open' | 'closed'
+}
+
+export interface MinuteBucketAddition {
+  id: number
+  account_id: number
+  cycle_id: number
+  minutes_added: number
+  reason: string | null
+  created_by: string
+  created_at: string
+}
+
+export interface CycleHistoryEntry {
+  id: number
+  account_id: number
+  cycle_start: string
+  cycle_end: string
+  included_minutes: number
+  is_prorated: boolean
+  proration_days: number | null
+  additional_minutes: number
+  reserved_minutes: number
+  consumed_minutes: number
+  overage_minutes: number
+  overage_cost: number
+  status: 'open' | 'closed'
+  created_at: string
+  updated_at: string
+  additions: MinuteBucketAddition[]
+}
+
+export interface MinuteBucketReportRow {
+  account_id: number
+  account_number: string
+  account_name: string | null
+  bucket_type: string | null
+  included_minutes: number
+  is_prorated: boolean
+  additional_minutes: number
+  additions_count: number
+  consumed_minutes: number
+  overage_minutes: number
+  overage_cost: number
+  utilization_percent: number
+  cycle_status: string
+  is_blocked: boolean
 }
 
 // Plan types
@@ -62,6 +175,13 @@ export interface Plan {
   max_concurrent_calls: number
   description?: string
   enabled: boolean
+  // Minute-bucket billing template (optional — most plans stay on billing_model='balance')
+  billing_model?: BillingModel
+  bucket_type?: BucketType | null
+  included_minutes?: number
+  proration_mode?: ProrationMode
+  overage_flat_rate_per_minute?: number | null
+  overage_tariff_group?: string | null
   created_at: string
   updated_at: string
   created_by: string
@@ -105,6 +225,7 @@ export interface RateCard {
   effective_start: string
   effective_end: string | null
   priority: number
+  card_group: string
   is_effective?: boolean
   rate_per_second?: number
   created_at?: string
@@ -599,7 +720,8 @@ export interface UpdateOutboundRouteRequest {
   enabled?: boolean
 }
 
-export interface CreateInboundRouteRequest {
+// DEPRECATED: Old routing inbound route request - use CreateInboundRouteRequest from simplified model
+export interface CreateRoutingInboundRouteRequest {
   name: string
   description?: string
   did_pattern: string
@@ -620,7 +742,8 @@ export interface CreateInboundRouteRequest {
   enabled?: boolean
 }
 
-export interface UpdateInboundRouteRequest {
+// DEPRECATED: Old routing inbound route update - use UpdateInboundRouteRequestNew from simplified model
+export interface UpdateRoutingInboundRouteRequest {
   name?: string
   description?: string
   did_pattern?: string
@@ -712,4 +835,549 @@ export interface SipStatusLogEntry {
   error_message?: string
   peer_user_agent?: string
   peer_allow_methods?: string
+}
+
+// ============== INBOUND ROUTING (Simplified) ==============
+
+// Inbound Route represents a simple routing rule with auto-priority
+// Priority is determined by pattern length - longer patterns win
+export interface InboundRoute {
+  id: string
+  name: string
+  description?: string
+  pattern: string           // e.g. "672017402000" (exact) or "6720*" (wildcard)
+  is_wildcard: boolean      // computed from pattern
+  source_ip?: string
+  destination_type: 'extension' | 'gateway'
+  gateway_id?: string
+  gateway_name?: string
+  destination_host: string
+  strip_digits: number
+  prefix_to_add: string
+  call_timeout: number
+  ims_mode: boolean
+  early_media: boolean
+  enabled: boolean
+  sync_status: string
+  sync_error?: string
+  created_at: string
+  updated_at: string
+}
+
+// Request type for creating inbound route
+export interface CreateInboundRouteRequest {
+  name: string
+  description?: string
+  pattern: string
+  source_ip?: string
+  destination_type?: string
+  gateway_id?: string
+  destination_host?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  call_timeout?: number
+  ims_mode?: boolean
+  early_media?: boolean
+  enabled?: boolean
+}
+
+// Request type for updating inbound route
+export interface UpdateInboundRouteRequestNew {
+  name?: string
+  description?: string
+  pattern?: string
+  source_ip?: string
+  destination_type?: string
+  gateway_id?: string
+  destination_host?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  call_timeout?: number
+  ims_mode?: boolean
+  early_media?: boolean
+  enabled?: boolean
+}
+
+// DEPRECATED: Kept for backward compatibility
+export interface Carrier {
+  id: string
+  name: string
+  description?: string
+  prefix: string
+  source_ip?: string
+  default_destination_type: 'extension' | 'gateway'
+  default_gateway_id?: string
+  default_gateway_name?: string
+  default_destination_host: string
+  default_destination_profile: string
+  strip_digits: number
+  prefix_to_add: string
+  ims_mode: boolean
+  send_early_media: boolean
+  call_timeout: number
+  enabled: boolean
+  sync_status: string
+  sync_error?: string
+  did_count: number
+  created_at: string
+  updated_at: string
+}
+
+// DEPRECATED: Carrier summary for dropdowns
+export interface CarrierSummary {
+  id: string
+  name: string
+  prefix: string
+}
+
+// DEPRECATED: DID Override represents a routing exception for a specific DID
+export interface DidOverride {
+  id: string
+  carrier_id: string
+  carrier_name: string
+  carrier_prefix: string
+  did: string
+  name?: string
+  description?: string
+  destination_type: 'extension' | 'gateway'
+  gateway_id?: string
+  gateway_name?: string
+  destination_extension?: string
+  destination_host?: string
+  destination_profile: string
+  strip_digits?: number
+  prefix_to_add?: string
+  ims_mode?: boolean
+  send_early_media?: boolean
+  call_timeout?: number
+  enabled: boolean
+  sync_status: string
+  sync_error?: string
+  created_at: string
+  updated_at: string
+}
+
+// DEPRECATED: Request types for Carrier
+export interface CreateCarrierRequest {
+  name: string
+  description?: string
+  prefix: string
+  source_ip?: string
+  default_destination_type?: string
+  default_gateway_id?: string
+  default_destination_host?: string
+  default_destination_profile?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  ims_mode?: boolean
+  send_early_media?: boolean
+  call_timeout?: number
+  enabled?: boolean
+}
+
+export interface UpdateCarrierRequest {
+  name?: string
+  description?: string
+  prefix?: string
+  source_ip?: string
+  default_destination_type?: string
+  default_gateway_id?: string
+  default_destination_host?: string
+  default_destination_profile?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  ims_mode?: boolean
+  send_early_media?: boolean
+  call_timeout?: number
+  enabled?: boolean
+}
+
+// DEPRECATED: Request types for DID Override
+export interface CreateDidOverrideRequest {
+  carrier_id: string
+  did: string
+  name?: string
+  description?: string
+  destination_type: string
+  gateway_id?: string
+  destination_extension?: string
+  destination_host?: string
+  destination_profile?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  ims_mode?: boolean
+  send_early_media?: boolean
+  call_timeout?: number
+  enabled?: boolean
+}
+
+export interface UpdateDidOverrideRequest {
+  carrier_id?: string
+  did?: string
+  name?: string
+  description?: string
+  destination_type?: string
+  gateway_id?: string
+  destination_extension?: string
+  destination_host?: string
+  destination_profile?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  ims_mode?: boolean
+  send_early_media?: boolean
+  call_timeout?: number
+  enabled?: boolean
+}
+
+// ============== ENDPOINT MONITOR ==============
+
+// Current status of a single endpoint (from latest probe cycle)
+export interface EndpointStatus {
+  trunk_id: string
+  name: string
+  ip: string
+  port: number
+  trunk_type: string
+  status: 'up' | 'down'
+  resp_code: number
+  rtt_ms: string | null
+  last_ts: number
+}
+
+// Response for GET /monitor/endpoints
+export interface EndpointStatusResponse {
+  endpoints: EndpointStatus[]
+  generated_at: number
+}
+
+// A single point in the time series for charting
+export interface SeriesPoint {
+  t: number
+  rtt: string | null
+  status: 'up' | 'down'
+  downs: number
+  n: number
+}
+
+// Time series data for a single endpoint
+export interface EndpointSeries {
+  trunk_id: string
+  name: string
+  ip: string
+  points: SeriesPoint[]
+}
+
+// A row in the probes table
+export interface ProbeRow {
+  id: number
+  ts: number
+  trunk_id: string
+  name: string
+  ip: string
+  trunk_type: string
+  port: number
+  status: 'up' | 'down'
+  resp_code: number
+  rtt_ms: string | null
+}
+
+// Response for GET /monitor/results
+export interface ProbeResultsResponse {
+  frm: number
+  to: number
+  bucket_seconds: number
+  generated_at: number
+  series: EndpointSeries[]
+  rows: ProbeRow[]
+}
+
+// Query parameters for probe results
+export interface ProbeResultsQuery {
+  name?: string
+  ip?: string
+  frm?: number
+  to?: number
+  limit?: number
+}
+
+// Query parameters for evidence report
+export interface EvidenceReportQuery {
+  name?: string
+  ip?: string
+  frm?: number
+  to?: number
+  full?: boolean
+}
+
+// ============== SIMPLIFIED ROUTING (dSIPRouter model) ==============
+
+// Transport protocol
+export type TransportProtocol = 'udp' | 'tcp' | 'tls'
+
+// Sync status with Kamailio
+export type KamailioSyncStatus = 'pending' | 'synced' | 'error'
+
+// SIP OPTIONS status
+export type SipOptionsStatus = 'unknown' | 'reachable' | 'unreachable' | 'checking'
+
+// Failover strategy for carrier groups
+export type CarrierFailoverStrategy = 'sequential' | 'round_robin' | 'weighted'
+
+// ============== CARRIERS (dr_gateways type=8) ==============
+
+export interface SipCarrier {
+  id: string
+  name: string
+  description?: string
+  host: string
+  port: number
+  transport: TransportProtocol
+  auth_username?: string
+  strip_digits: number
+  prefix_to_add: string
+  kamailio_gwid?: number
+  sync_status: KamailioSyncStatus
+  sync_error?: string
+  sip_status: SipOptionsStatus
+  last_options_check?: string
+  last_options_latency_ms?: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateSipCarrierRequest {
+  name: string
+  description?: string
+  host: string
+  port?: number
+  transport?: TransportProtocol
+  auth_username?: string
+  auth_password?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  enabled?: boolean
+}
+
+export interface UpdateSipCarrierRequest {
+  name?: string
+  description?: string
+  host?: string
+  port?: number
+  transport?: TransportProtocol
+  auth_username?: string
+  auth_password?: string
+  strip_digits?: number
+  prefix_to_add?: string
+  enabled?: boolean
+}
+
+export interface SipCarrierListResponse {
+  carriers: SipCarrier[]
+  total: number
+  online_count: number
+  offline_count: number
+}
+
+export interface CarrierSipCheckResult {
+  carrier_id: string
+  carrier_name: string
+  status: SipOptionsStatus
+  latency_ms?: number
+  response_code?: number
+  error_message?: string
+  checked_at: string
+}
+
+export interface CarrierSyncResult {
+  carrier_id: string
+  carrier_name: string
+  kamailio_gwid?: number
+  success: boolean
+  error?: string
+}
+
+export interface BulkCarrierSyncResult {
+  total: number
+  succeeded: number
+  failed: number
+  results: CarrierSyncResult[]
+}
+
+// ============== ENDPOINTS (dr_gateways type=9) ==============
+
+export interface SipEndpoint {
+  id: string
+  name: string
+  description?: string
+  host: string
+  port: number
+  transport: TransportProtocol
+  fs_profile: string
+  kamailio_gwid?: number
+  sync_status: KamailioSyncStatus
+  sync_error?: string
+  enabled: boolean
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateSipEndpointRequest {
+  name: string
+  description?: string
+  host: string
+  port?: number
+  transport?: TransportProtocol
+  fs_profile?: string
+  enabled?: boolean
+  is_default?: boolean
+}
+
+export interface UpdateSipEndpointRequest {
+  name?: string
+  description?: string
+  host?: string
+  port?: number
+  transport?: TransportProtocol
+  fs_profile?: string
+  enabled?: boolean
+  is_default?: boolean
+}
+
+export interface SipEndpointListResponse {
+  endpoints: SipEndpoint[]
+  total: number
+  enabled_count: number
+}
+
+export interface EndpointSyncResult {
+  endpoint_id: string
+  endpoint_name: string
+  kamailio_gwid?: number
+  success: boolean
+  error?: string
+}
+
+// ============== CARRIER GROUPS ==============
+
+export interface CarrierGroupMember {
+  id: string
+  group_id: string
+  carrier_id: string
+  carrier_name: string
+  carrier_host: string
+  carrier_enabled: boolean
+  priority: number
+  weight: number
+}
+
+export interface CarrierGroupBase {
+  id: string
+  name: string
+  description?: string
+  strategy: CarrierFailoverStrategy
+  kamailio_group_id?: number
+  sync_status: KamailioSyncStatus
+  sync_error?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CarrierGroupWithMembers extends CarrierGroupBase {
+  members: CarrierGroupMember[]
+}
+
+export interface CreateCarrierGroupRequest {
+  name: string
+  description?: string
+  strategy?: CarrierFailoverStrategy
+}
+
+export interface UpdateCarrierGroupRequestNew {
+  name?: string
+  description?: string
+  strategy?: CarrierFailoverStrategy
+}
+
+export interface AddCarrierGroupMemberRequest {
+  carrier_id: string
+  priority?: number
+  weight?: number
+}
+
+export interface UpdateCarrierGroupMemberRequest {
+  priority?: number
+  weight?: number
+}
+
+export interface CarrierGroupListResponse {
+  groups: CarrierGroupWithMembers[]
+  total: number
+}
+
+// ============== OUTBOUND ROUTES ==============
+
+export interface OutboundRouteNew {
+  id: string
+  name: string
+  description?: string
+  prefix: string
+  carrier_group_id?: string
+  carrier_id?: string
+  destination_name?: string
+  destination_type: 'group' | 'carrier'
+  priority: number
+  kamailio_ruleid?: number
+  sync_status: KamailioSyncStatus
+  sync_error?: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateOutboundRouteRequestNew {
+  name: string
+  description?: string
+  prefix: string
+  carrier_group_id?: string
+  carrier_id?: string
+  enabled?: boolean
+}
+
+export interface UpdateOutboundRouteRequestNew {
+  name?: string
+  description?: string
+  prefix?: string
+  carrier_group_id?: string
+  carrier_id?: string
+  enabled?: boolean
+}
+
+export interface OutboundRouteListResponse {
+  routes: OutboundRouteNew[]
+  total: number
+  enabled_count: number
+  synced_count: number
+}
+
+export interface OutboundRouteSyncResult {
+  route_id: string
+  route_name: string
+  kamailio_ruleid?: number
+  success: boolean
+  error?: string
+}
+
+// ============== KAMAILIO SYNC ==============
+
+export interface OutboundSyncAllResult {
+  carriers_synced: number
+  carriers_failed: number
+  groups_synced: number
+  groups_failed: number
+  routes_synced: number
+  routes_failed: number
+  kamailio_reloaded: boolean
+  errors: string[]
 }

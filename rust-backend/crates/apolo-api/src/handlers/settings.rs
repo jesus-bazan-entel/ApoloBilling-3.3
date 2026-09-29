@@ -1,7 +1,10 @@
 //! System settings handlers
 //!
 //! HTTP handlers for reading and updating system-wide configuration settings.
-//! GET is available to all authenticated users; PUT is restricted to superadmins.
+//! GET stays open to any authenticated user — some settings (e.g.
+//! `outbound_auth_enabled`) are read inline by business pages like Accounts
+//! that Admin (and a Usuario with the `accounts` module) must keep working.
+//! PUT (actually changing a setting) is restricted to Superadmin.
 
 use crate::dto::ApiResponse;
 use actix_web::{web, HttpResponse};
@@ -67,16 +70,15 @@ pub async fn update_setting(
     }
 
     // Verify the key exists before attempting an update.
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM system_settings WHERE key = $1)",
-    )
-    .bind(&key)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| {
-        warn!(error = %e, key = %key, "DB error checking setting existence");
-        AppError::Internal(format!("Database error: {}", e))
-    })?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM system_settings WHERE key = $1)")
+            .bind(&key)
+            .fetch_one(pool.get_ref())
+            .await
+            .map_err(|e| {
+                warn!(error = %e, key = %key, "DB error checking setting existence");
+                AppError::Internal(format!("Database error: {}", e))
+            })?;
 
     if !exists {
         return Err(AppError::NotFound(format!("Setting '{}' not found", key)));

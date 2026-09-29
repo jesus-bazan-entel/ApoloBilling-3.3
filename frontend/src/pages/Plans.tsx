@@ -1,10 +1,19 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchPlans, createPlan, updatePlan, deletePlan } from '../api/client'
+import {
+  fetchPlans,
+  createPlan,
+  updatePlan,
+  deletePlan,
+  getPlanBucketConfig,
+  updatePlanBucketConfig,
+  getRateCardGroups,
+} from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
-import { FileText, Plus, Edit, X, Trash2, AlertCircle } from 'lucide-react'
-import type { Plan, AccountType } from '../types'
+import { FileText, Plus, Edit, X, Trash2, AlertCircle, Timer, Check } from 'lucide-react'
+import type { Plan, AccountType, BucketConfig } from '../types'
+import { DEFAULT_NEW_BUCKET_CONFIG } from '../lib/bucketDefaults'
 
 export default function PlansPage() {
   const [showModal, setShowModal] = useState(false)
@@ -19,9 +28,16 @@ export default function PlansPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: createPlan,
+    mutationFn: async ({ data, bucketConfig }: { data: Partial<Plan>; bucketConfig?: BucketConfig }) => {
+      const newPlan = await createPlan(data)
+      if (bucketConfig && bucketConfig.billing_model === 'minute_bucket') {
+        await updatePlanBucketConfig(newPlan.id, bucketConfig)
+      }
+      return newPlan
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
+      queryClient.invalidateQueries({ queryKey: ['plan-bucket-config'] })
       setShowModal(false)
       setEditingPlan(null)
       setError('')
@@ -113,6 +129,11 @@ export default function PlansPage() {
       render: (plan: Plan) => <span>{plan.max_concurrent_calls}</span>,
     },
     {
+      key: 'billing_model',
+      header: 'Facturación',
+      render: (plan: Plan) => <PlanBillingModelBadge planId={plan.id} />,
+    },
+    {
       key: 'enabled',
       header: 'Estado',
       render: (plan: Plan) => (
@@ -182,11 +203,11 @@ export default function PlansPage() {
             setEditingPlan(null)
             setError('')
           }}
-          onSave={(data) => {
+          onSave={(data, bucketConfig) => {
             if (editingPlan) {
               updateMutation.mutate({ id: editingPlan.id, data })
             } else {
-              createMutation.mutate(data)
+              createMutation.mutate({ data, bucketConfig })
             }
           }}
         />
@@ -212,24 +233,44 @@ function PlanModal({
   plan: Plan | null
   error: string
   onClose: () => void
-  onSave: (data: Partial<Plan>) => void
+  onSave: (data: Partial<Plan>, bucketConfig?: BucketConfig) => void
 }) {
   const [formData, setFormData] = useState({
     plan_name: plan?.plan_name || '',
     plan_code: plan?.plan_code || '',
-    account_type: plan?.account_type || 'PREPAID',
-    initial_balance: plan?.initial_balance || 10,
+    // No hay planes prepago/postpago en el modelo de Fibertel — account_type
+    // sigue existiendo en el esquema pero es inerte para planes de bolsa
+    // (ver AuthorizationService::authorize, nunca lo lee en el camino
+    // minute_bucket). Un plan nuevo siempre nace como Control/Abierto, así
+    // que estos valores son un default fijo, no una elección del usuario.
+    account_type: plan?.account_type || 'POSTPAID',
+    initial_balance: plan?.initial_balance || 0,
     credit_limit: plan?.credit_limit || 0,
     max_concurrent_calls: plan?.max_concurrent_calls || 5,
     description: plan?.description || '',
     enabled: plan?.enabled ?? true,
+  })
+  // Only used when creating: edit mode configures/saves its bucket
+  // independently via BucketConfigSection once the plan has an id.
+  const [newBucketConfig, setNewBucketConfig] = useState<BucketConfig>(DEFAULT_NEW_BUCKET_CONFIG)
+  const { data: cardGroups = ['standard'] } = useQuery({
+    queryKey: ['rate-card-groups'],
+    queryFn: getRateCardGroups,
+    enabled: !plan,
   })
 
   const isPrepaid = formData.account_type.toUpperCase() === 'PREPAID'
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(formData)
+    if (plan) {
+      onSave(formData)
+    } else {
+      // billing_model aquí es solo un hint para que el backend salte la
+      // validación de saldo/crédito > 0 (ver PlanCreateRequest::validate_business_rules);
+      // el billing_model real del plan se fija con el PUT bucket-config que sigue.
+      onSave({ ...formData, billing_model: 'minute_bucket' }, newBucketConfig)
+    }
   }
 
   return (
@@ -285,23 +326,28 @@ function PlanModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Tipo de Cuenta *
-            </label>
-            <select
-              required
-              disabled={!!plan}
-              value={formData.account_type}
-              onChange={(e) =>
-                setFormData({ ...formData, account_type: e.target.value as AccountType })
-              }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
-            >
-              <option value="PREPAID">Prepago</option>
-              <option value="POSTPAID">Postpago</option>
-            </select>
-          </div>
+          {plan && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                  Tipo de Cuenta *
+                </label>
+                <select
+                  required
+                  disabled
+                  value={formData.account_type}
+                  onChange={(e) =>
+                    setFormData({ ...formData, account_type: e.target.value as AccountType })
+                  }
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                >
+                  <option value="PREPAID">Prepago (legacy)</option>
+                  <option value="POSTPAID">Postpago (legacy)</option>
+                </select>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  Campo legacy del modelo de saldo — los planes nuevos son Control/Abierto, sin prepago/postpago.
+                </p>
+              </div>
 
           {isPrepaid ? (
             <div>
@@ -349,6 +395,20 @@ function PlanModal({
                 El límite de crédito no puede ser cero (sin planes ilimitados)
               </p>
             </div>
+          )}
+            </>
+          )}
+
+          {!plan && (
+            <BucketConfigForm
+              title="Tipo de Plan"
+              initial={newBucketConfig}
+              cardGroups={cardGroups}
+              isSaving={false}
+              saved={false}
+              onChange={setNewBucketConfig}
+              lockToBucket
+            />
           )}
 
           <div>
@@ -398,6 +458,8 @@ function PlanModal({
               Plan activo
             </label>
           </div>
+
+          {plan && <BucketConfigSection planId={plan.id} />}
 
           <div className="flex justify-end space-x-3 pt-4">
             <button
@@ -455,6 +517,325 @@ function DeleteModal({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Compact badge showing a plan's billing model, fetched lazily per row. */
+function PlanBillingModelBadge({ planId }: { planId: number }) {
+  const { data } = useQuery({
+    queryKey: ['plan-bucket-config', planId],
+    queryFn: () => getPlanBucketConfig(planId),
+    staleTime: 60000,
+  })
+
+  if (!data) return <span className="text-xs text-[var(--color-text-tertiary)]">…</span>
+
+  if (data.billing_model !== 'minute_bucket') {
+    return <Badge variant="default">Saldo</Badge>
+  }
+
+  return (
+    <Badge variant="info">
+      Bolsa ({data.bucket_type === 'control' ? 'Control' : 'Abierto'})
+    </Badge>
+  )
+}
+
+/**
+ * Minute-bucket billing configuration for a plan. Lives on a separate
+ * endpoint/table from the rest of the plan (`/plans/{id}/bucket-config`), so
+ * it saves independently from the surrounding plan form instead of being
+ * bundled into the same submit.
+ */
+function BucketConfigSection({ planId }: { planId: number }) {
+  const queryClient = useQueryClient()
+  const [saved, setSaved] = useState(false)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['plan-bucket-config', planId],
+    queryFn: () => getPlanBucketConfig(planId),
+  })
+
+  const { data: cardGroups = ['standard'] } = useQuery({
+    queryKey: ['rate-card-groups'],
+    queryFn: getRateCardGroups,
+  })
+
+  const mutation = useMutation({
+    mutationFn: (config: BucketConfig) => updatePlanBucketConfig(planId, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plan-bucket-config', planId] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  if (isLoading || !data) {
+    return (
+      <div className="border-t border-[var(--color-border-primary)] pt-4 mt-2">
+        <p className="text-sm text-[var(--color-text-tertiary)]">Cargando configuración de bolsa...</p>
+      </div>
+    )
+  }
+
+  return (
+    <BucketConfigForm
+      title="Facturación: Bolsa de Minutos"
+      initial={data}
+      cardGroups={cardGroups}
+      isSaving={mutation.isPending}
+      saved={saved}
+      onSave={(config) => mutation.mutate(config)}
+    />
+  )
+}
+
+/**
+ * Shared bucket-config form used by both Plans (template) and Accounts
+ * (override). Renders as a plain section (no nested <form>) so it can live
+ * inside the parent modal's own <form> without invalid nested forms — the
+ * save button is type="button" and calls onSave directly.
+ */
+export function BucketConfigForm({
+  title,
+  initial,
+  cardGroups,
+  isSaving,
+  saved,
+  onSave,
+  onChange,
+  extra,
+  lockToBucket,
+}: {
+  title: string
+  initial: BucketConfig
+  cardGroups: string[]
+  isSaving: boolean
+  saved: boolean
+  /** Immediate-save mode (edit screens): renders its own "Guardar" button. */
+  onSave?: (config: BucketConfig) => void
+  /**
+   * Deferred mode (create screens, no id to save against yet): fires on every
+   * field change so the parent can hold the config and submit it together
+   * with the rest of the create form. No internal save button is rendered.
+   */
+  onChange?: (config: BucketConfig) => void
+  extra?: React.ReactNode
+  /**
+   * There is no "Saldo" plan type anymore (Fibertel's model is Plan Control
+   * / Plan Abierto only) — hides the billing_model dropdown entirely and
+   * always renders the bucket fields, since `initial.billing_model` is
+   * already forced to 'minute_bucket' by the caller.
+   */
+  lockToBucket?: boolean
+}) {
+  const [cfg, setCfg] = useState<BucketConfig>(initial)
+  const updateCfg = (patch: Partial<BucketConfig>) => {
+    setCfg((prev) => {
+      const next = { ...prev, ...patch }
+      onChange?.(next)
+      return next
+    })
+  }
+  const isBucket = lockToBucket || cfg.billing_model === 'minute_bucket'
+  const usesFlatRate = cfg.overage_flat_rate_per_minute !== null && cfg.overage_flat_rate_per_minute !== undefined
+
+  return (
+    <div className="border-t border-[var(--color-border-primary)] pt-4 mt-2 space-y-4">
+      <h3 className="text-sm font-bold text-[var(--color-text-primary)] flex items-center">
+        <Timer className="w-4 h-4 mr-2 text-blue-600" />
+        {title}
+      </h3>
+
+      {!lockToBucket && (
+        <div>
+          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+            Modelo de Facturación
+          </label>
+          <select
+            value={cfg.billing_model}
+            onChange={(e) => {
+              const billing_model = e.target.value as BucketConfig['billing_model']
+              updateCfg({
+                billing_model,
+                // Default to "control" the first time so a bare model switch
+                // is already valid against the backend (bucket_type is
+                // required when billing_model = minute_bucket).
+                bucket_type: billing_model === 'minute_bucket' ? cfg.bucket_type ?? 'control' : cfg.bucket_type,
+              })
+            }}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="balance">Saldo (modelo actual)</option>
+            <option value="minute_bucket">Bolsa de Minutos</option>
+          </select>
+        </div>
+      )}
+
+      {isBucket && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+              {lockToBucket ? 'Tipo de Plan' : 'Tipo de Bolsa'}
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label
+                className={`border rounded-lg p-3 cursor-pointer text-sm ${
+                  cfg.bucket_type === 'control' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="bucket_type"
+                  className="mr-2"
+                  checked={cfg.bucket_type === 'control'}
+                  onChange={() => updateCfg({ bucket_type: 'control' })}
+                />
+                <strong>Control</strong>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  Bloquea llamadas nuevas al agotar la bolsa.
+                </p>
+              </label>
+              <label
+                className={`border rounded-lg p-3 cursor-pointer text-sm ${
+                  cfg.bucket_type === 'abierto' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="bucket_type"
+                  className="mr-2"
+                  checked={cfg.bucket_type === 'abierto'}
+                  onChange={() => updateCfg({ bucket_type: 'abierto' })}
+                />
+                <strong>Abierto</strong>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  Nunca bloquea; el excedente se tarifica y reporta.
+                </p>
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+              Minutos Incluidos
+            </label>
+            <input
+              type="number"
+              min="0"
+              value={cfg.included_minutes}
+              onChange={(e) => updateCfg({ included_minutes: Number(e.target.value) })}
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+              Prorrateo del Primer Ciclo
+            </label>
+            <div className="flex gap-4 text-sm">
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="proration_mode"
+                  checked={cfg.proration_mode === 'full'}
+                  onChange={() => updateCfg({ proration_mode: 'full' })}
+                />
+                Bolsa completa desde el alta
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="proration_mode"
+                  checked={cfg.proration_mode === 'prorated'}
+                  onChange={() => updateCfg({ proration_mode: 'prorated' })}
+                />
+                Prorratear por días restantes
+              </label>
+            </div>
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+              El valor prorrateado se calcula al abrir el primer ciclo y queda editable desde el detalle de la cuenta.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+              Tarifa de Excedente
+            </label>
+            <div className="flex gap-4 text-sm mb-2">
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="overage_mode"
+                  checked={usesFlatRate}
+                  onChange={() =>
+                    updateCfg({ overage_flat_rate_per_minute: 0, overage_tariff_group: null })
+                  }
+                />
+                Tarifa fija por minuto
+              </label>
+              <label className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  name="overage_mode"
+                  checked={!usesFlatRate}
+                  onChange={() =>
+                    updateCfg({ overage_flat_rate_per_minute: null, overage_tariff_group: 'standard' })
+                  }
+                />
+                Tarifario por destino (grupo)
+              </label>
+            </div>
+            {usesFlatRate ? (
+              <input
+                type="number"
+                min="0"
+                step="0.0001"
+                value={cfg.overage_flat_rate_per_minute ?? 0}
+                onChange={(e) =>
+                  updateCfg({ overage_flat_rate_per_minute: Number(e.target.value) })
+                }
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="Ej. 0.08"
+              />
+            ) : (
+              <input
+                type="text"
+                list="overage-group-options"
+                value={cfg.overage_tariff_group ?? 'standard'}
+                onChange={(e) => updateCfg({ overage_tariff_group: e.target.value || 'standard' })}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            )}
+            <datalist id="overage-group-options">
+              {cardGroups.map((g) => (
+                <option key={g} value={g} />
+              ))}
+            </datalist>
+          </div>
+        </>
+      )}
+
+      {extra}
+
+      {onSave && (
+        <div className="flex items-center justify-end gap-3">
+          {saved && (
+            <span className="text-sm text-green-600 flex items-center">
+              <Check className="w-4 h-4 mr-1" /> Guardado
+            </span>
+          )}
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={() => onSave(cfg)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isSaving ? 'Guardando...' : 'Guardar Bolsa de Minutos'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

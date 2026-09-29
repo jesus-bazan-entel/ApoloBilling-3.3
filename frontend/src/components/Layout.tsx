@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { checkHealth, getCurrentUser, logout, changePassword } from '../api/client'
 import { useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
+import { MODULES, hasModule, type ModuleKey } from '../constants/modules'
 import {
   ArrowRightLeft,
   LayoutDashboard,
@@ -30,28 +31,34 @@ import {
   Sun,
   Moon,
   Monitor,
+  Building2,
+  Server,
+  Route,
+  Layers,
+  Timer,
 } from 'lucide-react'
 
-// Navigation items organized by sections
+// Navigation items organized by sections. Each item declares the module key
+// that gates it — a section is hidden entirely once none of its items are
+// visible to the current session (see `visibleSections` below).
 interface NavSection {
   title: string
   items: NavItem[]
-  adminOnly?: boolean
 }
 
 interface NavItem {
   name: string
   href: string
   icon: React.ComponentType<{ className?: string }>
+  moduleKey: ModuleKey
 }
 
-// Main operations - visible to all authenticated users
 const mainSection: NavSection = {
   title: 'Principal',
   items: [
-    { name: 'Panel de Control', href: '/', icon: LayoutDashboard },
-    { name: 'Llamadas Activas', href: '/calls', icon: Phone },
-    { name: 'Registros CDR', href: '/cdr', icon: FileText },
+    { name: 'Panel de Control', href: '/', icon: LayoutDashboard, moduleKey: MODULES.DASHBOARD },
+    { name: 'Llamadas Activas', href: '/calls', icon: Phone, moduleKey: MODULES.ACTIVE_CALLS },
+    { name: 'Registros CDR', href: '/cdr', icon: FileText, moduleKey: MODULES.CDR },
   ],
 }
 
@@ -59,9 +66,10 @@ const mainSection: NavSection = {
 const billingSection: NavSection = {
   title: 'Facturación',
   items: [
-    { name: 'Cuentas', href: '/accounts', icon: Users },
-    { name: 'Planes', href: '/plans', icon: CreditCard },
-    { name: 'Saldos', href: '/balance', icon: DollarSign },
+    { name: 'Cuentas', href: '/accounts', icon: Users, moduleKey: MODULES.ACCOUNTS },
+    { name: 'Planes', href: '/plans', icon: CreditCard, moduleKey: MODULES.PLANS },
+    { name: 'Saldos', href: '/balance', icon: DollarSign, moduleKey: MODULES.BALANCE },
+    { name: 'Bolsas de Minutos', href: '/minute-buckets', icon: Timer, moduleKey: MODULES.MINUTE_BUCKETS },
   ],
 }
 
@@ -69,33 +77,45 @@ const billingSection: NavSection = {
 const ratesSection: NavSection = {
   title: 'Tarifas',
   items: [
-    { name: 'Zonas', href: '/zones', icon: Globe },
-    { name: 'Tarifas', href: '/rates', icon: BarChart3 },
+    { name: 'Zonas', href: '/zones', icon: Globe, moduleKey: MODULES.ZONES },
+    { name: 'Tarifas', href: '/rates', icon: BarChart3, moduleKey: MODULES.RATES },
   ],
 }
 
-// Administration - superadmin only
+// Operación - full access for Admin/Superadmin by default; a Usuario needs
+// each module granted individually
 const adminSection: NavSection = {
-  title: 'Administración',
-  adminOnly: true,
+  title: 'Operación',
   items: [
-    { name: 'Dispositivos SIP', href: '/sip-devices', icon: Headphones },
-    { name: 'Rutas Externas', href: '/routing', icon: Router },
-    { name: 'Rutas Internas', href: '/internal-routing', icon: ArrowRightLeft },
+    { name: 'Dispositivos SIP', href: '/sip-devices', icon: Headphones, moduleKey: MODULES.SIP_DEVICES },
+    { name: 'Rutas Entrantes', href: '/inbound-routing', icon: Building2, moduleKey: MODULES.INBOUND_ROUTING },
+    { name: 'Rutas Salientes', href: '/outbound-routing', icon: Route, moduleKey: MODULES.OUTBOUND_ROUTING },
+    { name: 'Carriers', href: '/carriers', icon: Server, moduleKey: MODULES.CARRIERS },
+    { name: 'Carrier Groups', href: '/carrier-groups', icon: Layers, moduleKey: MODULES.CARRIER_GROUPS },
+    { name: 'Endpoints', href: '/endpoints', icon: Shield, moduleKey: MODULES.ENDPOINTS },
+    { name: 'Monitor Endpoints', href: '/endpoint-monitor', icon: Activity, moduleKey: MODULES.ENDPOINT_MONITOR },
   ],
 }
 
-// System - superadmin only
+// Legacy routing - exclusive to factory support (Superadmin)
+const legacySection: NavSection = {
+  title: 'Legacy',
+  items: [
+    { name: 'Unified Routing', href: '/routing', icon: Router, moduleKey: MODULES.LEGACY_ROUTING },
+    { name: 'Internal Routing', href: '/internal-routing', icon: ArrowRightLeft, moduleKey: MODULES.LEGACY_ROUTING },
+  ],
+}
+
+// Sistema - Admin+ (never assignable to a Usuario)
 const systemSection: NavSection = {
   title: 'Sistema',
-  adminOnly: true,
   items: [
-    { name: 'Usuarios', href: '/users', icon: UserCog },
-    { name: 'Auditoría', href: '/audit-logs', icon: FileSearch },
+    { name: 'Usuarios', href: '/users', icon: UserCog, moduleKey: MODULES.USERS },
+    { name: 'Auditoría', href: '/audit-logs', icon: FileSearch, moduleKey: MODULES.AUDIT_LOGS },
   ],
 }
 
-const allSections = [mainSection, billingSection, ratesSection, adminSection, systemSection]
+const allSections = [mainSection, billingSection, ratesSection, adminSection, systemSection, legacySection]
 
 interface LayoutProps {
   children: React.ReactNode
@@ -189,10 +209,15 @@ export default function Layout({ children }: LayoutProps) {
 
   const isOnline = health?.status === 'ok' || health?.status === 'healthy'
 
-  // Filter sections based on user role
-  const visibleSections = allSections.filter(
-    section => !section.adminOnly || currentUser?.role === 'superadmin'
-  )
+  // Filter each section down to the modules this session can see, then drop
+  // sections that end up empty (e.g. a Usuario with no Operación modules
+  // granted never sees an empty "Operación" header).
+  const visibleSections = allSections
+    .map(section => ({
+      ...section,
+      items: section.items.filter(item => hasModule(currentUser, item.moduleKey)),
+    }))
+    .filter(section => section.items.length > 0)
 
   const handleLogout = async () => {
     setIsLoggingOut(true)
@@ -221,7 +246,7 @@ export default function Layout({ children }: LayoutProps) {
         return 'bg-red-500/20 text-red-400 border-red-500/30'
       case 'admin':
         return 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-      case 'operator':
+      case 'usuario':
         return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
       default:
         return 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] border-[var(--color-border-primary)]'

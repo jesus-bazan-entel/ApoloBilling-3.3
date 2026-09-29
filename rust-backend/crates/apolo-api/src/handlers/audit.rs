@@ -1,6 +1,6 @@
 //! Audit log handlers
 //!
-//! HTTP handlers for audit log queries (superadmin only).
+//! HTTP handlers for audit log queries (admin+).
 
 use crate::dto::{ApiResponse, AuditLogListResponse, AuditLogQueryParams, AuditLogResponse};
 use actix_web::{web, HttpResponse};
@@ -11,14 +11,13 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tracing::debug;
 
-/// List audit logs with filters (superadmin only)
+/// List audit logs with filters (admin+)
 pub async fn list_audit_logs(
     pool: web::Data<PgPool>,
     user: AuthenticatedUser,
     query: web::Query<AuditLogQueryParams>,
 ) -> Result<HttpResponse, AppError> {
-    // Only superadmin can view audit logs
-    if !user.is_superadmin() {
+    if !user.is_admin() {
         return Err(AppError::Forbidden);
     }
 
@@ -86,13 +85,12 @@ pub async fn list_audit_logs(
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
-/// Get audit statistics (superadmin only)
+/// Get audit statistics (admin+)
 pub async fn get_audit_stats(
     pool: web::Data<PgPool>,
     user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
-    // Only superadmin can view audit stats
-    if !user.is_superadmin() {
+    if !user.is_admin() {
         return Err(AppError::Forbidden);
     }
 

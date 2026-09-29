@@ -96,14 +96,14 @@ export default function Login() {
             {/* Username field */}
             <div className="space-y-2">
               <label htmlFor="username" className="block text-sm font-semibold text-[#1E293B] dark:text-[#CBD5E1]">
-                Usuario
+                Usuario o email
               </label>
               <input
                 id="username"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Ingresa tu usuario"
+                placeholder="Usuario o email"
                 autoComplete="username"
                 autoFocus
                 className="w-full px-4 py-3 rounded-xl bg-[#F0F9FF] dark:bg-[#1E293B] border-2 border-[#BAE6FD] dark:border-[#334155] text-[#1E293B] dark:text-white placeholder-[#94A3B8] focus:outline-none focus:border-[#0099D9] focus:ring-4 focus:ring-[#0099D9]/10 transition-all"

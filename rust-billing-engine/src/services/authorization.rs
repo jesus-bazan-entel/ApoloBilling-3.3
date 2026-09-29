@@ -4,6 +4,7 @@ use crate::models::{AuthRequest, AuthResponse, Account, AccountStatus, AccountTy
 use crate::database::DbPool;
 use crate::cache::RedisClient;
 use crate::services::ReservationManager;
+use crate::services::MinuteBucketManager;
 use crate::error::BillingError;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -16,6 +17,7 @@ pub struct AuthorizationService {
     db_pool: DbPool,
     redis: RedisClient,
     reservation_mgr: Arc<ReservationManager>,
+    minute_bucket_mgr: Arc<MinuteBucketManager>,
 }
 
 impl AuthorizationService {
@@ -23,11 +25,13 @@ impl AuthorizationService {
         db_pool: DbPool,
         redis: RedisClient,
         reservation_mgr: Arc<ReservationManager>,
+        minute_bucket_mgr: Arc<MinuteBucketManager>,
     ) -> Self {
         Self {
             db_pool,
             redis,
             reservation_mgr,
+            minute_bucket_mgr,
         }
     }
 
@@ -192,6 +196,12 @@ impl AuthorizationService {
             );
         }
 
+        // 3. Bolsa de minutos vs saldo: la bolsa no necesita tarifa para autorizar
+        //    (el bloqueo de Control es por conteo de minutos, no por dinero).
+        if account.billing_model == "minute_bucket" {
+            return self.authorize_minute_bucket(account, &req.callee, call_uuid).await;
+        }
+
         // 3. Get rate for destination
         let rate = match self.get_rate(&req.callee).await? {
             Some(r) => r,
@@ -295,6 +305,56 @@ impl AuthorizationService {
         })
     }
 
+    /// Authorization branch for accounts on the minute-bucket billing model
+    /// (Plan Control / Plan Abierto). Control denies brand-new calls once the
+    /// bucket is exhausted; Abierto never denies. Neither branch computes a
+    /// dollar reservation or a hard max-duration cap — a call already in
+    /// progress when the bucket empties is never cut, its tail bills as
+    /// overage when the CDR is generated (see CdrGenerator).
+    async fn authorize_minute_bucket(
+        &self,
+        account: Account,
+        callee: &str,
+        call_uuid: String,
+    ) -> Result<AuthResponse, BillingError> {
+        match self.minute_bucket_mgr.check_and_reserve(&account, &call_uuid).await? {
+            crate::services::minute_bucket_manager::BucketAuthResult::Denied { reason } => {
+                warn!(
+                    "🚫 Bucket call DENIED: {} for account {} ({})",
+                    call_uuid, account.account_number, reason
+                );
+                Ok(AuthResponse {
+                    authorized: false,
+                    reason,
+                    uuid: call_uuid,
+                    account_id: Some(account.id.into()),
+                    account_number: Some(account.account_number),
+                    reservation_id: None,
+                    reserved_amount: None,
+                    max_duration_seconds: None,
+                    rate_per_minute: None,
+                })
+            }
+            crate::services::minute_bucket_manager::BucketAuthResult::Authorized { cycle_id } => {
+                info!(
+                    "✅ Bucket call AUTHORIZED: {} for account {} (cycle {}) -> {}",
+                    call_uuid, account.account_number, cycle_id, callee
+                );
+                Ok(AuthResponse {
+                    authorized: true,
+                    reason: "authorized_bucket".to_string(),
+                    uuid: call_uuid,
+                    account_id: Some(account.id.into()),
+                    account_number: Some(account.account_number),
+                    reservation_id: None,
+                    reserved_amount: None,
+                    max_duration_seconds: None,
+                    rate_per_minute: None,
+                })
+            }
+        }
+    }
+
     async fn find_account_by_ani(&self, ani: &str) -> Result<Option<Account>, BillingError> {
         let normalized = ani.replace('+', "").replace(' ', "").replace('-', "");
 
@@ -305,7 +365,8 @@ impl AuthorizationService {
             .query_opt(
                 "SELECT id, account_number, account_type::text, balance,
                         max_concurrent_calls, status::text,
-                        created_at, updated_at
+                        created_at, updated_at,
+                        billing_model, bucket_type, overage_flat_rate_per_minute, overage_tariff_group
                 FROM accounts
                 WHERE (account_number = $1 OR account_number = $2)
                 LIMIT 1",
@@ -325,14 +386,18 @@ impl AuthorizationService {
                 let balance: Decimal = r.get(3);
                 let max_concurrent_calls: i32 = r.get(4);
                 let status_str: String = r.get(5);
-                
+
                 // ✅ TIMESTAMP WITH TIME ZONE se deserializa directamente como DateTime<Utc>
                 let created_at: DateTime<Utc> = r.get(6);
                 let updated_at: DateTime<Utc> = r.get(7);
+                let billing_model: String = r.get(8);
+                let bucket_type: Option<String> = r.get(9);
+                let overage_flat_rate_per_minute: Option<Decimal> = r.get(10);
+                let overage_tariff_group: Option<String> = r.get(11);
 
                 info!(
-                    "✅ Found account: {} (ID: {}, Type: {}, Balance: ${}, Status: {})",
-                    account_number, id, account_type_str, balance, status_str
+                    "✅ Found account: {} (ID: {}, Type: {}, Balance: ${}, Status: {}, BillingModel: {})",
+                    account_number, id, account_type_str, balance, status_str, billing_model
                 );
 
                 Ok(Some(Account {
@@ -346,6 +411,10 @@ impl AuthorizationService {
                     max_concurrent_calls: Some(max_concurrent_calls),
                     created_at,
                     updated_at,
+                    billing_model,
+                    bucket_type,
+                    overage_flat_rate_per_minute,
+                    overage_tariff_group,
                 }))
             }
             None => {
@@ -422,6 +491,7 @@ impl AuthorizationService {
                         effective_start, effective_end, priority
                 FROM rate_cards
                 WHERE destination_prefix = ANY($1)
+                AND card_group = 'standard'
                 AND effective_start <= NOW()
                 AND (effective_end IS NULL OR effective_end >= NOW())
                 ORDER BY LENGTH(destination_prefix) DESC, priority DESC

@@ -1,6 +1,7 @@
 // src/services/cdr_generator.rs
 use crate::database::DbPool;
 use crate::services::ReservationManager;
+use crate::services::minute_bucket_manager::{ConsumeOutcome, MinuteBucketManager};
 use crate::models::ConsumeReservationRequest;
 use crate::error::BillingError;
 use std::sync::Arc;
@@ -10,9 +11,16 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use tracing::{info, warn, error};
 
+/// Billing increment (seconds) used to round minute-bucket calls. Bucket
+/// minute counting is independent of any matched `rate_cards` row (a bucket
+/// call may never touch a rate card at all if it stays fully in-bucket), so
+/// it always uses this fixed default rather than a per-destination increment.
+const BUCKET_BILLING_INCREMENT: i32 = 6;
+
 pub struct CdrGenerator {
     db_pool: DbPool,
     reservation_mgr: Arc<ReservationManager>,
+    minute_bucket_mgr: Arc<MinuteBucketManager>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,10 +39,15 @@ pub struct HangupEvent {
 }
 
 impl CdrGenerator {
-    pub fn new(db_pool: DbPool, reservation_mgr: Arc<ReservationManager>) -> Self {
+    pub fn new(
+        db_pool: DbPool,
+        reservation_mgr: Arc<ReservationManager>,
+        minute_bucket_mgr: Arc<MinuteBucketManager>,
+    ) -> Self {
         Self {
             db_pool,
             reservation_mgr,
+            minute_bucket_mgr,
         }
     }
 
@@ -47,84 +60,143 @@ impl CdrGenerator {
             if is_inbound { "INBOUND - No billing" } else { "OUTBOUND - Billable" }
         );
 
+        // Minute-bucket accounts never write a balance_reservations row, so
+        // check for a bucket hold FIRST. `consume()` returns NotApplicable
+        // for every non-bucket call, in which case we fall through to the
+        // existing balance/CDR logic completely unchanged.
+        let bucket_outcome = if is_inbound {
+            ConsumeOutcome::NotApplicable
+        } else {
+            let rounded_billsec_bucket = if event.billsec > 0 {
+                ((event.billsec + BUCKET_BILLING_INCREMENT - 1) / BUCKET_BILLING_INCREMENT)
+                    * BUCKET_BILLING_INCREMENT
+            } else {
+                event.billsec
+            };
+            let billed_minutes = Decimal::from(rounded_billsec_bucket) / Decimal::from(60);
+
+            self.minute_bucket_mgr
+                .consume(&event.uuid, billed_minutes, &event.callee)
+                .await?
+        };
+
         let client = self.db_pool.get().await
             .map_err(|e| {
                 error!("❌ Failed to get DB connection: {}", e);
                 BillingError::Internal(e.to_string())
             })?;
 
-        // Try to get reservation info (inbound calls won't have reservation)
-        let reservation_row = client
-            .query_opt(
-                "SELECT br.account_id, br.rate_per_minute, rc.billing_increment
-                 FROM balance_reservations br
-                 LEFT JOIN rate_cards rc ON br.destination_prefix = rc.destination_prefix
-                 WHERE br.call_uuid = $1
-                 ORDER BY br.created_at ASC
-                 LIMIT 1",
-                &[&event.uuid],
-            )
-            .await
-            .map_err(|e| {
-                error!("❌ Error querying reservation: {}", e);
-                BillingError::Database(e)
-            })?;
-
-        let has_reservation = reservation_row.is_some();
-        let (account_id, rate_per_minute, cost) = if let Some(row) = reservation_row {
-            let account_id: i32 = row.try_get(0).map_err(|e| {
-                error!("❌ Error getting account_id: {}", e);
-                BillingError::Internal(format!("Column 0 error: {}", e))
-            })?;
-
-            let rate: Decimal = row.try_get(1).map_err(|e| {
-                error!("❌ Error getting rate_per_minute: {}", e);
-                BillingError::Internal(format!("Column 1 error: {}", e))
-            })?;
-
-            let increment: i32 = row.try_get::<_, Option<i32>>(2)
-                .unwrap_or(Some(6))
-                .unwrap_or(6);
-
-            // Calculate cost with billing increment
-            let rounded_billsec = if increment > 0 && event.billsec > 0 {
-                ((event.billsec + increment - 1) / increment) * increment
+        // Bucket-specific CDR columns (NULL for every non-bucket call)
+        let (bucket_cycle_id, in_bucket_minutes, bucket_overage_minutes, bucket_overage_cost, overage_rate_applied):
+            (Option<i32>, Option<Decimal>, Option<Decimal>, Option<Decimal>, Option<Decimal>) =
+            if let ConsumeOutcome::Consumed(ref r) = bucket_outcome {
+                (
+                    Some(r.bucket_cycle_id),
+                    Some(r.in_bucket_minutes),
+                    Some(r.overage_minutes),
+                    Some(r.overage_cost),
+                    r.overage_rate_applied,
+                )
             } else {
-                event.billsec
+                (None, None, None, None, None)
             };
 
-            let minutes = Decimal::from(rounded_billsec) / Decimal::from(60);
-            let cost = minutes * rate;
+        let has_reservation;
+        let account_id: Option<i32>;
+        let rate_per_minute: Option<Decimal>;
+        let cost: Option<Decimal>;
+
+        if let ConsumeOutcome::Consumed(ref r) = bucket_outcome {
+            // Bucket call: cost to the customer is only the overage portion
+            // (in-bucket minutes are $0 — already paid for via the bundle).
+            has_reservation = false;
+            account_id = Some(r.account_id);
+            rate_per_minute = r.overage_rate_applied;
+            cost = Some(r.overage_cost);
 
             info!(
-                "💰 Call cost calculation: {}s → {}s ({}s increment) = {} min × ${}/min = ${}",
-                event.billsec, rounded_billsec, increment, minutes, rate, cost
+                "💰 Bucket call: {} min in-bucket, {} min overage (${} @ {:?}/min)",
+                r.in_bucket_minutes, r.overage_minutes, r.overage_cost, r.overage_rate_applied
             );
-
-            (Some(account_id), Some(rate), Some(cost))
-        } else if is_inbound {
-            info!("📞 INBOUND call {} - No billing required", event.uuid);
-            (None, None, None)
         } else {
-            // OUTBOUND call without reservation (authorization disabled)
-            // Still calculate cost via LPM rate lookup
-            info!("📊 No reservation for OUTBOUND call {}, performing LPM rate lookup for billing", event.uuid);
-            self.lookup_rate_and_calculate_cost(&event).await
-        };
+            // Try to get reservation info (inbound calls won't have reservation)
+            let reservation_row = client
+                .query_opt(
+                    "SELECT br.account_id, br.rate_per_minute, rc.billing_increment
+                     FROM balance_reservations br
+                     LEFT JOIN rate_cards rc ON br.destination_prefix = rc.destination_prefix
+                     WHERE br.call_uuid = $1
+                     ORDER BY br.created_at ASC
+                     LIMIT 1",
+                    &[&event.uuid],
+                )
+                .await
+                .map_err(|e| {
+                    error!("❌ Error querying reservation: {}", e);
+                    BillingError::Database(e)
+                })?;
+
+            has_reservation = reservation_row.is_some();
+            let (acc_id, rate, c) = if let Some(row) = reservation_row {
+                let account_id: i32 = row.try_get(0).map_err(|e| {
+                    error!("❌ Error getting account_id: {}", e);
+                    BillingError::Internal(format!("Column 0 error: {}", e))
+                })?;
+
+                let rate: Decimal = row.try_get(1).map_err(|e| {
+                    error!("❌ Error getting rate_per_minute: {}", e);
+                    BillingError::Internal(format!("Column 1 error: {}", e))
+                })?;
+
+                let increment: i32 = row.try_get::<_, Option<i32>>(2)
+                    .unwrap_or(Some(6))
+                    .unwrap_or(6);
+
+                // Calculate cost with billing increment
+                let rounded_billsec = if increment > 0 && event.billsec > 0 {
+                    ((event.billsec + increment - 1) / increment) * increment
+                } else {
+                    event.billsec
+                };
+
+                let minutes = Decimal::from(rounded_billsec) / Decimal::from(60);
+                let cost = minutes * rate;
+
+                info!(
+                    "💰 Call cost calculation: {}s → {}s ({}s increment) = {} min × ${}/min = ${}",
+                    event.billsec, rounded_billsec, increment, minutes, rate, cost
+                );
+
+                (Some(account_id), Some(rate), Some(cost))
+            } else if is_inbound {
+                info!("📞 INBOUND call {} - No billing required", event.uuid);
+                (None, None, None)
+            } else {
+                // OUTBOUND call without reservation (authorization disabled)
+                // Still calculate cost via LPM rate lookup
+                info!("📊 No reservation for OUTBOUND call {}, performing LPM rate lookup for billing", event.uuid);
+                self.lookup_rate_and_calculate_cost(&event).await
+            };
+            account_id = acc_id;
+            rate_per_minute = rate;
+            cost = c;
+        }
 
         // TIMESTAMP WITH TIME ZONE acepta DateTime<Utc> directamente
         let start_time = event.start_time;
         let answer_time = event.answer_time;
         let end_time = event.end_time;
-        
-        // Insert CDR - compatible con esquema actual
+
+        // Insert CDR - compatible con esquema actual + columnas de bolsa de minutos
         let row = client
             .query_one(
                 "INSERT INTO cdrs
                  (call_uuid, account_id, caller_number, called_number, start_time, answer_time, end_time,
-                  duration, billsec, hangup_cause, rate_per_minute, cost, direction, freeswitch_server_id)
+                  duration, billsec, hangup_cause, rate_per_minute, cost, direction, freeswitch_server_id,
+                  bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied)
                  VALUES ($1, $2, $3, $4, $5, $6, $7,
-                         $8, $9, $10, $11, $12, $13, $14)
+                         $8, $9, $10, $11, $12, $13, $14,
+                         $15, $16, $17, $18, $19)
                  RETURNING id",
                 &[
                     &event.uuid,
@@ -141,14 +213,22 @@ impl CdrGenerator {
                     &cost,
                     &event.direction,
                     &event.server_id,
+                    &bucket_cycle_id,
+                    &in_bucket_minutes,
+                    &bucket_overage_minutes,
+                    &bucket_overage_cost,
+                    &overage_rate_applied,
                 ],
             )
             .await?;
-        
+
         let cdr_id: i64 = row.get("id");
 
-        // Consume reservation if exists (only when there was an actual reservation)
-        if has_reservation && account_id.is_some() && cost.is_some() {
+        // Consume reservation if exists (only when there was an actual reservation;
+        // bucket calls already had their cycle updated inside minute_bucket_mgr.consume())
+        if let ConsumeOutcome::Consumed(_) = bucket_outcome {
+            info!("💰 Bucket call {} - cycle already consumed, no dollar reservation to release", event.uuid);
+        } else if has_reservation && account_id.is_some() && cost.is_some() {
             let consume_req = ConsumeReservationRequest {
                 call_uuid: event.uuid.clone(),
                 actual_cost: cost.unwrap().to_f64().unwrap_or(0.0),
@@ -230,6 +310,7 @@ impl CdrGenerator {
             "SELECT rate_per_minute, billing_increment, destination_name
              FROM rate_cards
              WHERE destination_prefix = ANY($1)
+             AND card_group = 'standard'
              AND effective_start <= NOW()
              AND (effective_end IS NULL OR effective_end >= NOW())
              ORDER BY LENGTH(destination_prefix) DESC, priority DESC

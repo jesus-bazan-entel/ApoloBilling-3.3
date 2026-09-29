@@ -397,6 +397,8 @@ pub struct InboundRoute {
     pub destination_trunk_name: Option<String>,
     /// Send 183 Session Progress with ringback tone before bridging
     pub send_early_media: Option<bool>,
+    /// Enable IMS interworking mode: 100rel/PRACK, timeout handlers, congestion tones
+    pub ims_mode: Option<bool>,
     pub failover_destinations: Vec<FailoverDestination>,
     pub enabled: Option<bool>,
     pub freeswitch_extension_id: Option<String>,
@@ -437,6 +439,9 @@ pub struct CreateInboundRouteRequest {
     /// Send 183 Session Progress with ringback tone before bridging
     #[serde(default)]
     pub send_early_media: bool,
+    /// Enable IMS interworking mode: 100rel/PRACK, timeout handlers, congestion tones
+    #[serde(default)]
+    pub ims_mode: bool,
     #[serde(default)]
     pub failover_destinations: Vec<FailoverDestination>,
     #[serde(default = "default_true")]
@@ -464,6 +469,8 @@ pub struct UpdateInboundRouteRequest {
     pub destination_trunk_id: Option<Uuid>,
     /// Send 183 Session Progress with ringback tone before bridging
     pub send_early_media: Option<bool>,
+    /// Enable IMS interworking mode: 100rel/PRACK, timeout handlers, congestion tones
+    pub ims_mode: Option<bool>,
     pub failover_destinations: Option<Vec<FailoverDestination>>,
     pub enabled: Option<bool>,
 }
@@ -636,10 +643,10 @@ pub struct SipMessageSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SipExchangeStep {
     pub timestamp: DateTime<Utc>,
-    pub direction: String,  // "outbound" or "inbound"
+    pub direction: String, // "outbound" or "inbound"
     pub message_type: String,
     pub description: String,
-    pub status: String,  // "success", "pending", "error"
+    pub status: String, // "success", "pending", "error"
 }
 
 /// SIP status log entry

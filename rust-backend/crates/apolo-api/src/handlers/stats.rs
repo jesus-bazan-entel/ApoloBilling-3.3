@@ -3,9 +3,9 @@
 //! HTTP handlers for dashboard statistics endpoints.
 
 use crate::dto::{
-    ApiResponse, BalanceTrendPoint, BalanceTrendResponse, CallsByHourResponse,
-    CallsByTypeResponse, CallsByZoneResponse, CallTypeStats, DailyRevenueStats,
-    HourlyCallStats, RevenueByDayResponse, TrafficByDirectionResponse, TrafficStats, ZoneStats,
+    ApiResponse, BalanceTrendPoint, BalanceTrendResponse, CallTypeStats, CallsByHourResponse,
+    CallsByTypeResponse, CallsByZoneResponse, DailyRevenueStats, HourlyCallStats,
+    RevenueByDayResponse, TrafficByDirectionResponse, TrafficStats, ZoneStats,
 };
 use actix_web::{web, HttpResponse};
 use apolo_auth::AuthenticatedUser;
@@ -65,15 +65,16 @@ pub async fn get_calls_by_hour(
     // Fill in all 24 hours (0-23) with zeros for missing hours
     let mut data: Vec<HourlyCallStats> = (0..24)
         .map(|hour| {
-            hour_map.get(&hour).cloned().unwrap_or_else(|| {
-                HourlyCallStats {
+            hour_map
+                .get(&hour)
+                .cloned()
+                .unwrap_or_else(|| HourlyCallStats {
                     hour,
                     hour_label: format!("{}:00", hour),
                     call_count: 0,
                     total_duration: 0,
                     total_revenue: Decimal::ZERO,
-                }
-            })
+                })
         })
         .collect();
 
@@ -139,7 +140,9 @@ pub async fn get_revenue_by_day(
         let weekday = day.weekday().num_days_from_sunday() as usize;
 
         // Find existing data or create zero entry
-        let existing = data.iter().find(|d| d.date == day.format("%Y-%m-%d").to_string());
+        let existing = data
+            .iter()
+            .find(|d| d.date == day.format("%Y-%m-%d").to_string());
 
         if let Some(existing_data) = existing {
             all_days.push(existing_data.clone());
@@ -155,7 +158,11 @@ pub async fn get_revenue_by_day(
         }
     }
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(RevenueByDayResponse { data: all_days })))
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(RevenueByDayResponse {
+            data: all_days,
+        })),
+    )
 }
 
 /// Get balance trend (last 30 days)
@@ -404,11 +411,7 @@ pub async fn get_traffic_by_direction(
     debug!("Fetching traffic statistics by direction");
 
     let now = Utc::now();
-    let start_of_day = now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc();
+    let start_of_day = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
 
     // Get inbound stats
     let inbound_row = sqlx::query(
@@ -464,10 +467,12 @@ pub async fn get_traffic_by_direction(
         avg_duration: outbound_row.get("avg_duration"),
     };
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(TrafficByDirectionResponse {
-        inbound,
-        outbound,
-    })))
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(TrafficByDirectionResponse {
+            inbound,
+            outbound,
+        })),
+    )
 }
 
 /// Configure statistics routes
@@ -479,7 +484,10 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/balance-trend", web::get().to(get_balance_trend))
             .route("/calls-by-type", web::get().to(get_calls_by_type))
             .route("/calls-by-zone", web::get().to(get_calls_by_zone))
-            .route("/traffic-by-direction", web::get().to(get_traffic_by_direction)),
+            .route(
+                "/traffic-by-direction",
+                web::get().to(get_traffic_by_direction),
+            ),
     );
 }
 

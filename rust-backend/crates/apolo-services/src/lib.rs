@@ -27,6 +27,7 @@
 // pub mod authorization;
 pub mod billing_sync;
 // pub mod cdr_generator;
+pub mod minute_bucket_alerts;
 pub mod rating;
 pub mod reservation_manager;
 pub mod sip_device;

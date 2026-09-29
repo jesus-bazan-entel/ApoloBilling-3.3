@@ -36,12 +36,18 @@ impl<T> ApiResponse<T> {
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct PaginationParams {
     /// Page number (1-indexed)
-    #[serde(default = "default_page", deserialize_with = "deserialize_number_from_string")]
+    #[serde(
+        default = "default_page",
+        deserialize_with = "deserialize_number_from_string"
+    )]
     #[validate(range(min = 1))]
     pub page: i64,
 
     /// Items per page
-    #[serde(default = "default_per_page", deserialize_with = "deserialize_number_from_string")]
+    #[serde(
+        default = "default_per_page",
+        deserialize_with = "deserialize_number_from_string"
+    )]
     #[validate(range(min = 1, max = 1000))]
     pub per_page: i64,
 }

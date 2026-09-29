@@ -119,15 +119,14 @@ pub async fn list_carrier_groups(
 ) -> Result<HttpResponse, AppError> {
     info!("Listing Kamailio carrier groups");
 
-    let groups: Vec<CarrierGroup> = sqlx::query_as(
-        "SELECT id, gwlist, description FROM dr_gw_lists ORDER BY id"
-    )
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| {
-        error!(error = %e, "Failed to fetch carrier groups");
-        AppError::Database(format!("Failed to fetch carrier groups: {}", e))
-    })?;
+    let groups: Vec<CarrierGroup> =
+        sqlx::query_as("SELECT id, gwlist, description FROM dr_gw_lists ORDER BY id")
+            .fetch_all(pool.get_ref())
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to fetch carrier groups");
+                AppError::Database(format!("Failed to fetch carrier groups: {}", e))
+            })?;
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(groups)))
 }
@@ -144,21 +143,22 @@ pub async fn get_carrier_group(
     let group_id = path.into_inner();
     info!(group_id = group_id, "Getting carrier group");
 
-    let group: Option<CarrierGroup> = sqlx::query_as(
-        "SELECT id, gwlist, description FROM dr_gw_lists WHERE id = ?"
-    )
-    .bind(group_id)
-    .fetch_optional(pool.get_ref())
-    .await
-    .map_err(|e| {
-        error!(error = %e, "Failed to fetch carrier group");
-        AppError::Database(format!("Failed to fetch carrier group: {}", e))
-    })?;
+    let group: Option<CarrierGroup> =
+        sqlx::query_as("SELECT id, gwlist, description FROM dr_gw_lists WHERE id = ?")
+            .bind(group_id)
+            .fetch_optional(pool.get_ref())
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to fetch carrier group");
+                AppError::Database(format!("Failed to fetch carrier group: {}", e))
+            })?;
 
-    let group = group.ok_or_else(|| AppError::NotFound(format!("Carrier group {} not found", group_id)))?;
+    let group =
+        group.ok_or_else(|| AppError::NotFound(format!("Carrier group {} not found", group_id)))?;
 
     // Parse gwlist to get carrier IDs
-    let carrier_ids: Vec<i32> = group.gwlist
+    let carrier_ids: Vec<i32> = group
+        .gwlist
         .split(',')
         .filter_map(|s| s.trim().parse().ok())
         .collect();
@@ -166,7 +166,11 @@ pub async fn get_carrier_group(
     let carriers: Vec<Carrier> = if carrier_ids.is_empty() {
         Vec::new()
     } else {
-        let placeholders = carrier_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let placeholders = carrier_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(",");
         let query = format!(
             "SELECT gwid, type, address, strip, pri_prefix, attrs, description FROM dr_gateways WHERE gwid IN ({}) ORDER BY gwid",
             placeholders
@@ -175,12 +179,10 @@ pub async fn get_carrier_group(
         for id in &carrier_ids {
             q = q.bind(id);
         }
-        q.fetch_all(pool.get_ref())
-            .await
-            .map_err(|e| {
-                error!(error = %e, "Failed to fetch carriers for group");
-                AppError::Database(format!("Failed to fetch carriers: {}", e))
-            })?
+        q.fetch_all(pool.get_ref()).await.map_err(|e| {
+            error!(error = %e, "Failed to fetch carriers for group");
+            AppError::Database(format!("Failed to fetch carriers: {}", e))
+        })?
     };
 
     let result = CarrierGroupWithCarriers { group, carriers };
@@ -199,22 +201,22 @@ pub async fn create_carrier_group(
     info!(description = %req.description, "Creating carrier group");
 
     if req.description.trim().is_empty() {
-        return Err(AppError::Validation("Description cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Description cannot be empty".to_string(),
+        ));
     }
 
     let gwlist = req.gwlist.clone().unwrap_or_default();
 
-    let result = sqlx::query(
-        "INSERT INTO dr_gw_lists (gwlist, description) VALUES (?, ?)"
-    )
-    .bind(&gwlist)
-    .bind(&req.description)
-    .execute(pool.get_ref())
-    .await
-    .map_err(|e| {
-        error!(error = %e, "Failed to create carrier group");
-        AppError::Database(format!("Failed to create carrier group: {}", e))
-    })?;
+    let result = sqlx::query("INSERT INTO dr_gw_lists (gwlist, description) VALUES (?, ?)")
+        .bind(&gwlist)
+        .bind(&req.description)
+        .execute(pool.get_ref())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to create carrier group");
+            AppError::Database(format!("Failed to create carrier group: {}", e))
+        })?;
 
     let group_id = result.last_insert_id() as u32;
     let group = CarrierGroup {
@@ -240,27 +242,30 @@ pub async fn update_carrier_group(
     info!(group_id = group_id, "Updating carrier group");
 
     if req.description.trim().is_empty() {
-        return Err(AppError::Validation("Description cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Description cannot be empty".to_string(),
+        ));
     }
 
     // Build update query
     let gwlist = req.gwlist.clone().unwrap_or_default();
 
-    let result = sqlx::query(
-        "UPDATE dr_gw_lists SET gwlist = ?, description = ? WHERE id = ?"
-    )
-    .bind(&gwlist)
-    .bind(&req.description)
-    .bind(group_id)
-    .execute(pool.get_ref())
-    .await
-    .map_err(|e| {
-        error!(error = %e, "Failed to update carrier group");
-        AppError::Database(format!("Failed to update carrier group: {}", e))
-    })?;
+    let result = sqlx::query("UPDATE dr_gw_lists SET gwlist = ?, description = ? WHERE id = ?")
+        .bind(&gwlist)
+        .bind(&req.description)
+        .bind(group_id)
+        .execute(pool.get_ref())
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to update carrier group");
+            AppError::Database(format!("Failed to update carrier group: {}", e))
+        })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Carrier group {} not found", group_id)));
+        return Err(AppError::NotFound(format!(
+            "Carrier group {} not found",
+            group_id
+        )));
     }
 
     let group = CarrierGroup {
@@ -294,7 +299,10 @@ pub async fn delete_carrier_group(
         })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Carrier group {} not found", group_id)));
+        return Err(AppError::NotFound(format!(
+            "Carrier group {} not found",
+            group_id
+        )));
     }
 
     Ok(HttpResponse::Ok().json(ApiResponse::with_message(
@@ -353,7 +361,8 @@ pub async fn get_carrier(
         AppError::Database(format!("Failed to fetch carrier: {}", e))
     })?;
 
-    let carrier = carrier.ok_or_else(|| AppError::NotFound(format!("Carrier {} not found", carrier_id)))?;
+    let carrier =
+        carrier.ok_or_else(|| AppError::NotFound(format!("Carrier {} not found", carrier_id)))?;
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(carrier)))
 }
@@ -438,7 +447,10 @@ pub async fn update_carrier(
     })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Carrier {} not found", carrier_id)));
+        return Err(AppError::NotFound(format!(
+            "Carrier {} not found",
+            carrier_id
+        )));
     }
 
     let carrier = Carrier {
@@ -476,7 +488,10 @@ pub async fn delete_carrier(
         })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Carrier {} not found", carrier_id)));
+        return Err(AppError::NotFound(format!(
+            "Carrier {} not found",
+            carrier_id
+        )));
     }
 
     Ok(HttpResponse::Ok().json(ApiResponse::with_message(
@@ -535,7 +550,8 @@ pub async fn get_outbound_route(
         AppError::Database(format!("Failed to fetch outbound route: {}", e))
     })?;
 
-    let route = route.ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
+    let route = route
+        .ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(route)))
 }
@@ -552,7 +568,9 @@ pub async fn create_outbound_route(
     info!(prefix = %req.prefix, "Creating outbound route");
 
     if req.gwlist.trim().is_empty() {
-        return Err(AppError::Validation("Gateway list cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Gateway list cannot be empty".to_string(),
+        ));
     }
 
     let result = sqlx::query(
@@ -601,7 +619,9 @@ pub async fn update_outbound_route(
     info!(route_id = route_id, "Updating outbound route");
 
     if req.gwlist.trim().is_empty() {
-        return Err(AppError::Validation("Gateway list cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Gateway list cannot be empty".to_string(),
+        ));
     }
 
     let result = sqlx::query(
@@ -623,7 +643,10 @@ pub async fn update_outbound_route(
     })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Outbound route {} not found", route_id)));
+        return Err(AppError::NotFound(format!(
+            "Outbound route {} not found",
+            route_id
+        )));
     }
 
     let route = OutboundRoute {
@@ -662,7 +685,10 @@ pub async fn delete_outbound_route(
         })?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Outbound route {} not found", route_id)));
+        return Err(AppError::NotFound(format!(
+            "Outbound route {} not found",
+            route_id
+        )));
     }
 
     Ok(HttpResponse::Ok().json(ApiResponse::with_message(
@@ -696,7 +722,10 @@ pub async fn reload_kamailio_routes(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         error!(stderr = %stderr, "kamcmd drouting.reload failed");
-        return Err(AppError::Internal(format!("Failed to reload routes: {}", stderr)));
+        return Err(AppError::Internal(format!(
+            "Failed to reload routes: {}",
+            stderr
+        )));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

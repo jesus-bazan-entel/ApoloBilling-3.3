@@ -16,11 +16,15 @@ use validator::Validate;
 /// List all plans
 ///
 /// GET /api/v1/plans
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_plans(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("plans") {
+        return Err(AppError::Forbidden);
+    }
+
     debug!("Listing all plans");
 
     let repo = PgPlanRepository::new(pool.get_ref().clone());
@@ -34,11 +38,15 @@ pub async fn list_plans(
 /// List only active plans
 ///
 /// GET /api/v1/plans/active
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_active_plans(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("plans") {
+        return Err(AppError::Forbidden);
+    }
+
     debug!("Listing active plans");
 
     let repo = PgPlanRepository::new(pool.get_ref().clone());
@@ -52,12 +60,16 @@ pub async fn list_active_plans(
 /// Get a single plan by ID
 ///
 /// GET /api/v1/plans/{id}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_plan(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("plans") {
+        return Err(AppError::Forbidden);
+    }
+
     let plan_id = path.into_inner();
     debug!(id = plan_id, "Getting plan");
 
@@ -77,7 +89,7 @@ pub async fn get_plan(
 #[instrument(skip(pool, user, req))]
 pub async fn create_plan(
     pool: web::Data<PgPool>,
-    user: AuthenticatedUser,
+    user: apolo_auth::AdminUser,
     req: web::Json<PlanCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -167,7 +179,7 @@ pub async fn create_plan(
 pub async fn update_plan(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _user: apolo_auth::AdminUser,
     req: web::Json<PlanUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     let plan_id = path.into_inner();
@@ -278,7 +290,7 @@ pub async fn update_plan(
 pub async fn delete_plan(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _user: apolo_auth::AdminUser,
 ) -> Result<HttpResponse, AppError> {
     let plan_id = path.into_inner();
     debug!(id = plan_id, "Deleting plan");
@@ -313,10 +325,7 @@ pub async fn delete_plan(
         audit_data.insert(pool.get_ref()).await;
     }
 
-    Ok(HttpResponse::Ok().json(ApiResponse::with_message(
-        (),
-        "Plan deleted successfully",
-    )))
+    Ok(HttpResponse::Ok().json(ApiResponse::with_message((), "Plan deleted successfully")))
 }
 
 /// Configure plan routes

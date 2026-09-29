@@ -42,13 +42,13 @@ pub struct BridgeDestination {
 /// Dialplan route representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DialplanRoute {
-    pub id: String,                     // Extension name (slug)
-    pub name: String,                   // Display name
-    pub priority: i32,                  // Order (lower = first)
-    pub prefix_pattern: String,         // Regex for destination_number
-    pub destination_ip: String,         // Bridge target IP
-    pub destination_port: u16,          // Port (default 5060)
-    pub sip_profile: String,            // "internal" or "external"
+    pub id: String,             // Extension name (slug)
+    pub name: String,           // Display name
+    pub priority: i32,          // Order (lower = first)
+    pub prefix_pattern: String, // Regex for destination_number
+    pub destination_ip: String, // Bridge target IP
+    pub destination_port: u16,  // Port (default 5060)
+    pub sip_profile: String,    // "internal" or "external"
     pub bypass_media: bool,
     pub inherit_codec: bool,
     pub enable_100rel: bool,
@@ -329,7 +329,10 @@ pub async fn delete_route(
     routes.retain(|r| r.id != route_id);
 
     if routes.len() == initial_len {
-        return Err(AppError::NotFound(format!("Route '{}' not found", route_id)));
+        return Err(AppError::NotFound(format!(
+            "Route '{}' not found",
+            route_id
+        )));
     }
 
     // Backup, write, and reload
@@ -408,7 +411,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 /// Validate route request
 fn validate_route_request(req: &DialplanRouteRequest) -> Result<(), AppError> {
     if req.name.trim().is_empty() {
-        return Err(AppError::Validation("Route name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Route name cannot be empty".to_string(),
+        ));
     }
 
     if req.prefix_pattern.trim().is_empty() {
@@ -633,7 +638,10 @@ fn parse_bridge_action(content: &str) -> Option<(String, u16, String, Vec<Bridge
                 let mut failover = Vec::new();
                 for segment in segments.iter().skip(1) {
                     if let Some((fo_ip, fo_port, _)) = parse_sofia_segment(segment) {
-                        failover.push(BridgeDestination { ip: fo_ip, port: fo_port });
+                        failover.push(BridgeDestination {
+                            ip: fo_ip,
+                            port: fo_port,
+                        });
                     }
                 }
 
@@ -831,7 +839,9 @@ fn generate_to_kamailio_extension(route: &DialplanRoute) -> String {
         }
 
         if route.ignore_early_media {
-            ext.push_str("          <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
+            ext.push_str(
+                "          <action application=\"set\" data=\"ignore_early_media=true\"/>\n",
+            );
         }
 
         if route.inherit_codec {
@@ -880,7 +890,9 @@ fn generate_to_kamailio_extension(route: &DialplanRoute) -> String {
         }
 
         if route.ignore_early_media {
-            ext.push_str("        <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
+            ext.push_str(
+                "        <action application=\"set\" data=\"ignore_early_media=true\"/>\n",
+            );
         }
 
         if route.inherit_codec {
@@ -1092,7 +1104,10 @@ mod tests {
         assert_eq!(route.destination_ip, "10.10.22.7");
         assert_eq!(route.destination_port, 5060);
         assert_eq!(route.sip_profile, "internal");
-        assert_eq!(route.source_ip_filter, Some("^10\\.10\\.22\\.18$".to_string()));
+        assert_eq!(
+            route.source_ip_filter,
+            Some("^10\\.10\\.22\\.18$".to_string())
+        );
         assert_eq!(route.call_timeout, Some(120));
         assert!(route.ignore_early_media);
         assert!(route.inherit_codec);
@@ -1147,8 +1162,14 @@ mod tests {
             call_timeout: None,
             source_ip_filter: None,
             failover_destinations: vec![
-                BridgeDestination { ip: "10.10.22.100".to_string(), port: 5060 },
-                BridgeDestination { ip: "10.10.22.200".to_string(), port: 5070 },
+                BridgeDestination {
+                    ip: "10.10.22.100".to_string(),
+                    port: 5060,
+                },
+                BridgeDestination {
+                    ip: "10.10.22.200".to_string(),
+                    port: 5070,
+                },
             ],
             enabled: true,
         }];
@@ -1206,14 +1227,17 @@ mod tests {
             ignore_early_media: false,
             call_timeout: None,
             source_ip_filter: Some("^10\\.10\\.22\\.18$".to_string()),
-            failover_destinations: vec![
-                BridgeDestination { ip: "10.10.22.100".to_string(), port: 5060 },
-            ],
+            failover_destinations: vec![BridgeDestination {
+                ip: "10.10.22.100".to_string(),
+                port: 5060,
+            }],
             enabled: true,
         }];
 
         let xml = generate_xml(&routes, "to_kamailio").unwrap();
 
-        assert!(xml.contains("sofia/internal/$1@10.10.22.7:5060|sofia/internal/$1@10.10.22.100:5060"));
+        assert!(
+            xml.contains("sofia/internal/$1@10.10.22.7:5060|sofia/internal/$1@10.10.22.100:5060")
+        );
     }
 }

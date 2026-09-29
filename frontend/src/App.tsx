@@ -10,14 +10,22 @@ import Balance from './pages/Balance'
 import Zones from './pages/Zones'
 import Rates from './pages/Rates'
 import Plans from './pages/Plans'
+import MinuteBuckets from './pages/MinuteBuckets'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
 import UnifiedRouting from './pages/UnifiedRouting'
 import InternalRouting from './pages/InternalRouting'
 import SipDevices from './pages/SipDevices'
+import InboundRoutingPage from './pages/InboundRouting'
+import EndpointMonitor from './pages/EndpointMonitor'
+// New simplified routing pages
+import Carriers from './pages/Carriers'
+import Endpoints from './pages/Endpoints'
+import OutboundRouting from './pages/OutboundRouting'
+import CarrierGroups from './pages/CarrierGroups'
 import Login from './pages/Login'
 import { getCurrentUser } from './api/client'
-import type { UserRole } from './types'
+import { MODULES, hasModule, type ModuleKey } from './constants/modules'
 
 // Create a client
 const queryClient = new QueryClient({
@@ -30,13 +38,16 @@ const queryClient = new QueryClient({
   },
 })
 
-// Protected route wrapper with optional role check
+// Protected route wrapper with an optional module gate. `requiredModule`
+// mirrors the server's `has_module` check: Admin/Superadmin always pass,
+// a Usuario session needs the module explicitly granted. This is UX only —
+// the real enforcement happens on the backend for every request.
 interface ProtectedRouteProps {
   children: React.ReactNode
-  requiredRole?: UserRole
+  requiredModule?: ModuleKey
 }
 
-function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+function ProtectedRoute({ children, requiredModule }: ProtectedRouteProps) {
   const { data: user, isLoading } = useQuery({
     queryKey: ['currentUser'],
     queryFn: getCurrentUser,
@@ -59,8 +70,7 @@ function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />
   }
 
-  // Check role permission if required
-  if (requiredRole && user.role !== requiredRole) {
+  if (requiredModule && !hasModule(user, requiredModule)) {
     return (
       <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
         <div className="text-center">
@@ -93,19 +103,77 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <Routes>
+                {/* Always visible to any authenticated user (dashboard = always_visible module) */}
                 <Route path="/" element={<Dashboard />} />
-                <Route path="/calls" element={<ActiveCalls />} />
-                <Route path="/cdr" element={<CDR />} />
-                <Route path="/accounts" element={<Accounts />} />
-                <Route path="/plans" element={<Plans />} />
-                <Route path="/balance" element={<Balance />} />
-                <Route path="/zones" element={<Zones />} />
-                <Route path="/rates" element={<Rates />} />
-                {/* Superadmin only routes */}
+                <Route
+                  path="/calls"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.ACTIVE_CALLS}>
+                      <ActiveCalls />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/cdr"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.CDR}>
+                      <CDR />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/accounts"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.ACCOUNTS}>
+                      <Accounts />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/plans"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.PLANS}>
+                      <Plans />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/balance"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.BALANCE}>
+                      <Balance />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/minute-buckets"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.MINUTE_BUCKETS}>
+                      <MinuteBuckets />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/zones"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.ZONES}>
+                      <Zones />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/rates"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.RATES}>
+                      <Rates />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* Sistema - Admin+ only, never assignable to a Usuario */}
                 <Route
                   path="/users"
                   element={
-                    <ProtectedRoute requiredRole="superadmin">
+                    <ProtectedRoute requiredModule={MODULES.USERS}>
                       <Users />
                     </ProtectedRoute>
                   }
@@ -113,15 +181,16 @@ function AppRoutes() {
                 <Route
                   path="/audit-logs"
                   element={
-                    <ProtectedRoute requiredRole="superadmin">
+                    <ProtectedRoute requiredModule={MODULES.AUDIT_LOGS}>
                       <AuditLogs />
                     </ProtectedRoute>
                   }
                 />
+                {/* Legacy routing - exclusive to factory support (Superadmin) */}
                 <Route
                   path="/routing"
                   element={
-                    <ProtectedRoute requiredRole="superadmin">
+                    <ProtectedRoute requiredModule={MODULES.LEGACY_ROUTING}>
                       <UnifiedRouting />
                     </ProtectedRoute>
                   }
@@ -129,16 +198,66 @@ function AppRoutes() {
                 <Route
                   path="/internal-routing"
                   element={
-                    <ProtectedRoute requiredRole="superadmin">
+                    <ProtectedRoute requiredModule={MODULES.LEGACY_ROUTING}>
                       <InternalRouting />
                     </ProtectedRoute>
                   }
                 />
+                {/* Operación - full access for Admin/Superadmin, grantable to a Usuario */}
                 <Route
                   path="/sip-devices"
                   element={
-                    <ProtectedRoute requiredRole="superadmin">
+                    <ProtectedRoute requiredModule={MODULES.SIP_DEVICES}>
                       <SipDevices />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/inbound-routing"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.INBOUND_ROUTING}>
+                      <InboundRoutingPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/endpoint-monitor"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.ENDPOINT_MONITOR}>
+                      <EndpointMonitor />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* New simplified routing pages */}
+                <Route
+                  path="/carriers"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.CARRIERS}>
+                      <Carriers />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/endpoints"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.ENDPOINTS}>
+                      <Endpoints />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/outbound-routing"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.OUTBOUND_ROUTING}>
+                      <OutboundRouting />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/carrier-groups"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.CARRIER_GROUPS}>
+                      <CarrierGroups />
                     </ProtectedRoute>
                   }
                 />

@@ -273,7 +273,10 @@ impl<A: AccountRepository, R: ReservationRepository> ReservationManager<A, R> {
 
             // Check deficit limit
             if deficit > MAX_DEFICIT {
-                error!("Deficit exceeds maximum allowed: {} > {}", deficit, MAX_DEFICIT);
+                error!(
+                    "Deficit exceeds maximum allowed: {} > {}",
+                    deficit, MAX_DEFICIT
+                );
                 return Err(AppError::ReservationFailed(format!(
                     "Deficit {} exceeds maximum allowed {}",
                     deficit, MAX_DEFICIT
@@ -597,14 +600,17 @@ mod tests {
             effective_start: Utc::now(),
             effective_end: None,
             priority: 1,
+            card_group: "standard".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
 
         // 5 minutes at $0.10/min = $0.50
         // With 8% buffer = $0.54
-        let amount =
-            ReservationManager::<apolo_db::PgAccountRepository, apolo_db::PgReservationRepository>::calculate_reservation_amount(&rate, 5);
+        let amount = ReservationManager::<
+            apolo_db::PgAccountRepository,
+            apolo_db::PgReservationRepository,
+        >::calculate_reservation_amount(&rate, 5);
 
         assert!(amount >= dec!(0.50));
         assert!(amount <= dec!(1.00));

@@ -4,8 +4,8 @@
 
 use crate::dto::sip_device::{
     FreeswitchIpRequest, FreeswitchIpResponse, PasswordRegenerateResponse, SipDeviceCreateRequest,
-    SipDeviceFilterParams, SipDeviceResponse, SipDeviceUpdateRequest, SipDeviceWithPasswordResponse,
-    SipRegistrationStatusResponse,
+    SipDeviceFilterParams, SipDeviceResponse, SipDeviceUpdateRequest,
+    SipDeviceWithPasswordResponse, SipRegistrationStatusResponse,
 };
 use crate::dto::{ApiResponse, PaginationParams};
 use actix_web::{web, HttpResponse};
@@ -23,13 +23,17 @@ use validator::Validate;
 /// List SIP devices with pagination and filters
 ///
 /// GET /api/v1/sip-devices
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_sip_devices(
     pool: web::Data<PgPool>,
     query: web::Query<PaginationParams>,
     filters: web::Query<SipDeviceFilterParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("sip_devices") {
+        return Err(AppError::Forbidden);
+    }
+
     query.validate().map_err(|e| {
         warn!("Pagination validation failed: {}", e);
         AppError::Validation(e.to_string())
@@ -60,11 +64,11 @@ pub async fn list_sip_devices(
 /// Create a new SIP device
 ///
 /// POST /api/v1/sip-devices
-#[instrument(skip(pool, sip_service, _user, req))]
+#[instrument(skip(pool, sip_service, _admin, req))]
 pub async fn create_sip_device(
     pool: web::Data<PgPool>,
     sip_service: web::Data<Arc<SipDeviceService>>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<SipDeviceCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -124,7 +128,7 @@ pub async fn create_sip_device(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("create_sip_device")
         .entity_type("sip_device")
         .entity_id(created.id.to_string())
@@ -149,12 +153,16 @@ pub async fn create_sip_device(
 /// Get a single SIP device by ID
 ///
 /// GET /api/v1/sip-devices/{id}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_sip_device(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("sip_devices") {
+        return Err(AppError::Forbidden);
+    }
+
     let device_id = path.into_inner();
     debug!(id = device_id, "Getting SIP device");
 
@@ -171,11 +179,11 @@ pub async fn get_sip_device(
 /// Update a SIP device
 ///
 /// PUT /api/v1/sip-devices/{id}
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn update_sip_device(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<SipDeviceUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -270,7 +278,7 @@ pub async fn update_sip_device(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("update_sip_device")
         .entity_type("sip_device")
         .entity_id(updated.id.to_string())
@@ -341,7 +349,9 @@ pub async fn delete_sip_device(
 
         Ok(HttpResponse::NoContent().finish())
     } else {
-        Err(AppError::Internal("Failed to delete SIP device".to_string()))
+        Err(AppError::Internal(
+            "Failed to delete SIP device".to_string(),
+        ))
     }
 }
 
@@ -400,12 +410,12 @@ pub async fn get_sip_device_password(
 /// Regenerate SIP device password
 ///
 /// POST /api/v1/sip-devices/{id}/regenerate-password
-#[instrument(skip(pool, sip_service, _user))]
+#[instrument(skip(pool, sip_service, _admin))]
 pub async fn regenerate_sip_device_password(
     pool: web::Data<PgPool>,
     sip_service: web::Data<Arc<SipDeviceService>>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
 ) -> Result<HttpResponse, AppError> {
     let device_id = path.into_inner();
     debug!(id = device_id, "Regenerating SIP device password");
@@ -442,7 +452,7 @@ pub async fn regenerate_sip_device_password(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("regenerate_sip_password")
         .entity_type("sip_device")
         .entity_id(device_id.to_string())
@@ -541,12 +551,16 @@ pub async fn delete_allowed_ip(
 /// Get SIP device registration status from FreeSWITCH
 ///
 /// GET /api/v1/sip-devices/{id}/registration-status
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_sip_device_registration_status(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("sip_devices") {
+        return Err(AppError::Forbidden);
+    }
+
     let device_id = path.into_inner();
     debug!(id = device_id, "Getting SIP device registration status");
 
@@ -563,7 +577,10 @@ pub async fn get_sip_device_registration_status(
 }
 
 /// Query FreeSWITCH for registration status of a specific user
-async fn query_freeswitch_registration(username: &str, domain: &str) -> SipRegistrationStatusResponse {
+async fn query_freeswitch_registration(
+    username: &str,
+    domain: &str,
+) -> SipRegistrationStatusResponse {
     use std::process::Command;
 
     // Execute fs_cli command to get ALL registrations (passing AOR as argument doesn't work)
@@ -597,7 +614,11 @@ async fn query_freeswitch_registration(username: &str, domain: &str) -> SipRegis
 }
 
 /// Parse FreeSWITCH registration output
-fn parse_freeswitch_registration(output: &str, username: &str, domain: &str) -> SipRegistrationStatusResponse {
+fn parse_freeswitch_registration(
+    output: &str,
+    username: &str,
+    domain: &str,
+) -> SipRegistrationStatusResponse {
     // Check if no registrations exist
     if output.contains("Total items returned: 0") || output.trim().is_empty() {
         return SipRegistrationStatusResponse {
@@ -668,7 +689,8 @@ fn parse_freeswitch_registration(output: &str, username: &str, domain: &str) -> 
                     // Extract EXP datetime
                     if let Some(exp_start) = value.find("EXP(") {
                         if let Some(exp_end) = value[exp_start + 4..].find(')') {
-                            expires_at = Some(value[exp_start + 4..exp_start + 4 + exp_end].to_string());
+                            expires_at =
+                                Some(value[exp_start + 4..exp_start + 4 + exp_end].to_string());
                         }
                     }
                 }
@@ -698,7 +720,10 @@ fn parse_freeswitch_registration(output: &str, username: &str, domain: &str) -> 
     }
 
     SipRegistrationStatusResponse {
-        registered: status.as_ref().map(|s| s.contains("Registered")).unwrap_or(false),
+        registered: status
+            .as_ref()
+            .map(|s| s.contains("Registered"))
+            .unwrap_or(false),
         sip_username: username.to_string(),
         sip_domain: domain.to_string(),
         user_agent,

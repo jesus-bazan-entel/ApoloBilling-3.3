@@ -42,6 +42,14 @@ pub struct PlanCreateRequest {
     /// Whether plan is enabled
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+
+    /// Optional hint: "minute_bucket" skips the initial_balance/credit_limit
+    /// > 0 requirement below, since a bucket plan (Plan Control / Plan
+    /// Abierto) doesn't use the balance rails at all — the actual
+    /// billing_model is set right after creation via
+    /// `PUT /plans/{id}/bucket-config`, this field only affects validation.
+    #[serde(default)]
+    pub billing_model: Option<String>,
 }
 
 fn default_max_concurrent_calls() -> i32 {
@@ -57,6 +65,12 @@ impl PlanCreateRequest {
     pub fn validate_business_rules(&self) -> Result<(), String> {
         let account_type = AccountType::from_str(&self.account_type)
             .ok_or_else(|| "Invalid account type".to_string())?;
+
+        // Bucket plans (Plan Control / Plan Abierto) don't use the balance
+        // rails, so the "no unlimited plans" invariant below doesn't apply.
+        if self.billing_model.as_deref() == Some("minute_bucket") {
+            return Ok(());
+        }
 
         match account_type {
             AccountType::Prepaid => {
@@ -163,6 +177,7 @@ mod tests {
             max_concurrent_calls: 5,
             description: Some("Test".to_string()),
             enabled: true,
+            billing_model: None,
         };
 
         assert!(req.validate_business_rules().is_ok());
@@ -179,6 +194,7 @@ mod tests {
             max_concurrent_calls: 5,
             description: None,
             enabled: true,
+            billing_model: None,
         };
 
         assert!(req.validate_business_rules().is_err());
@@ -195,6 +211,7 @@ mod tests {
             max_concurrent_calls: 10,
             description: Some("Test".to_string()),
             enabled: true,
+            billing_model: None,
         };
 
         assert!(req.validate_business_rules().is_ok());
@@ -211,6 +228,7 @@ mod tests {
             max_concurrent_calls: 5,
             description: None,
             enabled: true,
+            billing_model: None,
         };
 
         assert!(req.validate_business_rules().is_err());

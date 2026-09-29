@@ -21,13 +21,17 @@ use validator::Validate;
 /// List accounts with pagination and filters
 ///
 /// GET /api/v1/accounts
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_accounts(
     pool: web::Data<PgPool>,
     query: web::Query<PaginationParams>,
     filters: web::Query<AccountFilterParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("accounts") {
+        return Err(AppError::Forbidden);
+    }
+
     query.validate().map_err(|e| {
         warn!("Pagination validation failed: {}", e);
         AppError::Validation(e.to_string())
@@ -61,7 +65,7 @@ pub async fn list_accounts(
 #[instrument(skip(pool, _user, req))]
 pub async fn create_account(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    _user: apolo_auth::AdminUser,
     req: web::Json<AccountCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -90,13 +94,10 @@ pub async fn create_account(
         debug!(plan_id, "Validating account against plan");
 
         let plan_repo = PgPlanRepository::new(pool.get_ref().clone());
-        let plan = plan_repo
-            .find_by_id(plan_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(plan_id, "Plan not found");
-                AppError::NotFound(format!("Plan {} not found", plan_id))
-            })?;
+        let plan = plan_repo.find_by_id(plan_id).await?.ok_or_else(|| {
+            warn!(plan_id, "Plan not found");
+            AppError::NotFound(format!("Plan {} not found", plan_id))
+        })?;
 
         // Validate account_type matches plan
         let req_type = AccountType::from_str(&req.account_type)
@@ -200,12 +201,16 @@ pub async fn create_account(
 /// Get a single account by ID
 ///
 /// GET /api/v1/accounts/{id}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_account(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("accounts") {
+        return Err(AppError::Forbidden);
+    }
+
     let account_id = path.into_inner();
     debug!(id = account_id, "Getting account");
 
@@ -226,7 +231,7 @@ pub async fn get_account(
 pub async fn update_account(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _user: apolo_auth::AdminUser,
     req: web::Json<AccountUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -330,7 +335,7 @@ pub async fn update_account(
 pub async fn topup_account(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _user: apolo_auth::AdminUser,
     req: web::Json<TopupRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {

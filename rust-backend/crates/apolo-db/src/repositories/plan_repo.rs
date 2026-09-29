@@ -2,7 +2,10 @@
 //!
 //! Provides PostgreSQL-backed storage for plan entities.
 
-use apolo_core::{models::{AccountType, Plan}, AppError, AppResult};
+use apolo_core::{
+    models::{AccountType, Plan},
+    AppError, AppResult,
+};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::{FromRow, PgPool};

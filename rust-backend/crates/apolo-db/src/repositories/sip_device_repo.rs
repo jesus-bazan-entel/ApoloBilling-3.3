@@ -56,7 +56,10 @@ impl Repository<SipDevice, i32> for PgSipDeviceRepository {
 
     #[instrument(skip(self))]
     async fn find_all(&self, limit: i64, offset: i64) -> AppResult<Vec<SipDevice>> {
-        debug!("Finding all SIP devices with limit {} offset {}", limit, offset);
+        debug!(
+            "Finding all SIP devices with limit {} offset {}",
+            limit, offset
+        );
 
         let rows = sqlx::query_as::<_, SipDeviceRow>(
             r#"

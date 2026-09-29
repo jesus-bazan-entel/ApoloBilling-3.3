@@ -18,6 +18,7 @@ use cache::RedisClient;
 use services::{
     AuthorizationService,
     ReservationManager,
+    MinuteBucketManager,
     RealtimeBiller,
     CdrGenerator,
     CallSimulator,
@@ -63,10 +64,19 @@ async fn main() -> std::io::Result<()> {
         redis_client.clone()
     ));
 
+    // Minute-bucket billing (Plan Control / Plan Abierto) — coexists with
+    // ReservationManager; only exercised for accounts with
+    // billing_model = 'minute_bucket'.
+    let minute_bucket_mgr = Arc::new(MinuteBucketManager::new(
+        db_pool.clone(),
+        redis_client.clone()
+    ));
+
     let auth_service = Arc::new(AuthorizationService::new(
         db_pool.clone(),
         redis_client.clone(),
-        reservation_mgr.clone()
+        reservation_mgr.clone(),
+        minute_bucket_mgr.clone()
     ));
 
     let realtime_biller = Arc::new(RealtimeBiller::new(
@@ -76,7 +86,8 @@ async fn main() -> std::io::Result<()> {
 
     let cdr_generator = Arc::new(CdrGenerator::new(
         db_pool.clone(),
-        reservation_mgr.clone()
+        reservation_mgr.clone(),
+        minute_bucket_mgr.clone()
     ));
 
     // Create call simulator

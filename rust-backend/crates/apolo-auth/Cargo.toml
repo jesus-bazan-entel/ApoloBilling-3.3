@@ -31,7 +31,3 @@ chrono = { workspace = true }
 
 # Tracing
 tracing = { workspace = true }
-
-[[bin]]
-name = "gen_hash"
-path = "../../gen_hash.rs"

@@ -6,6 +6,9 @@
 
 use crate::dto::routing::*;
 use crate::dto::ApiResponse;
+use crate::handlers::kamailio_gateway::{
+    gateway_attrs, signalling_from_transport, GW_TYPE_CARRIER, GW_TYPE_PBX,
+};
 use actix_web::{web, HttpResponse};
 use apolo_auth::SuperadminUser;
 use apolo_core::models::AuditLogBuilder;
@@ -14,6 +17,7 @@ use apolo_services::SipDeviceService;
 use serde_json::json;
 use sqlx::mysql::MySqlPool;
 use sqlx::PgPool;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
@@ -116,43 +120,54 @@ pub async fn create_trunk(
 
     // Validate request
     if req.name.trim().is_empty() {
-        return Err(AppError::Validation("Trunk name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Trunk name cannot be empty".to_string(),
+        ));
     }
     if req.host.trim().is_empty() {
         return Err(AppError::Validation("Host cannot be empty".to_string()));
     }
 
-    let transport = if req.transport.is_empty() { "udp" } else { &req.transport };
+    let transport = if req.transport.is_empty() {
+        "udp"
+    } else {
+        &req.transport
+    };
 
     // Validate trunk_type
-    let trunk_type = if req.trunk_type.is_empty() || (req.trunk_type != "private" && req.trunk_type != "public") {
+    let trunk_type = if req.trunk_type.is_empty()
+        || (req.trunk_type != "private" && req.trunk_type != "public")
+    {
         "public"
     } else {
         &req.trunk_type
     };
 
     // Encrypt password if provided and sip_service is available
-    let (password_encrypted, password_nonce): (Option<Vec<u8>>, Option<Vec<u8>>) =
-        if let Some(password) = &req.auth_password {
-            if !password.is_empty() {
-                if let Some(sip_svc) = &sip_service {
-                    match sip_svc.encrypt_password(password) {
-                        Ok((encrypted, nonce)) => (Some(encrypted), Some(nonce)),
-                        Err(e) => {
-                            warn!(error = %e, "Failed to encrypt password, storing without encryption");
-                            (None, None)
-                        }
+    let (password_encrypted, password_nonce): (Option<Vec<u8>>, Option<Vec<u8>>) = if let Some(
+        password,
+    ) =
+        &req.auth_password
+    {
+        if !password.is_empty() {
+            if let Some(sip_svc) = &sip_service {
+                match sip_svc.encrypt_password(password) {
+                    Ok((encrypted, nonce)) => (Some(encrypted), Some(nonce)),
+                    Err(e) => {
+                        warn!(error = %e, "Failed to encrypt password, storing without encryption");
+                        (None, None)
                     }
-                } else {
-                    warn!("SIP service not available, cannot encrypt password");
-                    (None, None)
                 }
             } else {
+                warn!("SIP service not available, cannot encrypt password");
                 (None, None)
             }
         } else {
             (None, None)
-        };
+        }
+    } else {
+        (None, None)
+    };
 
     // Insert into PostgreSQL
     let trunk = sqlx::query_as!(
@@ -205,7 +220,16 @@ pub async fn create_trunk(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "create", "trunk", Some(trunk.id), "kamailio", "success", None).await;
+                    log_sync_operation(
+                        &pool,
+                        "create",
+                        "trunk",
+                        Some(trunk.id),
+                        "kamailio",
+                        "success",
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -217,7 +241,16 @@ pub async fn create_trunk(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "create", "trunk", Some(trunk.id), "kamailio", "error", Some(&error_msg)).await;
+                    log_sync_operation(
+                        &pool,
+                        "create",
+                        "trunk",
+                        Some(trunk.id),
+                        "kamailio",
+                        "error",
+                        Some(&error_msg),
+                    )
+                    .await;
                     warn!(error = %e, "Failed to sync trunk to Kamailio");
                 }
             }
@@ -236,7 +269,16 @@ pub async fn create_trunk(
                 .execute(pool.get_ref())
                 .await;
 
-                log_sync_operation(&pool, "create", "trunk", Some(trunk.id), "freeswitch", "success", None).await;
+                log_sync_operation(
+                    &pool,
+                    "create",
+                    "trunk",
+                    Some(trunk.id),
+                    "freeswitch",
+                    "success",
+                    None,
+                )
+                .await;
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -248,7 +290,16 @@ pub async fn create_trunk(
                 .execute(pool.get_ref())
                 .await;
 
-                log_sync_operation(&pool, "create", "trunk", Some(trunk.id), "freeswitch", "error", Some(&error_msg)).await;
+                log_sync_operation(
+                    &pool,
+                    "create",
+                    "trunk",
+                    Some(trunk.id),
+                    "freeswitch",
+                    "error",
+                    Some(&error_msg),
+                )
+                .await;
                 warn!(error = %e, "Failed to sync trunk to FreeSWITCH");
             }
         }
@@ -293,7 +344,8 @@ pub async fn update_trunk(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let existing = existing.ok_or_else(|| AppError::NotFound(format!("Trunk {} not found", trunk_id)))?;
+    let existing =
+        existing.ok_or_else(|| AppError::NotFound(format!("Trunk {} not found", trunk_id)))?;
 
     // Encrypt password if provided
     let (password_encrypted, password_nonce): (Option<Vec<u8>>, Option<Vec<u8>>) =
@@ -381,7 +433,16 @@ pub async fn update_trunk(
                         .execute(pool.get_ref())
                         .await;
 
-                        log_sync_operation(&pool, "update", "trunk", Some(trunk.id), "kamailio", "success", None).await;
+                        log_sync_operation(
+                            &pool,
+                            "update",
+                            "trunk",
+                            Some(trunk.id),
+                            "kamailio",
+                            "success",
+                            None,
+                        )
+                        .await;
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
@@ -393,7 +454,16 @@ pub async fn update_trunk(
                         .execute(pool.get_ref())
                         .await;
 
-                        log_sync_operation(&pool, "update", "trunk", Some(trunk.id), "kamailio", "error", Some(&error_msg)).await;
+                        log_sync_operation(
+                            &pool,
+                            "update",
+                            "trunk",
+                            Some(trunk.id),
+                            "kamailio",
+                            "error",
+                            Some(&error_msg),
+                        )
+                        .await;
                     }
                 }
             } else {
@@ -416,7 +486,9 @@ pub async fn update_trunk(
         }
     } else {
         // Private trunks -> FreeSWITCH
-        let gateway_name = existing.freeswitch_gateway_name.unwrap_or_else(|| slugify(&trunk.name));
+        let gateway_name = existing
+            .freeswitch_gateway_name
+            .unwrap_or_else(|| slugify(&trunk.name));
         let sip_svc_ref = sip_service.as_ref().map(|s| s.get_ref());
         match sync_trunk_to_freeswitch(&pool, &trunk, &gateway_name, sip_svc_ref).await {
             Ok(_) => {
@@ -428,7 +500,16 @@ pub async fn update_trunk(
                 .execute(pool.get_ref())
                 .await;
 
-                log_sync_operation(&pool, "update", "trunk", Some(trunk.id), "freeswitch", "success", None).await;
+                log_sync_operation(
+                    &pool,
+                    "update",
+                    "trunk",
+                    Some(trunk.id),
+                    "freeswitch",
+                    "success",
+                    None,
+                )
+                .await;
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -440,7 +521,16 @@ pub async fn update_trunk(
                 .execute(pool.get_ref())
                 .await;
 
-                log_sync_operation(&pool, "update", "trunk", Some(trunk.id), "freeswitch", "error", Some(&error_msg)).await;
+                log_sync_operation(
+                    &pool,
+                    "update",
+                    "trunk",
+                    Some(trunk.id),
+                    "freeswitch",
+                    "error",
+                    Some(&error_msg),
+                )
+                .await;
             }
         }
     }
@@ -482,7 +572,8 @@ pub async fn delete_trunk(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let existing = existing.ok_or_else(|| AppError::NotFound(format!("Trunk {} not found", trunk_id)))?;
+    let existing =
+        existing.ok_or_else(|| AppError::NotFound(format!("Trunk {} not found", trunk_id)))?;
 
     // Check if trunk is used by any inbound routes (as destination_trunk_id)
     let inbound_routes_using_trunk = sqlx::query!(
@@ -494,7 +585,10 @@ pub async fn delete_trunk(
     .map_err(|e| AppError::Database(e.to_string()))?;
 
     if !inbound_routes_using_trunk.is_empty() {
-        let route_names: Vec<String> = inbound_routes_using_trunk.iter().map(|r| r.name.clone()).collect();
+        let route_names: Vec<String> = inbound_routes_using_trunk
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
         return Err(AppError::Validation(format!(
             "No se puede eliminar la troncal '{}' porque está siendo usada por las siguientes rutas entrantes: {}. Elimina o modifica estas rutas primero.",
             existing.name,
@@ -512,7 +606,10 @@ pub async fn delete_trunk(
     .map_err(|e| AppError::Database(e.to_string()))?;
 
     if !outbound_routes_using_trunk.is_empty() {
-        let route_names: Vec<String> = outbound_routes_using_trunk.iter().map(|r| r.name.clone()).collect();
+        let route_names: Vec<String> = outbound_routes_using_trunk
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
         return Err(AppError::Validation(format!(
             "No se puede eliminar la troncal '{}' porque está siendo usada por las siguientes rutas salientes: {}. Elimina o modifica estas rutas primero.",
             existing.name,
@@ -531,15 +628,42 @@ pub async fn delete_trunk(
                 match tokio::time::timeout(std::time::Duration::from_secs(5), delete_future).await {
                     Ok(Ok(())) => {
                         info!(gwid = gwid, "Trunk deleted from Kamailio");
-                        log_sync_operation(&pool, "delete", "trunk", Some(trunk_id), "kamailio", "success", None).await;
+                        log_sync_operation(
+                            &pool,
+                            "delete",
+                            "trunk",
+                            Some(trunk_id),
+                            "kamailio",
+                            "success",
+                            None,
+                        )
+                        .await;
                     }
                     Ok(Err(e)) => {
                         warn!(error = %e, gwid = gwid, "Failed to delete trunk from Kamailio");
-                        log_sync_operation(&pool, "delete", "trunk", Some(trunk_id), "kamailio", "error", Some(&e.to_string())).await;
+                        log_sync_operation(
+                            &pool,
+                            "delete",
+                            "trunk",
+                            Some(trunk_id),
+                            "kamailio",
+                            "error",
+                            Some(&e.to_string()),
+                        )
+                        .await;
                     }
                     Err(_) => {
                         warn!(gwid = gwid, "Timeout deleting trunk from Kamailio");
-                        log_sync_operation(&pool, "delete", "trunk", Some(trunk_id), "kamailio", "error", Some("Timeout")).await;
+                        log_sync_operation(
+                            &pool,
+                            "delete",
+                            "trunk",
+                            Some(trunk_id),
+                            "kamailio",
+                            "error",
+                            Some("Timeout"),
+                        )
+                        .await;
                     }
                 }
             }
@@ -550,11 +674,29 @@ pub async fn delete_trunk(
             match delete_trunk_from_freeswitch(gateway_name).await {
                 Ok(_) => {
                     info!(gateway = %gateway_name, "Gateway deleted from FreeSWITCH");
-                    log_sync_operation(&pool, "delete", "trunk", Some(trunk_id), "freeswitch", "success", None).await;
+                    log_sync_operation(
+                        &pool,
+                        "delete",
+                        "trunk",
+                        Some(trunk_id),
+                        "freeswitch",
+                        "success",
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     warn!(error = %e, gateway = %gateway_name, "Failed to delete gateway from FreeSWITCH");
-                    log_sync_operation(&pool, "delete", "trunk", Some(trunk_id), "freeswitch", "error", Some(&e.to_string())).await;
+                    log_sync_operation(
+                        &pool,
+                        "delete",
+                        "trunk",
+                        Some(trunk_id),
+                        "freeswitch",
+                        "error",
+                        Some(&e.to_string()),
+                    )
+                    .await;
                 }
             }
         }
@@ -646,7 +788,8 @@ pub async fn get_trunk_group(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let group = group.ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
+    let group =
+        group.ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
 
     // Get members with trunk details
     let members = sqlx::query_as!(
@@ -683,11 +826,16 @@ pub async fn create_trunk_group(
     info!(name = %req.name, "Creating trunk group");
 
     if req.name.trim().is_empty() {
-        return Err(AppError::Validation("Group name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Group name cannot be empty".to_string(),
+        ));
     }
 
     // Start transaction
-    let mut tx = pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     // Create group
     let group = sqlx::query_as!(
@@ -725,7 +873,9 @@ pub async fn create_trunk_group(
         .map_err(|e| AppError::Database(format!("Failed to add member: {}", e)))?;
     }
 
-    tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     // Sync to Kamailio
     if let Some(mysql) = mysql_pool {
@@ -749,7 +899,16 @@ pub async fn create_trunk_group(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "create", "trunk_group", Some(group.id), "kamailio", "success", None).await;
+                    log_sync_operation(
+                        &pool,
+                        "create",
+                        "trunk_group",
+                        Some(group.id),
+                        "kamailio",
+                        "success",
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -761,7 +920,16 @@ pub async fn create_trunk_group(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "create", "trunk_group", Some(group.id), "kamailio", "error", Some(&error_msg)).await;
+                    log_sync_operation(
+                        &pool,
+                        "create",
+                        "trunk_group",
+                        Some(group.id),
+                        "kamailio",
+                        "error",
+                        Some(&error_msg),
+                    )
+                    .await;
                 }
             }
         }
@@ -796,7 +964,10 @@ pub async fn update_trunk_group(
     let group_id = path.into_inner();
     info!(group_id = %group_id, "Updating trunk group");
 
-    let mut tx = pool.begin().await.map_err(|e| AppError::Database(e.to_string()))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     // Update group
     let group = sqlx::query_as!(
@@ -821,15 +992,19 @@ pub async fn update_trunk_group(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let group = group.ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
+    let group =
+        group.ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
 
     // Update members if provided
     if let Some(members) = &req.members {
         // Remove existing members
-        sqlx::query!("DELETE FROM routing_trunk_group_members WHERE group_id = $1", group_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        sqlx::query!(
+            "DELETE FROM routing_trunk_group_members WHERE group_id = $1",
+            group_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         // Add new members
         for member in members {
@@ -850,7 +1025,9 @@ pub async fn update_trunk_group(
         }
     }
 
-    tx.commit().await.map_err(|e| AppError::Database(e.to_string()))?;
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     // Sync to Kamailio
     if let Some(mysql) = mysql_pool {
@@ -866,7 +1043,15 @@ pub async fn update_trunk_group(
             let trunk_ids: Vec<Uuid> = members.iter().map(|m| m.trunk_id).collect();
 
             if let Some(kam_group_id) = group.kamailio_group_id {
-                match update_trunk_group_in_kamailio(&pool, &mysql, kam_group_id, &group, &trunk_ids).await {
+                match update_trunk_group_in_kamailio(
+                    &pool,
+                    &mysql,
+                    kam_group_id,
+                    &group,
+                    &trunk_ids,
+                )
+                .await
+                {
                     Ok(_) => {
                         let _ = sqlx::query!(
                             "UPDATE routing_trunk_groups SET sync_status = 'synced', sync_error = NULL WHERE id = $1",
@@ -875,7 +1060,16 @@ pub async fn update_trunk_group(
                         .execute(pool.get_ref())
                         .await;
 
-                        log_sync_operation(&pool, "update", "trunk_group", Some(group.id), "kamailio", "success", None).await;
+                        log_sync_operation(
+                            &pool,
+                            "update",
+                            "trunk_group",
+                            Some(group.id),
+                            "kamailio",
+                            "success",
+                            None,
+                        )
+                        .await;
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
@@ -887,7 +1081,16 @@ pub async fn update_trunk_group(
                         .execute(pool.get_ref())
                         .await;
 
-                        log_sync_operation(&pool, "update", "trunk_group", Some(group.id), "kamailio", "error", Some(&error_msg)).await;
+                        log_sync_operation(
+                            &pool,
+                            "update",
+                            "trunk_group",
+                            Some(group.id),
+                            "kamailio",
+                            "error",
+                            Some(&error_msg),
+                        )
+                        .await;
                     }
                 }
             }
@@ -923,12 +1126,16 @@ pub async fn delete_trunk_group(
     info!(group_id = %group_id, "Deleting trunk group");
 
     // Get Kamailio group ID for deletion
-    let existing = sqlx::query!("SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1", group_id)
-        .fetch_optional(pool.get_ref())
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let existing = sqlx::query!(
+        "SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1",
+        group_id
+    )
+    .fetch_optional(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let existing = existing.ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
+    let existing = existing
+        .ok_or_else(|| AppError::NotFound(format!("Trunk group {} not found", group_id)))?;
 
     // Delete from Kamailio first
     if let Some(mysql) = mysql_pool {
@@ -936,7 +1143,16 @@ pub async fn delete_trunk_group(
             if let Err(e) = delete_trunk_group_from_kamailio(&mysql, kam_id).await {
                 warn!(error = %e, "Failed to delete trunk group from Kamailio");
             } else {
-                log_sync_operation(&pool, "delete", "trunk_group", Some(group_id), "kamailio", "success", None).await;
+                log_sync_operation(
+                    &pool,
+                    "delete",
+                    "trunk_group",
+                    Some(group_id),
+                    "kamailio",
+                    "success",
+                    None,
+                )
+                .await;
             }
         }
     }
@@ -948,7 +1164,10 @@ pub async fn delete_trunk_group(
         .map_err(|e| AppError::Database(e.to_string()))?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Trunk group {} not found", group_id)));
+        return Err(AppError::NotFound(format!(
+            "Trunk group {} not found",
+            group_id
+        )));
     }
 
     // Audit log
@@ -1038,7 +1257,10 @@ pub async fn get_outbound_route(
 
     match route {
         Some(r) => Ok(HttpResponse::Ok().json(ApiResponse::success(r))),
-        None => Err(AppError::NotFound(format!("Outbound route {} not found", route_id))),
+        None => Err(AppError::NotFound(format!(
+            "Outbound route {} not found",
+            route_id
+        ))),
     }
 }
 
@@ -1056,13 +1278,19 @@ pub async fn create_outbound_route(
 
     // Validate
     if req.name.trim().is_empty() {
-        return Err(AppError::Validation("Route name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Route name cannot be empty".to_string(),
+        ));
     }
     if req.trunk_group_id.is_none() && req.trunk_id.is_none() {
-        return Err(AppError::Validation("Must specify either trunk_group_id or trunk_id".to_string()));
+        return Err(AppError::Validation(
+            "Must specify either trunk_group_id or trunk_id".to_string(),
+        ));
     }
     if req.trunk_group_id.is_some() && req.trunk_id.is_some() {
-        return Err(AppError::Validation("Cannot specify both trunk_group_id and trunk_id".to_string()));
+        return Err(AppError::Validation(
+            "Cannot specify both trunk_group_id and trunk_id".to_string(),
+        ));
     }
 
     let route = sqlx::query_as!(
@@ -1110,7 +1338,16 @@ pub async fn create_outbound_route(
                     warn!("Failed to reload Kamailio after creating route: {}", e);
                 }
 
-                log_sync_operation(&pool, "create", "outbound_route", Some(route.id), "kamailio", "success", None).await;
+                log_sync_operation(
+                    &pool,
+                    "create",
+                    "outbound_route",
+                    Some(route.id),
+                    "kamailio",
+                    "success",
+                    None,
+                )
+                .await;
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -1122,7 +1359,16 @@ pub async fn create_outbound_route(
                 .execute(pool.get_ref())
                 .await;
 
-                log_sync_operation(&pool, "create", "outbound_route", Some(route.id), "kamailio", "error", Some(&error_msg)).await;
+                log_sync_operation(
+                    &pool,
+                    "create",
+                    "outbound_route",
+                    Some(route.id),
+                    "kamailio",
+                    "error",
+                    Some(&error_msg),
+                )
+                .await;
             }
         }
     }
@@ -1158,7 +1404,9 @@ pub async fn update_outbound_route(
 
     // Validate mutual exclusivity
     if req.trunk_group_id.is_some() && req.trunk_id.is_some() {
-        return Err(AppError::Validation("Cannot specify both trunk_group_id and trunk_id".to_string()));
+        return Err(AppError::Validation(
+            "Cannot specify both trunk_group_id and trunk_id".to_string(),
+        ));
     }
 
     let route = sqlx::query_as!(
@@ -1198,7 +1446,8 @@ pub async fn update_outbound_route(
     .await
     .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let route = route.ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
+    let route = route
+        .ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
 
     // Sync to Kamailio immediately
     if let Some(mysql) = mysql_pool {
@@ -1218,7 +1467,16 @@ pub async fn update_outbound_route(
                         warn!("Failed to reload Kamailio after updating route: {}", e);
                     }
 
-                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "success", None).await;
+                    log_sync_operation(
+                        &pool,
+                        "update",
+                        "outbound_route",
+                        Some(route.id),
+                        "kamailio",
+                        "success",
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -1230,7 +1488,16 @@ pub async fn update_outbound_route(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "error", Some(&error_msg)).await;
+                    log_sync_operation(
+                        &pool,
+                        "update",
+                        "outbound_route",
+                        Some(route.id),
+                        "kamailio",
+                        "error",
+                        Some(&error_msg),
+                    )
+                    .await;
                 }
             }
         } else {
@@ -1250,7 +1517,16 @@ pub async fn update_outbound_route(
                         warn!("Failed to reload Kamailio after creating route: {}", e);
                     }
 
-                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "success", None).await;
+                    log_sync_operation(
+                        &pool,
+                        "update",
+                        "outbound_route",
+                        Some(route.id),
+                        "kamailio",
+                        "success",
+                        None,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -1262,7 +1538,16 @@ pub async fn update_outbound_route(
                     .execute(pool.get_ref())
                     .await;
 
-                    log_sync_operation(&pool, "update", "outbound_route", Some(route.id), "kamailio", "error", Some(&error_msg)).await;
+                    log_sync_operation(
+                        &pool,
+                        "update",
+                        "outbound_route",
+                        Some(route.id),
+                        "kamailio",
+                        "error",
+                        Some(&error_msg),
+                    )
+                    .await;
                 }
             }
         }
@@ -1296,12 +1581,16 @@ pub async fn delete_outbound_route(
     let route_id = path.into_inner();
     info!(route_id = %route_id, "Deleting outbound route");
 
-    let existing = sqlx::query!("SELECT kamailio_ruleid FROM routing_outbound_routes WHERE id = $1", route_id)
-        .fetch_optional(pool.get_ref())
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let existing = sqlx::query!(
+        "SELECT kamailio_ruleid FROM routing_outbound_routes WHERE id = $1",
+        route_id
+    )
+    .fetch_optional(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
-    let existing = existing.ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
+    let existing = existing
+        .ok_or_else(|| AppError::NotFound(format!("Outbound route {} not found", route_id)))?;
 
     // Delete from Kamailio
     if let Some(mysql) = mysql_pool {
@@ -1313,18 +1602,33 @@ pub async fn delete_outbound_route(
                 if let Err(e) = reload_kamailio().await {
                     warn!("Failed to reload Kamailio after deleting route: {}", e);
                 }
-                log_sync_operation(&pool, "delete", "outbound_route", Some(route_id), "kamailio", "success", None).await;
+                log_sync_operation(
+                    &pool,
+                    "delete",
+                    "outbound_route",
+                    Some(route_id),
+                    "kamailio",
+                    "success",
+                    None,
+                )
+                .await;
             }
         }
     }
 
-    let result = sqlx::query!("DELETE FROM routing_outbound_routes WHERE id = $1", route_id)
-        .execute(pool.get_ref())
-        .await
-        .map_err(|e| AppError::Database(e.to_string()))?;
+    let result = sqlx::query!(
+        "DELETE FROM routing_outbound_routes WHERE id = $1",
+        route_id
+    )
+    .execute(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Outbound route {} not found", route_id)));
+        return Err(AppError::NotFound(format!(
+            "Outbound route {} not found",
+            route_id
+        )));
     }
 
     // Audit log
@@ -1366,7 +1670,7 @@ pub async fn list_inbound_routes(
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.name as "destination_trunk_name?",
-               r.send_early_media, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
+               r.send_early_media, r.ims_mode, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
                r.sync_status, r.sync_error, r.created_at, r.updated_at
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
@@ -1398,7 +1702,11 @@ pub async fn list_inbound_routes(
             destination_trunk_id: r.destination_trunk_id,
             destination_trunk_name: r.destination_trunk_name,
             send_early_media: Some(r.send_early_media),
-            failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
+            ims_mode: Some(r.ims_mode),
+            failover_destinations: serde_json::from_value(
+                r.failover_destinations.unwrap_or_default(),
+            )
+            .unwrap_or_default(),
             enabled: r.enabled,
             freeswitch_extension_id: r.freeswitch_extension_id,
             sync_status: r.sync_status,
@@ -1429,7 +1737,7 @@ pub async fn get_inbound_route(
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.name as "destination_trunk_name?",
-               r.send_early_media, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
+               r.send_early_media, r.ims_mode, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
                r.sync_status, r.sync_error, r.created_at, r.updated_at
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
@@ -1462,7 +1770,11 @@ pub async fn get_inbound_route(
                 destination_trunk_id: r.destination_trunk_id,
                 destination_trunk_name: r.destination_trunk_name,
                 send_early_media: Some(r.send_early_media),
-                failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
+                ims_mode: Some(r.ims_mode),
+                failover_destinations: serde_json::from_value(
+                    r.failover_destinations.unwrap_or_default(),
+                )
+                .unwrap_or_default(),
                 enabled: r.enabled,
                 freeswitch_extension_id: r.freeswitch_extension_id,
                 sync_status: r.sync_status,
@@ -1472,7 +1784,10 @@ pub async fn get_inbound_route(
             };
             Ok(HttpResponse::Ok().json(ApiResponse::success(route)))
         }
-        None => Err(AppError::NotFound(format!("Inbound route {} not found", route_id))),
+        None => Err(AppError::NotFound(format!(
+            "Inbound route {} not found",
+            route_id
+        ))),
     }
 }
 
@@ -1488,10 +1803,14 @@ pub async fn create_inbound_route(
     info!(name = %req.name, did = %req.did_pattern, "Creating inbound route");
 
     if req.name.trim().is_empty() {
-        return Err(AppError::Validation("Route name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Route name cannot be empty".to_string(),
+        ));
     }
     if req.destination_host.trim().is_empty() {
-        return Err(AppError::Validation("Destination host cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Destination host cannot be empty".to_string(),
+        ));
     }
 
     let failover_json = serde_json::to_value(&req.failover_destinations).unwrap_or_default();
@@ -1515,13 +1834,13 @@ pub async fn create_inbound_route(
                                            destination_profile, call_timeout, inherit_codec,
                                            ignore_early_media, bypass_media, strip_digits,
                                            prefix_to_add, destination_trunk_id, send_early_media,
-                                           failover_destinations, enabled, freeswitch_extension_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                                           ims_mode, failover_destinations, enabled, freeswitch_extension_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         RETURNING id, name, description, did_pattern, source_ip_pattern, priority,
                   destination_host, destination_port, destination_profile,
                   call_timeout, inherit_codec, ignore_early_media, bypass_media,
                   strip_digits, prefix_to_add, destination_trunk_id, send_early_media,
-                  failover_destinations, enabled, freeswitch_extension_id,
+                  ims_mode, failover_destinations, enabled, freeswitch_extension_id,
                   sync_status, sync_error, created_at, updated_at
         "#,
         req.name.trim(),
@@ -1540,6 +1859,7 @@ pub async fn create_inbound_route(
         req.prefix_to_add.trim(),
         req.destination_trunk_id,
         req.send_early_media,
+        req.ims_mode,
         failover_json,
         req.enabled,
         extension_id
@@ -1567,7 +1887,9 @@ pub async fn create_inbound_route(
         destination_trunk_id: r.destination_trunk_id,
         destination_trunk_name: trunk_name,
         send_early_media: Some(r.send_early_media),
-        failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
+        ims_mode: Some(r.ims_mode),
+        failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default())
+            .unwrap_or_default(),
         enabled: r.enabled,
         freeswitch_extension_id: r.freeswitch_extension_id,
         sync_status: r.sync_status,
@@ -1586,7 +1908,16 @@ pub async fn create_inbound_route(
             .execute(pool.get_ref())
             .await;
 
-            log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "success", None).await;
+            log_sync_operation(
+                &pool,
+                "create",
+                "inbound_route",
+                Some(route.id),
+                "freeswitch",
+                "success",
+                None,
+            )
+            .await;
         }
         Err(e) => {
             let error_msg = e.to_string();
@@ -1598,7 +1929,16 @@ pub async fn create_inbound_route(
             .execute(pool.get_ref())
             .await;
 
-            log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "error", Some(&error_msg)).await;
+            log_sync_operation(
+                &pool,
+                "create",
+                "inbound_route",
+                Some(route.id),
+                "freeswitch",
+                "error",
+                Some(&error_msg),
+            )
+            .await;
         }
     }
 
@@ -1630,7 +1970,10 @@ pub async fn update_inbound_route(
     let route_id = path.into_inner();
     info!(route_id = %route_id, "Updating inbound route");
 
-    let failover_json = req.failover_destinations.as_ref().map(|f| serde_json::to_value(f).unwrap_or_default());
+    let failover_json = req
+        .failover_destinations
+        .as_ref()
+        .map(|f| serde_json::to_value(f).unwrap_or_default());
 
     // Note: For destination_trunk_id, we use a direct assignment to allow setting it to NULL
     let r = sqlx::query!(
@@ -1652,15 +1995,16 @@ pub async fn update_inbound_route(
             prefix_to_add = COALESCE($14, prefix_to_add),
             destination_trunk_id = $15,
             send_early_media = COALESCE($16, send_early_media),
-            failover_destinations = COALESCE($17, failover_destinations),
-            enabled = COALESCE($18, enabled),
+            ims_mode = COALESCE($17, ims_mode),
+            failover_destinations = COALESCE($18, failover_destinations),
+            enabled = COALESCE($19, enabled),
             sync_status = 'pending'
-        WHERE id = $19
+        WHERE id = $20
         RETURNING id, name, description, did_pattern, source_ip_pattern, priority,
                   destination_host, destination_port, destination_profile,
                   call_timeout, inherit_codec, ignore_early_media, bypass_media,
                   strip_digits, prefix_to_add, destination_trunk_id, send_early_media,
-                  failover_destinations, enabled, freeswitch_extension_id,
+                  ims_mode, failover_destinations, enabled, freeswitch_extension_id,
                   sync_status, sync_error, created_at, updated_at
         "#,
         req.name.as_deref(),
@@ -1679,6 +2023,7 @@ pub async fn update_inbound_route(
         req.prefix_to_add.as_deref(),
         req.destination_trunk_id,
         req.send_early_media,
+        req.ims_mode,
         failover_json,
         req.enabled,
         route_id
@@ -1719,7 +2064,9 @@ pub async fn update_inbound_route(
         destination_trunk_id: r.destination_trunk_id,
         destination_trunk_name: trunk_name,
         send_early_media: Some(r.send_early_media),
-        failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
+        ims_mode: Some(r.ims_mode),
+        failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default())
+            .unwrap_or_default(),
         enabled: r.enabled,
         freeswitch_extension_id: r.freeswitch_extension_id,
         sync_status: r.sync_status,
@@ -1738,7 +2085,16 @@ pub async fn update_inbound_route(
             .execute(pool.get_ref())
             .await;
 
-            log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "success", None).await;
+            log_sync_operation(
+                &pool,
+                "update",
+                "inbound_route",
+                Some(route.id),
+                "freeswitch",
+                "success",
+                None,
+            )
+            .await;
         }
         Err(e) => {
             let error_msg = e.to_string();
@@ -1750,7 +2106,16 @@ pub async fn update_inbound_route(
             .execute(pool.get_ref())
             .await;
 
-            log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "error", Some(&error_msg)).await;
+            log_sync_operation(
+                &pool,
+                "update",
+                "inbound_route",
+                Some(route.id),
+                "freeswitch",
+                "error",
+                Some(&error_msg),
+            )
+            .await;
         }
     }
 
@@ -1787,16 +2152,37 @@ pub async fn delete_inbound_route(
         .map_err(|e| AppError::Database(e.to_string()))?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Inbound route {} not found", route_id)));
+        return Err(AppError::NotFound(format!(
+            "Inbound route {} not found",
+            route_id
+        )));
     }
 
     // Regenerate FreeSWITCH XML
     match sync_inbound_routes_to_freeswitch(&pool).await {
         Ok(_) => {
-            log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "freeswitch", "success", None).await;
+            log_sync_operation(
+                &pool,
+                "delete",
+                "inbound_route",
+                Some(route_id),
+                "freeswitch",
+                "success",
+                None,
+            )
+            .await;
         }
         Err(e) => {
-            log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "freeswitch", "error", Some(&e.to_string())).await;
+            log_sync_operation(
+                &pool,
+                "delete",
+                "inbound_route",
+                Some(route_id),
+                "freeswitch",
+                "error",
+                Some(&e.to_string()),
+            )
+            .await;
         }
     }
 
@@ -1848,7 +2234,16 @@ pub async fn reload_routing(
         }
         Err(e) => {
             result.kamailio_message = Some(e.to_string());
-            log_sync_operation(&pool, "reload", "system", None, "kamailio", "error", Some(&e.to_string())).await;
+            log_sync_operation(
+                &pool,
+                "reload",
+                "system",
+                None,
+                "kamailio",
+                "error",
+                Some(&e.to_string()),
+            )
+            .await;
         }
     }
 
@@ -1857,11 +2252,29 @@ pub async fn reload_routing(
         Ok(msg) => {
             result.freeswitch_reloaded = true;
             result.freeswitch_message = Some(msg);
-            log_sync_operation(&pool, "reload", "system", None, "freeswitch", "success", None).await;
+            log_sync_operation(
+                &pool,
+                "reload",
+                "system",
+                None,
+                "freeswitch",
+                "success",
+                None,
+            )
+            .await;
         }
         Err(e) => {
             result.freeswitch_message = Some(e.to_string());
-            log_sync_operation(&pool, "reload", "system", None, "freeswitch", "error", Some(&e.to_string())).await;
+            log_sync_operation(
+                &pool,
+                "reload",
+                "system",
+                None,
+                "freeswitch",
+                "error",
+                Some(&e.to_string()),
+            )
+            .await;
         }
     }
 
@@ -1909,7 +2322,7 @@ pub async fn get_sync_status(
         outbound_routes_synced: status.outbound_routes_synced.unwrap_or(0),
         inbound_routes_total: status.inbound_routes_total.unwrap_or(0),
         inbound_routes_synced: status.inbound_routes_synced.unwrap_or(0),
-        kamailio_connected: true, // TODO: Actually check connection
+        kamailio_connected: true,   // TODO: Actually check connection
         freeswitch_connected: true, // TODO: Actually check connection
         last_sync: status.last_sync,
     };
@@ -1948,25 +2361,42 @@ pub async fn migrate_routes(
         // Import groups from dr_gw_lists
         match import_trunk_groups_from_kamailio(&pool, &mysql).await {
             Ok(count) => result.trunk_groups_imported = count,
-            Err(e) => result.errors.push(format!("Trunk group import failed: {}", e)),
+            Err(e) => result
+                .errors
+                .push(format!("Trunk group import failed: {}", e)),
         }
 
         // Import routes from dr_rules
         match import_outbound_routes_from_kamailio(&pool, &mysql).await {
             Ok(count) => result.outbound_routes_imported = count,
-            Err(e) => result.errors.push(format!("Outbound route import failed: {}", e)),
+            Err(e) => result
+                .errors
+                .push(format!("Outbound route import failed: {}", e)),
         }
     } else {
-        result.warnings.push("Kamailio MySQL not configured - skipping Kamailio migration".to_string());
+        result
+            .warnings
+            .push("Kamailio MySQL not configured - skipping Kamailio migration".to_string());
     }
 
     // Import inbound routes from FreeSWITCH XML
     match import_inbound_routes_from_freeswitch(&pool).await {
         Ok(count) => result.inbound_routes_imported = count,
-        Err(e) => result.errors.push(format!("Inbound route import failed: {}", e)),
+        Err(e) => result
+            .errors
+            .push(format!("Inbound route import failed: {}", e)),
     }
 
-    log_sync_operation(&pool, "migrate", "system", None, "both", "success", Some(&format!("{:?}", result))).await;
+    log_sync_operation(
+        &pool,
+        "migrate",
+        "system",
+        None,
+        "both",
+        "success",
+        Some(&format!("{:?}", result)),
+    )
+    .await;
 
     // Audit log
     if let Ok(audit) = AuditLogBuilder::default()
@@ -1994,9 +2424,8 @@ pub async fn sync_to_kamailio(
 ) -> Result<HttpResponse, AppError> {
     info!("Syncing routes to Kamailio");
 
-    let mysql = mysql_pool.ok_or_else(|| {
-        AppError::Internal("Kamailio MySQL not configured".to_string())
-    })?;
+    let mysql = mysql_pool
+        .ok_or_else(|| AppError::Internal("Kamailio MySQL not configured".to_string()))?;
 
     let mut result = SyncToKamailioResult {
         trunks_synced: 0,
@@ -2161,7 +2590,16 @@ pub async fn sync_to_kamailio(
         }
     }
 
-    log_sync_operation(&pool, "sync_to_kamailio", "system", None, "kamailio", "success", Some(&format!("{:?}", result))).await;
+    log_sync_operation(
+        &pool,
+        "sync_to_kamailio",
+        "system",
+        None,
+        "kamailio",
+        "success",
+        Some(&format!("{:?}", result)),
+    )
+    .await;
 
     // Audit log
     if let Ok(audit) = AuditLogBuilder::default()
@@ -2189,9 +2627,8 @@ pub async fn force_sync_to_kamailio(
 ) -> Result<HttpResponse, AppError> {
     info!("Force syncing all routes to Kamailio");
 
-    let mysql = mysql_pool.ok_or_else(|| {
-        AppError::Internal("Kamailio MySQL not configured".to_string())
-    })?;
+    let mysql = mysql_pool
+        .ok_or_else(|| AppError::Internal("Kamailio MySQL not configured".to_string()))?;
 
     let mut result = SyncToKamailioResult {
         trunks_synced: 0,
@@ -2271,7 +2708,16 @@ pub async fn force_sync_to_kamailio(
         }
     }
 
-    log_sync_operation(&pool, "force_sync_to_kamailio", "system", None, "kamailio", "success", Some(&format!("{:?}", result))).await;
+    log_sync_operation(
+        &pool,
+        "force_sync_to_kamailio",
+        "system",
+        None,
+        "kamailio",
+        "success",
+        Some(&format!("{:?}", result)),
+    )
+    .await;
 
     // Audit log
     if let Ok(audit) = AuditLogBuilder::default()
@@ -2325,11 +2771,17 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/sync-status", web::get().to(get_sync_status))
             .route("/migrate", web::post().to(migrate_routes))
             .route("/sync-to-kamailio", web::post().to(sync_to_kamailio))
-            .route("/force-sync-kamailio", web::post().to(force_sync_to_kamailio))
+            .route(
+                "/force-sync-kamailio",
+                web::post().to(force_sync_to_kamailio),
+            )
             // SIP Status
             .route("/sip-status", web::get().to(check_all_trunks_sip_status))
             .route("/sip-status/{id}", web::get().to(check_trunk_sip_status))
-            .route("/sip-status/{id}/history", web::get().to(get_trunk_sip_history)),
+            .route(
+                "/sip-status/{id}/history",
+                web::get().to(get_trunk_sip_history),
+            ),
     );
 }
 
@@ -2380,6 +2832,15 @@ async fn log_sync_operation(
 // ============================================================================
 
 /// Sync a trunk to Kamailio dr_gateways
+/// dSIPRouter gateway type: 8 = carrier/trunk (public), 9 = PBX endpoint (private).
+fn kamailio_gateway_type(trunk_type: Option<&str>) -> i32 {
+    if trunk_type == Some("private") {
+        GW_TYPE_PBX
+    } else {
+        GW_TYPE_CARRIER
+    }
+}
+
 async fn sync_trunk_to_kamailio(
     _pg_pool: &PgPool,
     mysql_pool: &MySqlPool,
@@ -2389,11 +2850,13 @@ async fn sync_trunk_to_kamailio(
     let strip_digits = trunk.strip_digits.unwrap_or(0) as u32;
     let prefix = trunk.prefix_to_add.as_deref().unwrap_or("");
     let address = format!("{}:{}", trunk.host, port);
+    let gw_type = kamailio_gateway_type(trunk.trunk_type.as_deref());
+    let signalling = signalling_from_transport(trunk.transport.as_deref());
 
     let result = sqlx::query(
         "INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description) VALUES (?, ?, ?, ?, ?, ?)"
     )
-    .bind(1i32) // type 1 = SIP gateway
+    .bind(gw_type)
     .bind(&address)
     .bind(strip_digits)
     .bind(prefix)
@@ -2403,10 +2866,20 @@ async fn sync_trunk_to_kamailio(
     .await
     .map_err(|e| AppError::Database(format!("Failed to sync trunk to Kamailio: {}", e)))?;
 
+    let gwid = result.last_insert_id() as i32;
+
+    // attrs is positional and starts with the gwid, only known after the INSERT assigns it
+    sqlx::query("UPDATE dr_gateways SET attrs = ? WHERE gwid = ?")
+        .bind(gateway_attrs(gwid, gw_type, signalling))
+        .bind(gwid as u32)
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to set gateway attrs in Kamailio: {}", e)))?;
+
     // Reload Kamailio drouting
     reload_kamailio_drouting().await;
 
-    Ok(result.last_insert_id() as i32)
+    Ok(gwid)
 }
 
 /// Update a trunk in Kamailio
@@ -2419,13 +2892,17 @@ async fn update_trunk_in_kamailio(
     let strip_digits = trunk.strip_digits.unwrap_or(0) as u32;
     let prefix = trunk.prefix_to_add.as_deref().unwrap_or("");
     let address = format!("{}:{}", trunk.host, port);
+    let gw_type = kamailio_gateway_type(trunk.trunk_type.as_deref());
+    let signalling = signalling_from_transport(trunk.transport.as_deref());
 
     sqlx::query(
-        "UPDATE dr_gateways SET address = ?, strip = ?, pri_prefix = ?, description = ? WHERE gwid = ?"
+        "UPDATE dr_gateways SET type = ?, address = ?, strip = ?, pri_prefix = ?, attrs = ?, description = ? WHERE gwid = ?"
     )
+    .bind(gw_type)
     .bind(&address)
     .bind(strip_digits)
     .bind(prefix)
+    .bind(gateway_attrs(gwid, gw_type, signalling))
     .bind(&trunk.name)
     .bind(gwid as u32)
     .execute(mysql_pool)
@@ -2477,11 +2954,12 @@ async fn delete_trunk_from_kamailio(mysql_pool: &MySqlPool, gwid: i32) -> Result
     let gwid_str = gwid.to_string();
 
     // Get all groups that contain this gwid
-    let groups: Vec<(i32, String)> = sqlx::query_as("SELECT id, gwlist FROM dr_gw_lists WHERE gwlist LIKE ?")
-        .bind(format!("%{}%", gwid))
-        .fetch_all(mysql_pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Failed to query dr_gw_lists: {}", e)))?;
+    let groups: Vec<(i32, String)> =
+        sqlx::query_as("SELECT id, gwlist FROM dr_gw_lists WHERE gwlist LIKE ?")
+            .bind(format!("%{}%", gwid))
+            .fetch_all(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to query dr_gw_lists: {}", e)))?;
 
     // Update each group to remove the gwid
     for (group_id, gwlist) in groups {
@@ -2498,7 +2976,10 @@ async fn delete_trunk_from_kamailio(mysql_pool: &MySqlPool, gwid: i32) -> Result
                 .execute(mysql_pool)
                 .await
                 .map_err(|e| AppError::Database(format!("Failed to delete empty group: {}", e)))?;
-            info!(group_id = group_id, "Deleted empty Kamailio group after removing gateway");
+            info!(
+                group_id = group_id,
+                "Deleted empty Kamailio group after removing gateway"
+            );
         } else {
             // Update the group with remaining gateways
             sqlx::query("UPDATE dr_gw_lists SET gwlist = ? WHERE id = ?")
@@ -2542,7 +3023,9 @@ async fn sync_trunk_to_freeswitch(
     let username = trunk.auth_username.as_deref().unwrap_or("");
 
     // Decrypt password if available
-    let password = if let (Some(encrypted), Some(nonce)) = (&trunk.auth_password_encrypted, &trunk.auth_password_nonce) {
+    let password = if let (Some(encrypted), Some(nonce)) =
+        (&trunk.auth_password_encrypted, &trunk.auth_password_nonce)
+    {
         if let Some(sip_svc) = sip_service {
             match sip_svc.decrypt_password(encrypted, nonce) {
                 Ok(pwd) => Some(pwd),
@@ -2560,7 +3043,8 @@ async fn sync_trunk_to_freeswitch(
     };
 
     // Build password parameter line if password is available
-    let password_line = password.as_ref()
+    let password_line = password
+        .as_ref()
         .map(|pwd| format!("    <param name=\"password\" value=\"{}\"/>\n", pwd))
         .unwrap_or_default();
 
@@ -2585,7 +3069,11 @@ async fn sync_trunk_to_freeswitch(
         trunk.host,
         trunk.host,
         port,
-        if username.is_empty() && password.is_none() { "false" } else { "true" },
+        if username.is_empty() && password.is_none() {
+            "false"
+        } else {
+            "true"
+        },
         username,
         password_line,
         transport
@@ -2594,9 +3082,9 @@ async fn sync_trunk_to_freeswitch(
     // Ensure directory exists
     let gateway_dir = Path::new(FS_GATEWAYS_DIR);
     if !gateway_dir.exists() {
-        fs::create_dir_all(gateway_dir)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to create gateways directory: {}", e)))?;
+        fs::create_dir_all(gateway_dir).await.map_err(|e| {
+            AppError::Internal(format!("Failed to create gateways directory: {}", e))
+        })?;
     }
 
     // Write gateway XML file
@@ -2619,7 +3107,10 @@ async fn reload_freeswitch_gateway(gateway_name: &str) -> Result<(), AppError> {
 
     // Kill existing gateway if it exists
     let kill_result = Command::new("fs_cli")
-        .args(["-x", &format!("sofia profile external killgw {}", gateway_name)])
+        .args([
+            "-x",
+            &format!("sofia profile external killgw {}", gateway_name),
+        ])
         .output()
         .await;
 
@@ -2657,7 +3148,10 @@ async fn delete_trunk_from_freeswitch(gateway_name: &str) -> Result<(), AppError
 
     // Kill gateway in FreeSWITCH first
     let _ = Command::new("fs_cli")
-        .args(["-x", &format!("sofia profile external killgw {}", gateway_name)])
+        .args([
+            "-x",
+            &format!("sofia profile external killgw {}", gateway_name),
+        ])
         .output()
         .await;
 
@@ -2713,7 +3207,10 @@ pub async fn check_all_trunks_sip_status(
     for trunk in trunks {
         let trunk_type = trunk.trunk_type.as_deref().unwrap_or("public");
         let port = trunk.port.unwrap_or(5060);
-        let gateway_name_str = trunk.freeswitch_gateway_name.clone().unwrap_or_else(|| trunk.name.clone());
+        let gateway_name_str = trunk
+            .freeswitch_gateway_name
+            .clone()
+            .unwrap_or_else(|| trunk.name.clone());
         let gateway_name = gateway_name_str.as_str();
 
         // Perform OPTIONS check based on trunk type
@@ -2768,10 +3265,18 @@ pub async fn check_all_trunks_sip_status(
             "#,
             trunk.id,
             trunk_type,
-            if status == "reachable" { "success" } else { "error" },
+            if status == "reachable" {
+                "success"
+            } else {
+                "error"
+            },
             response_code,
             latency_ms,
-            if status == "reachable" { None } else { Some(&status_message) }
+            if status == "reachable" {
+                None
+            } else {
+                Some(&status_message)
+            }
         )
         .execute(pool.get_ref())
         .await;
@@ -2782,7 +3287,11 @@ pub async fn check_all_trunks_sip_status(
             trunk_type: trunk_type.to_string(),
             host: trunk.host,
             port,
-            gateway_name: if trunk_type == "private" { Some(gateway_name_str.clone()) } else { None },
+            gateway_name: if trunk_type == "private" {
+                Some(gateway_name_str.clone())
+            } else {
+                None
+            },
             status,
             status_message,
             response_code,
@@ -2831,7 +3340,10 @@ pub async fn check_trunk_sip_status(
 
     let trunk_type = trunk.trunk_type.as_deref().unwrap_or("public");
     let port = trunk.port.unwrap_or(5060);
-    let gateway_name_str = trunk.freeswitch_gateway_name.clone().unwrap_or_else(|| trunk.name.clone());
+    let gateway_name_str = trunk
+        .freeswitch_gateway_name
+        .clone()
+        .unwrap_or_else(|| trunk.name.clone());
     let gateway_name = gateway_name_str.as_str();
 
     // Perform OPTIONS check
@@ -2875,10 +3387,18 @@ pub async fn check_trunk_sip_status(
         "#,
         trunk_id,
         trunk_type,
-        if status == "reachable" { "success" } else { "error" },
+        if status == "reachable" {
+            "success"
+        } else {
+            "error"
+        },
         response_code,
         latency_ms,
-        if status == "reachable" { None } else { Some(&status_message) }
+        if status == "reachable" {
+            None
+        } else {
+            Some(&status_message)
+        }
     )
     .execute(pool.get_ref())
     .await;
@@ -2889,7 +3409,11 @@ pub async fn check_trunk_sip_status(
         trunk_type: trunk_type.to_string(),
         host: trunk.host,
         port,
-        gateway_name: if trunk_type == "private" { Some(gateway_name_str) } else { None },
+        gateway_name: if trunk_type == "private" {
+            Some(gateway_name_str)
+        } else {
+            None
+        },
         status,
         status_message,
         response_code,
@@ -2942,7 +3466,16 @@ async fn check_sip_status_via_freeswitch(
     gateway_name: &str,
     host: &str,
     port: i32,
-) -> Result<(String, String, Option<i32>, Option<i32>, Option<SipExchange>), AppError> {
+) -> Result<
+    (
+        String,
+        String,
+        Option<i32>,
+        Option<i32>,
+        Option<SipExchange>,
+    ),
+    AppError,
+> {
     use std::time::{Duration, Instant};
     use tokio::process::Command;
     use tokio::time::timeout;
@@ -2953,11 +3486,8 @@ async fn check_sip_status_via_freeswitch(
     let fs_result = timeout(
         Duration::from_secs(5),
         Command::new("fs_cli")
-            .args([
-                "-x",
-                &format!("sofia status gateway {}", gateway_name),
-            ])
-            .output()
+            .args(["-x", &format!("sofia status gateway {}", gateway_name)])
+            .output(),
     )
     .await;
 
@@ -3056,16 +3586,24 @@ async fn check_sip_status_via_freeswitch(
             } else {
                 Ok((
                     "unknown".to_string(),
-                    format!("Estado: {}", stdout.lines().find(|l| l.contains("State")).unwrap_or("desconocido").trim()),
+                    format!(
+                        "Estado: {}",
+                        stdout
+                            .lines()
+                            .find(|l| l.contains("State"))
+                            .unwrap_or("desconocido")
+                            .trim()
+                    ),
                     None,
                     Some(latency),
                     None,
                 ))
             }
         }
-        Err(e) => {
-            Err(AppError::Internal(format!("Error ejecutando fs_cli: {}", e)))
-        }
+        Err(e) => Err(AppError::Internal(format!(
+            "Error ejecutando fs_cli: {}",
+            e
+        ))),
     }
 }
 
@@ -3073,11 +3611,20 @@ async fn check_sip_status_via_freeswitch(
 async fn check_sip_status_via_kamailio(
     host: &str,
     port: i32,
-) -> Result<(String, String, Option<i32>, Option<i32>, Option<SipExchange>), AppError> {
+) -> Result<
+    (
+        String,
+        String,
+        Option<i32>,
+        Option<i32>,
+        Option<SipExchange>,
+    ),
+    AppError,
+> {
     use std::time::{Duration, Instant};
+    use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
     use tokio::time::timeout;
-    use tokio::io::AsyncWriteExt;
 
     let start = Instant::now();
 
@@ -3085,7 +3632,11 @@ async fn check_sip_status_via_kamailio(
     let local_ip = std::env::var("SIPSAK_LOCAL_IP").unwrap_or_else(|_| "127.0.0.1".to_string());
 
     // Generate unique Call-ID and branch
-    let call_id = format!("apolo-{}-{}", std::process::id(), start.elapsed().as_nanos());
+    let call_id = format!(
+        "apolo-{}-{}",
+        std::process::id(),
+        start.elapsed().as_nanos()
+    );
     let branch = format!("z9hG4bK-apolo-{}", &call_id[..16.min(call_id.len())]);
 
     // Build custom SIP OPTIONS message with ApoloSBC User-Agent
@@ -3101,42 +3652,48 @@ async fn check_sip_status_via_kamailio(
          User-Agent: ApoloSBC/1.0\r\n\
          Accept: application/sdp\r\n\
          Content-Length: 0\r\n\r\n",
-        host, port,           // Request-URI
-        local_ip, branch,     // Via
-        local_ip, &call_id[..8.min(call_id.len())], // From + tag
-        host, port,           // To
-        call_id, local_ip,    // Call-ID
-        local_ip,             // Contact
+        host,
+        port, // Request-URI
+        local_ip,
+        branch, // Via
+        local_ip,
+        &call_id[..8.min(call_id.len())], // From + tag
+        host,
+        port, // To
+        call_id,
+        local_ip, // Call-ID
+        local_ip, // Contact
     );
 
     // Use sipsak with custom message via stdin (-f -)
     // -L: don't add CR to input file
-    let sipsak_result = timeout(
-        Duration::from_secs(5),
-        async {
-            let mut child = Command::new("sipsak")
-                .args([
-                    "-f", "-",           // Read message from stdin
-                    "-L",                // Don't modify line endings
-                    "-s", &format!("sip:{}:{}", host, port),
-                    "-H", &local_ip,     // Local hostname for responses
-                    "-i", "2000",        // Timeout 2000ms
-                    "-v",                // Verbose
-                ])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
+    let sipsak_result = timeout(Duration::from_secs(5), async {
+        let mut child = Command::new("sipsak")
+            .args([
+                "-f",
+                "-",  // Read message from stdin
+                "-L", // Don't modify line endings
+                "-s",
+                &format!("sip:{}:{}", host, port),
+                "-H",
+                &local_ip, // Local hostname for responses
+                "-i",
+                "2000", // Timeout 2000ms
+                "-v",   // Verbose
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
 
-            // Write SIP message to stdin
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(sip_message.as_bytes()).await?;
-                drop(stdin); // Close stdin to signal EOF
-            }
-
-            child.wait_with_output().await
+        // Write SIP message to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(sip_message.as_bytes()).await?;
+            drop(stdin); // Close stdin to signal EOF
         }
-    )
+
+        child.wait_with_output().await
+    })
     .await;
 
     let latency = start.elapsed().as_millis() as i32;
@@ -3180,13 +3737,37 @@ async fn check_sip_status_via_kamailio(
             // - 403: Forbidden, peer rejects connection (unreachable)
             // - 404, 5xx, None: unreachable
             let (status, status_msg) = match response_code {
-                Some(200) => ("reachable", format!("Peer operativo - Latencia: {}ms", latency)),
-                Some(401) | Some(407) => ("reachable", format!("Requiere autenticación (401) - Latencia: {}ms", latency)),
-                Some(403) => ("unreachable", format!("Conexión rechazada (403 Forbidden) - Latencia: {}ms", latency)),
-                Some(404) => ("unreachable", format!("Destino no encontrado (404) - Latencia: {}ms", latency)),
-                Some(503) => ("unreachable", format!("Servicio no disponible (503) - Latencia: {}ms", latency)),
-                Some(code) => ("unreachable", format!("Error SIP ({}) - Latencia: {}ms", code, latency)),
-                None => ("unreachable", format!("Sin respuesta SIP - Latencia: {}ms", latency)),
+                Some(200) => (
+                    "reachable",
+                    format!("Peer operativo - Latencia: {}ms", latency),
+                ),
+                Some(401) | Some(407) => (
+                    "reachable",
+                    format!("Requiere autenticación (401) - Latencia: {}ms", latency),
+                ),
+                Some(403) => (
+                    "unreachable",
+                    format!(
+                        "Conexión rechazada (403 Forbidden) - Latencia: {}ms",
+                        latency
+                    ),
+                ),
+                Some(404) => (
+                    "unreachable",
+                    format!("Destino no encontrado (404) - Latencia: {}ms", latency),
+                ),
+                Some(503) => (
+                    "unreachable",
+                    format!("Servicio no disponible (503) - Latencia: {}ms", latency),
+                ),
+                Some(code) => (
+                    "unreachable",
+                    format!("Error SIP ({}) - Latencia: {}ms", code, latency),
+                ),
+                None => (
+                    "unreachable",
+                    format!("Sin respuesta SIP - Latencia: {}ms", latency),
+                ),
             };
 
             let is_reachable = status == "reachable";
@@ -3204,7 +3785,9 @@ async fn check_sip_status_via_kamailio(
                     allow_methods: None,
                 },
                 response_summary: Some(SipMessageSummary {
-                    method_or_status: format!("{} {}", response_code.unwrap_or(0),
+                    method_or_status: format!(
+                        "{} {}",
+                        response_code.unwrap_or(0),
                         match response_code {
                             Some(200) => "OK",
                             Some(401) => "Unauthorized",
@@ -3213,12 +3796,17 @@ async fn check_sip_status_via_kamailio(
                             Some(407) => "Proxy Auth Required",
                             Some(503) => "Service Unavailable",
                             _ => "Error",
-                        }),
+                        }
+                    ),
                     from: format!("sip:{}:{}", host, port),
                     to: "sip:apolo-sbc@kamailio".to_string(),
                     call_id: Some("options-check-abc".to_string()),
                     user_agent: None,
-                    allow_methods: if is_reachable { Some("INVITE, ACK, BYE, CANCEL, OPTIONS, PRACK".to_string()) } else { None },
+                    allow_methods: if is_reachable {
+                        Some("INVITE, ACK, BYE, CANCEL, OPTIONS, PRACK".to_string())
+                    } else {
+                        None
+                    },
                 }),
                 timeline: vec![
                     SipExchangeStep {
@@ -3231,7 +3819,9 @@ async fn check_sip_status_via_kamailio(
                     SipExchangeStep {
                         timestamp: chrono::Utc::now(),
                         direction: "inbound".to_string(),
-                        message_type: response_code.map(|c| format!("{}", c)).unwrap_or("Timeout".to_string()),
+                        message_type: response_code
+                            .map(|c| format!("{}", c))
+                            .unwrap_or("Timeout".to_string()),
                         description: format!("Respuesta recibida en {}ms", latency),
                         status: if is_reachable { "success" } else { "error" }.to_string(),
                     },
@@ -3248,7 +3838,10 @@ async fn check_sip_status_via_kamailio(
         }
         Err(e) => {
             // sipsak command failed to execute
-            Err(AppError::Internal(format!("Error ejecutando sipsak: {}", e)))
+            Err(AppError::Internal(format!(
+                "Error ejecutando sipsak: {}",
+                e
+            )))
         }
     }
 }
@@ -3263,10 +3856,13 @@ async fn sync_trunk_group_to_kamailio(
     // Get Kamailio gwids for the trunks
     let mut gwids = Vec::new();
     for trunk_id in trunk_ids {
-        if let Some(row) = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?
+        if let Some(row) = sqlx::query!(
+            "SELECT kamailio_gwid FROM routing_trunks WHERE id = $1",
+            trunk_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
         {
             if let Some(gwid) = row.kamailio_gwid {
                 gwids.push(gwid.to_string());
@@ -3281,7 +3877,9 @@ async fn sync_trunk_group_to_kamailio(
         .bind(&group.name)
         .execute(mysql_pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to sync trunk group to Kamailio: {}", e)))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to sync trunk group to Kamailio: {}", e))
+        })?;
 
     Ok(result.last_insert_id() as i32)
 }
@@ -3296,10 +3894,13 @@ async fn update_trunk_group_in_kamailio(
 ) -> Result<(), AppError> {
     let mut gwids = Vec::new();
     for trunk_id in trunk_ids {
-        if let Some(row) = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?
+        if let Some(row) = sqlx::query!(
+            "SELECT kamailio_gwid FROM routing_trunks WHERE id = $1",
+            trunk_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?
         {
             if let Some(gwid) = row.kamailio_gwid {
                 gwids.push(gwid.to_string());
@@ -3315,18 +3916,25 @@ async fn update_trunk_group_in_kamailio(
         .bind(kam_group_id as u32)
         .execute(mysql_pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to update trunk group in Kamailio: {}", e)))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to update trunk group in Kamailio: {}", e))
+        })?;
 
     Ok(())
 }
 
 /// Delete a trunk group from Kamailio
-async fn delete_trunk_group_from_kamailio(mysql_pool: &MySqlPool, kam_id: i32) -> Result<(), AppError> {
+async fn delete_trunk_group_from_kamailio(
+    mysql_pool: &MySqlPool,
+    kam_id: i32,
+) -> Result<(), AppError> {
     sqlx::query("DELETE FROM dr_gw_lists WHERE id = ?")
         .bind(kam_id as u32)
         .execute(mysql_pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to delete trunk group from Kamailio: {}", e)))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to delete trunk group from Kamailio: {}", e))
+        })?;
 
     Ok(())
 }
@@ -3340,25 +3948,39 @@ async fn sync_outbound_route_to_kamailio(
     // Determine gwlist (either from group or single trunk)
     let gwlist = if let Some(group_id) = route.trunk_group_id {
         // Get Kamailio group ID
-        let group = sqlx::query!("SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1", group_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let group = sqlx::query!(
+            "SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1",
+            group_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         match group.and_then(|g| g.kamailio_group_id) {
             Some(id) => format!("#{}", id), // # prefix means group reference
-            None => return Err(AppError::Validation("Trunk group not synced to Kamailio".to_string())),
+            None => {
+                return Err(AppError::Validation(
+                    "Trunk group not synced to Kamailio".to_string(),
+                ))
+            }
         }
     } else if let Some(trunk_id) = route.trunk_id {
         // Get Kamailio gwid
-        let trunk = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let trunk = sqlx::query!(
+            "SELECT kamailio_gwid FROM routing_trunks WHERE id = $1",
+            trunk_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         match trunk.and_then(|t| t.kamailio_gwid) {
             Some(id) => id.to_string(),
-            None => return Err(AppError::Validation("Trunk not synced to Kamailio".to_string())),
+            None => {
+                return Err(AppError::Validation(
+                    "Trunk not synced to Kamailio".to_string(),
+                ))
+            }
         }
     } else {
         return Err(AppError::Validation("No destination specified".to_string()));
@@ -3400,20 +4022,26 @@ async fn update_outbound_route_in_kamailio(
     route: &OutboundRoute,
 ) -> Result<(), AppError> {
     let gwlist = if let Some(group_id) = route.trunk_group_id {
-        let group = sqlx::query!("SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1", group_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let group = sqlx::query!(
+            "SELECT kamailio_group_id FROM routing_trunk_groups WHERE id = $1",
+            group_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         match group.and_then(|g| g.kamailio_group_id) {
             Some(id) => format!("#{}", id),
             None => return Err(AppError::Validation("Trunk group not synced".to_string())),
         }
     } else if let Some(trunk_id) = route.trunk_id {
-        let trunk = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let trunk = sqlx::query!(
+            "SELECT kamailio_gwid FROM routing_trunks WHERE id = $1",
+            trunk_id
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         match trunk.and_then(|t| t.kamailio_gwid) {
             Some(id) => id.to_string(),
@@ -3448,12 +4076,20 @@ async fn update_outbound_route_in_kamailio(
 }
 
 /// Delete an outbound route from Kamailio
-async fn delete_outbound_route_from_kamailio(mysql_pool: &MySqlPool, ruleid: i32) -> Result<(), AppError> {
+async fn delete_outbound_route_from_kamailio(
+    mysql_pool: &MySqlPool,
+    ruleid: i32,
+) -> Result<(), AppError> {
     sqlx::query("DELETE FROM dr_rules WHERE ruleid = ?")
         .bind(ruleid as u32)
         .execute(mysql_pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to delete outbound route from Kamailio: {}", e)))?;
+        .map_err(|e| {
+            AppError::Database(format!(
+                "Failed to delete outbound route from Kamailio: {}",
+                e
+            ))
+        })?;
 
     Ok(())
 }
@@ -3472,7 +4108,7 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.freeswitch_gateway_name as trunk_gateway_name,
-               r.send_early_media, r.failover_destinations, r.freeswitch_extension_id
+               r.send_early_media, r.ims_mode, r.failover_destinations, r.freeswitch_extension_id
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
         WHERE r.enabled = true
@@ -3488,9 +4124,9 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
     xml.push_str("  <context name=\"to-kamailio\">\n");
 
     for route in &routes {
-        let failover: Vec<FailoverDestination> = serde_json::from_value(
-            route.failover_destinations.clone().unwrap_or_default()
-        ).unwrap_or_default();
+        let failover: Vec<FailoverDestination> =
+            serde_json::from_value(route.failover_destinations.clone().unwrap_or_default())
+                .unwrap_or_default();
 
         let ext_id = route.freeswitch_extension_id.as_deref().unwrap_or("route");
 
@@ -3569,18 +4205,54 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                 call_timeout
             ));
 
+            // IMS Mode: Full interworking with 100rel/PRACK and timeout handlers
+            let ims_mode_src = route.ims_mode;
+            if ims_mode_src {
+                xml.push_str(&format!(
+                    "          <action application=\"set\" data=\"progress_timeout={}\"/>\n",
+                    call_timeout
+                ));
+                xml.push_str(
+                    "          <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str(
+                    "          <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str(
+                    "          <action application=\"set\" data=\"bypass_media=false\"/>\n",
+                );
+            }
+
             if route.ignore_early_media.unwrap_or(false) {
-                xml.push_str("          <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
+                xml.push_str(
+                    "          <action application=\"set\" data=\"ignore_early_media=true\"/>\n",
+                );
             }
             if route.inherit_codec.unwrap_or(true) {
-                xml.push_str("          <action application=\"set\" data=\"inherit_codec=true\"/>\n");
+                xml.push_str(
+                    "          <action application=\"set\" data=\"inherit_codec=true\"/>\n",
+                );
             }
 
             // Early media: send 183 Session Progress with ringback tone
             if route.send_early_media {
-                xml.push_str("          <action application=\"set\" data=\"ringback=${us-ring}\"/>\n");
-                xml.push_str("          <action application=\"set\" data=\"instant_ringback=true\"/>\n");
+                xml.push_str(
+                    "          <action application=\"set\" data=\"ringback=${us-ring}\"/>\n",
+                );
+                xml.push_str(
+                    "          <action application=\"set\" data=\"instant_ringback=true\"/>\n",
+                );
                 xml.push_str("          <action application=\"pre_answer\"/>\n");
+            }
+
+            // IMS Mode: Continue after bridge to handle failures with tones
+            if ims_mode_src {
+                xml.push_str(
+                    "          <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+                );
+                xml.push_str(
+                    "          <action application=\"set\" data=\"continue_on_fail=true\"/>\n",
+                );
             }
 
             // Bridge - use gateway if trunk is set, user/ for registered extensions, otherwise sofia/profile
@@ -3597,11 +4269,23 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                     dest_profile, dial_var, route.destination_host, dest_port
                 );
                 for fo in &failover {
-                    b.push_str(&format!("|sofia/{}/{}@{}:{}", dest_profile, dial_var, fo.host, fo.port));
+                    b.push_str(&format!(
+                        "|sofia/{}/{}@{}:{}",
+                        dest_profile, dial_var, fo.host, fo.port
+                    ));
                 }
                 b
             };
-            xml.push_str(&format!("          <action application=\"bridge\" data=\"{}\"/>\n", bridge));
+            xml.push_str(&format!(
+                "          <action application=\"bridge\" data=\"{}\"/>\n",
+                bridge
+            ));
+
+            // IMS Mode: Transfer to failure handler after bridge
+            if ims_mode_src {
+                xml.push_str("          <action application=\"log\" data=\"WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}\"/>\n");
+                xml.push_str("          <action application=\"transfer\" data=\"_handle_bridge_failure_\"/>\n");
+            }
 
             xml.push_str("        </condition>\n");
             xml.push_str("      </condition>\n");
@@ -3655,8 +4339,26 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                 call_timeout
             ));
 
+            // IMS Mode: Full interworking with 100rel/PRACK and timeout handlers
+            let ims_mode = route.ims_mode;
+            if ims_mode {
+                xml.push_str(&format!(
+                    "        <action application=\"set\" data=\"progress_timeout={}\"/>\n",
+                    call_timeout
+                ));
+                xml.push_str(
+                    "        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str("        <action application=\"set\" data=\"bypass_media=false\"/>\n");
+            }
+
             if route.ignore_early_media.unwrap_or(false) {
-                xml.push_str("        <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
+                xml.push_str(
+                    "        <action application=\"set\" data=\"ignore_early_media=true\"/>\n",
+                );
             }
             if route.inherit_codec.unwrap_or(true) {
                 xml.push_str("        <action application=\"set\" data=\"inherit_codec=true\"/>\n");
@@ -3664,9 +4366,23 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
 
             // Early media: send 183 Session Progress with ringback tone
             if route.send_early_media {
-                xml.push_str("        <action application=\"set\" data=\"ringback=${us-ring}\"/>\n");
-                xml.push_str("        <action application=\"set\" data=\"instant_ringback=true\"/>\n");
+                xml.push_str(
+                    "        <action application=\"set\" data=\"ringback=${us-ring}\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"set\" data=\"instant_ringback=true\"/>\n",
+                );
                 xml.push_str("        <action application=\"pre_answer\"/>\n");
+            }
+
+            // IMS Mode: Continue after bridge to handle failures with tones
+            if ims_mode {
+                xml.push_str(
+                    "        <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"set\" data=\"continue_on_fail=true\"/>\n",
+                );
             }
 
             // Bridge - use gateway if trunk is set, user/ for registered extensions, otherwise sofia/profile
@@ -3683,16 +4399,37 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                     dest_profile, dial_var, route.destination_host, dest_port
                 );
                 for fo in &failover {
-                    b.push_str(&format!("|sofia/{}/{}@{}:{}", dest_profile, dial_var, fo.host, fo.port));
+                    b.push_str(&format!(
+                        "|sofia/{}/{}@{}:{}",
+                        dest_profile, dial_var, fo.host, fo.port
+                    ));
                 }
                 b
             };
-            xml.push_str(&format!("        <action application=\"bridge\" data=\"{}\"/>\n", bridge));
+            xml.push_str(&format!(
+                "        <action application=\"bridge\" data=\"{}\"/>\n",
+                bridge
+            ));
+
+            // IMS Mode: Transfer to failure handler after bridge
+            if ims_mode {
+                xml.push_str("        <action application=\"log\" data=\"WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}\"/>\n");
+                xml.push_str(
+                    "        <action application=\"transfer\" data=\"_handle_bridge_failure_\"/>\n",
+                );
+            }
 
             xml.push_str("      </condition>\n");
         }
 
         xml.push_str("    </extension>\n");
+    }
+
+    // Check if any route has IMS mode enabled - if so, add the failure handlers
+    let has_ims_routes = routes.iter().any(|r| r.ims_mode);
+    if has_ims_routes {
+        // Add IMS failure handler extensions
+        xml.push_str(&generate_ims_failure_handlers());
     }
 
     // Fallback reject extension
@@ -3722,6 +4459,146 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
     reload_freeswitch().await?;
 
     Ok(())
+}
+
+/// Generate IMS failure handler extensions for FreeSWITCH dialplan
+/// These extensions handle post-bridge failures with appropriate tones and SIP responses
+fn generate_ims_failure_handlers() -> String {
+    let mut xml = String::new();
+
+    // Dispatcher: evalúa originate_disposition y transfiere al handler correcto
+    xml.push_str(r#"
+    <!-- ============================================================ -->
+    <!-- IMS FAILURE HANDLERS: Post-bridge handling with tones       -->
+    <!-- Mapeo Q.850 → Tono + Respuesta SIP según causa               -->
+    <!-- ============================================================ -->
+
+    <!-- Dispatcher: evalúa originate_disposition y transfiere al handler correcto -->
+    <!-- SUCCESS/NORMAL_CLEARING después de llamada contestada = cuelgue normal, sin tonos -->
+    <extension name="handle-bridge-success">
+      <condition field="destination_number" expression="^_handle_bridge_failure_$"/>
+      <condition field="${originate_disposition}" expression="^SUCCESS$">
+        <action application="log" data="INFO Call completed successfully - normal hangup"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-dispatcher">
+      <condition field="destination_number" expression="^_handle_bridge_failure_$"/>
+      <!-- USER_BUSY → 486 Busy Here -->
+      <condition field="${originate_disposition}" expression="^USER_BUSY$">
+        <action application="transfer" data="_hangup_user_busy_"/>
+        <anti-action application="transfer" data="_hangup_check_no_answer_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-no-answer">
+      <condition field="destination_number" expression="^_hangup_check_no_answer_$"/>
+      <!-- NO_ANSWER, NO_USER_RESPONSE → 486 Busy Here (timeout = ocupado) -->
+      <condition field="${originate_disposition}" expression="^(NO_ANSWER|NO_USER_RESPONSE)$">
+        <action application="transfer" data="_hangup_originator_cancel_"/>
+        <anti-action application="transfer" data="_hangup_check_rejected_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-rejected">
+      <condition field="destination_number" expression="^_hangup_check_rejected_$"/>
+      <!-- CALL_REJECTED → 603 Decline -->
+      <condition field="${originate_disposition}" expression="^CALL_REJECTED$">
+        <action application="transfer" data="_hangup_call_rejected_"/>
+        <anti-action application="transfer" data="_hangup_check_cancel_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-cancel">
+      <condition field="destination_number" expression="^_hangup_check_cancel_$"/>
+      <!-- ORIGINATOR_CANCEL, NORMAL_CLEARING, TIMEOUT → 486 Busy Here -->
+      <condition field="${originate_disposition}" expression="^(ORIGINATOR_CANCEL|NORMAL_CLEARING|NORMAL_TEMPORARY_FAILURE|TIMEOUT|CANCEL)$">
+        <action application="transfer" data="_hangup_originator_cancel_"/>
+        <anti-action application="transfer" data="_hangup_check_unavailable_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-unavailable">
+      <condition field="destination_number" expression="^_hangup_check_unavailable_$"/>
+      <!-- SUBSCRIBER_ABSENT, USER_NOT_REGISTERED → 480 Temporarily Unavailable -->
+      <condition field="${originate_disposition}" expression="^(SUBSCRIBER_ABSENT|USER_NOT_REGISTERED)$">
+        <action application="transfer" data="_hangup_unavailable_"/>
+        <anti-action application="transfer" data="_hangup_congestion_"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
+    <!-- HANDLERS: Reproducen tono apropiado + respuesta SIP          -->
+    <!-- ============================================================ -->
+
+    <!-- USER_BUSY: Tono ocupado (500ms on/500ms off) + 486 -->
+    <extension name="hangup-user-busy">
+      <condition field="destination_number" expression="^_hangup_user_busy_$">
+        <action application="log" data="INFO Hangup handler: USER_BUSY - sending 486 with busy tone"/>
+        <!-- Tono de ocupado: 480Hz + 620Hz, 500ms on / 500ms off, 4 repeticiones (~4s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=4"/>
+        <action application="set" data="sip_reason=Q.850;cause=17"/>
+        <action application="respond" data="486 Busy Here"/>
+      </condition>
+    </extension>
+
+    <!-- NO_ANSWER: Sin tono adicional (ya hubo ringback) + 480 -->
+    <extension name="hangup-no-answer">
+      <condition field="destination_number" expression="^_hangup_no_answer_$">
+        <action application="log" data="INFO Hangup handler: NO_ANSWER - sending 480"/>
+        <!-- No reproducir tono - el llamante ya escuchó ringback suficiente -->
+        <action application="set" data="sip_reason=Q.850;cause=18"/>
+        <action application="respond" data="480 Temporarily Unavailable"/>
+      </condition>
+    </extension>
+
+    <!-- CALL_REJECTED: Tono ocupado breve + 603 -->
+    <extension name="hangup-call-rejected">
+      <condition field="destination_number" expression="^_hangup_call_rejected_$">
+        <action application="log" data="INFO Hangup handler: CALL_REJECTED - sending 603 with busy tone"/>
+        <!-- Tono de ocupado breve: 2 repeticiones (~2s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=2"/>
+        <action application="set" data="sip_reason=Q.850;cause=21"/>
+        <action application="respond" data="603 Decline"/>
+      </condition>
+    </extension>
+
+    <!-- ORIGINATOR_CANCEL/NORMAL_CLEARING: Tono ocupado + 486 (timeout de llamada) -->
+    <extension name="hangup-originator-cancel">
+      <condition field="destination_number" expression="^_hangup_originator_cancel_$">
+        <action application="log" data="INFO Hangup handler: ORIGINATOR_CANCEL/TIMEOUT (${originate_disposition}) - sending 486"/>
+        <!-- Tono de ocupado: 480Hz + 620Hz, 500ms on / 500ms off, 7 repeticiones (~7s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=7"/>
+        <action application="set" data="sip_reason=Q.850;cause=17"/>
+        <action application="respond" data="486 Busy Here"/>
+      </condition>
+    </extension>
+
+    <!-- SUBSCRIBER_ABSENT/USER_NOT_REGISTERED: Tono congestión + 480 -->
+    <extension name="hangup-unavailable">
+      <condition field="destination_number" expression="^_hangup_unavailable_$">
+        <action application="log" data="INFO Hangup handler: UNAVAILABLE - sending 480 with congestion tone"/>
+        <!-- Tono de congestión: 480Hz + 620Hz, 250ms on / 250ms off, 6 repeticiones (~3s) -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="set" data="sip_reason=Q.850;cause=20"/>
+        <action application="respond" data="480 Temporarily Unavailable"/>
+      </condition>
+    </extension>
+
+    <!-- DEFAULT/CONGESTION: Tono congestión + 503 -->
+    <extension name="hangup-congestion">
+      <condition field="destination_number" expression="^_hangup_congestion_$">
+        <action application="log" data="INFO Hangup handler: CONGESTION/DEFAULT (${originate_disposition}) - sending 503"/>
+        <!-- Tono de congestión: 480Hz + 620Hz, 250ms on / 250ms off, 6 repeticiones (~3s) -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="set" data="sip_reason=Q.850;cause=42"/>
+        <action application="respond" data="503 Service Unavailable"/>
+      </condition>
+    </extension>
+"#);
+
+    xml
 }
 
 /// Escape XML special characters
@@ -3781,7 +4658,10 @@ async fn reload_freeswitch() -> Result<String, AppError> {
 // ============================================================================
 
 /// Import trunks from Kamailio dr_gateways
-async fn import_trunks_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -> Result<i64, AppError> {
+async fn import_trunks_from_kamailio(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+) -> Result<i64, AppError> {
     #[derive(sqlx::FromRow)]
     struct KamGateway {
         gwid: u32,
@@ -3791,12 +4671,11 @@ async fn import_trunks_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -
         description: String,
     }
 
-    let gateways: Vec<KamGateway> = sqlx::query_as(
-        "SELECT gwid, address, strip, pri_prefix, description FROM dr_gateways"
-    )
-    .fetch_all(mysql_pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let gateways: Vec<KamGateway> =
+        sqlx::query_as("SELECT gwid, address, strip, pri_prefix, description FROM dr_gateways")
+            .fetch_all(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
     let mut count = 0i64;
 
@@ -3817,10 +4696,13 @@ async fn import_trunks_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -
         };
 
         // Check if already exists
-        let existing = sqlx::query!("SELECT id FROM routing_trunks WHERE kamailio_gwid = $1", gw.gwid as i32)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let existing = sqlx::query!(
+            "SELECT id FROM routing_trunks WHERE kamailio_gwid = $1",
+            gw.gwid as i32
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         if existing.is_some() {
             continue; // Skip existing
@@ -3849,7 +4731,10 @@ async fn import_trunks_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -
 }
 
 /// Import trunk groups from Kamailio dr_gw_lists
-async fn import_trunk_groups_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -> Result<i64, AppError> {
+async fn import_trunk_groups_from_kamailio(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+) -> Result<i64, AppError> {
     #[derive(sqlx::FromRow)]
     struct KamGwList {
         id: u32,
@@ -3857,12 +4742,10 @@ async fn import_trunk_groups_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlP
         description: String,
     }
 
-    let lists: Vec<KamGwList> = sqlx::query_as(
-        "SELECT id, gwlist, description FROM dr_gw_lists"
-    )
-    .fetch_all(mysql_pool)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let lists: Vec<KamGwList> = sqlx::query_as("SELECT id, gwlist, description FROM dr_gw_lists")
+        .fetch_all(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     let mut count = 0i64;
 
@@ -3874,10 +4757,13 @@ async fn import_trunk_groups_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlP
         };
 
         // Check if already exists
-        let existing = sqlx::query!("SELECT id FROM routing_trunk_groups WHERE kamailio_group_id = $1", list.id as i32)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let existing = sqlx::query!(
+            "SELECT id FROM routing_trunk_groups WHERE kamailio_group_id = $1",
+            list.id as i32
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         if existing.is_some() {
             continue;
@@ -3894,16 +4780,21 @@ async fn import_trunk_groups_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlP
         .map_err(|e| AppError::Database(e.to_string()))?;
 
         // Add members
-        let gwids: Vec<i32> = list.gwlist.split(',')
+        let gwids: Vec<i32> = list
+            .gwlist
+            .split(',')
             .filter_map(|s| s.trim().parse().ok())
             .collect();
 
         for (priority, gwid) in gwids.iter().enumerate() {
             // Find trunk by kamailio_gwid
-            if let Some(trunk) = sqlx::query!("SELECT id FROM routing_trunks WHERE kamailio_gwid = $1", gwid)
-                .fetch_optional(pg_pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?
+            if let Some(trunk) = sqlx::query!(
+                "SELECT id FROM routing_trunks WHERE kamailio_gwid = $1",
+                gwid
+            )
+            .fetch_optional(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?
             {
                 let _ = sqlx::query!(
                     "INSERT INTO routing_trunk_group_members (group_id, trunk_id, priority) VALUES ($1, $2, $3)",
@@ -3923,7 +4814,10 @@ async fn import_trunk_groups_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlP
 }
 
 /// Import outbound routes from Kamailio dr_rules
-async fn import_outbound_routes_from_kamailio(pg_pool: &PgPool, mysql_pool: &MySqlPool) -> Result<i64, AppError> {
+async fn import_outbound_routes_from_kamailio(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+) -> Result<i64, AppError> {
     #[derive(sqlx::FromRow)]
     struct KamRule {
         ruleid: u32,
@@ -3935,7 +4829,7 @@ async fn import_outbound_routes_from_kamailio(pg_pool: &PgPool, mysql_pool: &MyS
     }
 
     let rules: Vec<KamRule> = sqlx::query_as(
-        "SELECT ruleid, prefix, timerec, priority, gwlist, description FROM dr_rules"
+        "SELECT ruleid, prefix, timerec, priority, gwlist, description FROM dr_rules",
     )
     .fetch_all(mysql_pool)
     .await
@@ -3951,10 +4845,13 @@ async fn import_outbound_routes_from_kamailio(pg_pool: &PgPool, mysql_pool: &MyS
         };
 
         // Check if already exists
-        let existing = sqlx::query!("SELECT id FROM routing_outbound_routes WHERE kamailio_ruleid = $1", rule.ruleid as i32)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        let existing = sqlx::query!(
+            "SELECT id FROM routing_outbound_routes WHERE kamailio_ruleid = $1",
+            rule.ruleid as i32
+        )
+        .fetch_optional(pg_pool)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
         if existing.is_some() {
             continue;
@@ -3964,20 +4861,29 @@ async fn import_outbound_routes_from_kamailio(pg_pool: &PgPool, mysql_pool: &MyS
         let (trunk_id, trunk_group_id) = if rule.gwlist.starts_with('#') {
             // Group reference
             let group_num: i32 = rule.gwlist[1..].parse().unwrap_or(0);
-            let group = sqlx::query!("SELECT id FROM routing_trunk_groups WHERE kamailio_group_id = $1", group_num)
-                .fetch_optional(pg_pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let group = sqlx::query!(
+                "SELECT id FROM routing_trunk_groups WHERE kamailio_group_id = $1",
+                group_num
+            )
+            .fetch_optional(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
             (None, group.map(|g| g.id))
         } else {
             // Single gateway or comma-separated list (use first)
-            let gwid: i32 = rule.gwlist.split(',').next()
+            let gwid: i32 = rule
+                .gwlist
+                .split(',')
+                .next()
                 .and_then(|s| s.trim().parse().ok())
                 .unwrap_or(0);
-            let trunk = sqlx::query!("SELECT id FROM routing_trunks WHERE kamailio_gwid = $1", gwid)
-                .fetch_optional(pg_pool)
-                .await
-                .map_err(|e| AppError::Database(e.to_string()))?;
+            let trunk = sqlx::query!(
+                "SELECT id FROM routing_trunks WHERE kamailio_gwid = $1",
+                gwid
+            )
+            .fetch_optional(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
             (trunk.map(|t| t.id), None)
         };
 
@@ -4018,9 +4924,9 @@ async fn import_inbound_routes_from_freeswitch(pg_pool: &PgPool) -> Result<i64, 
         return Ok(0);
     }
 
-    let content = fs::read_to_string(TO_KAMAILIO_XML).await.map_err(|e| {
-        AppError::Internal(format!("Failed to read dialplan file: {}", e))
-    })?;
+    let content = fs::read_to_string(TO_KAMAILIO_XML)
+        .await
+        .map_err(|e| AppError::Internal(format!("Failed to read dialplan file: {}", e)))?;
 
     let mut count = 0i64;
 
@@ -4037,7 +4943,8 @@ async fn import_inbound_routes_from_freeswitch(pg_pool: &PgPool) -> Result<i64, 
             }
 
             // Extract name
-            let name = extract_attribute(ext_content, "name").unwrap_or_else(|| format!("import-{}", count));
+            let name = extract_attribute(ext_content, "name")
+                .unwrap_or_else(|| format!("import-{}", count));
 
             // Check if already exists
             let existing = sqlx::query!(
@@ -4053,7 +4960,8 @@ async fn import_inbound_routes_from_freeswitch(pg_pool: &PgPool) -> Result<i64, 
             }
 
             // Extract DID pattern
-            let did_pattern = extract_destination_pattern(ext_content).unwrap_or_else(|| "^(.+)$".to_string());
+            let did_pattern =
+                extract_destination_pattern(ext_content).unwrap_or_else(|| "^(.+)$".to_string());
 
             // Extract source IP filter
             let source_ip_pattern = extract_source_ip_filter(ext_content);

@@ -9,7 +9,7 @@ use apolo_core::AppError;
 use apolo_db::{PgFreeswitchIpRepository, PgSipDeviceRepository};
 use serde::Deserialize;
 use sqlx::PgPool;
-use tracing::{debug, info, warn, instrument};
+use tracing::{debug, info, instrument, warn};
 
 /// FreeSWITCH mod_xml_curl request parameters
 ///
@@ -75,7 +75,9 @@ pub async fn directory_lookup(
     }
 
     // Extract username and realm (prefer sip_auth_* fields, fall back to user/domain)
-    let username = req.sip_auth_username.as_ref()
+    let username = req
+        .sip_auth_username
+        .as_ref()
         .filter(|u| !u.is_empty())
         .or(req.user.as_ref().filter(|u| !u.is_empty()))
         .cloned();
@@ -88,7 +90,9 @@ pub async fn directory_lookup(
         }
     };
 
-    let realm = req.sip_auth_realm.as_ref()
+    let realm = req
+        .sip_auth_realm
+        .as_ref()
         .filter(|r| !r.is_empty())
         .or(req.domain.as_ref().filter(|r| !r.is_empty()))
         .cloned()
@@ -104,7 +108,10 @@ pub async fn directory_lookup(
 
     // Lookup device
     let device_repo = PgSipDeviceRepository::new(pool.get_ref().clone());
-    let device = match device_repo.find_by_username_domain(&username, &realm).await? {
+    let device = match device_repo
+        .find_by_username_domain(&username, &realm)
+        .await?
+    {
         Some(d) if d.enabled => d,
         Some(_) => {
             debug!(
@@ -149,10 +156,7 @@ fn build_directory_xml(device: &apolo_core::models::SipDevice) -> String {
 
     // Build accountcode (prefer explicit, fallback to account_id)
     let account_id_str = device.account_id.to_string();
-    let accountcode = device
-        .accountcode
-        .as_deref()
-        .unwrap_or(&account_id_str);
+    let accountcode = device.accountcode.as_deref().unwrap_or(&account_id_str);
 
     // Build codecs (format for FreeSWITCH variable)
     let codecs = &device.codecs;

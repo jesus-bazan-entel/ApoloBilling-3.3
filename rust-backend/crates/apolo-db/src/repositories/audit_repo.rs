@@ -2,7 +2,10 @@
 //!
 //! Provides PostgreSQL-backed storage for audit logs.
 
-use apolo_core::{models::{AuditLog, AuditLogData}, AppError, AppResult};
+use apolo_core::{
+    models::{AuditLog, AuditLogData},
+    AppError, AppResult,
+};
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use tracing::{debug, error, instrument};
@@ -21,7 +24,10 @@ impl PgAuditLogRepository {
     /// Create a new audit log entry
     #[instrument(skip(self, data))]
     pub async fn create(&self, data: AuditLogData) -> AppResult<AuditLog> {
-        debug!("Creating audit log: {} on {}", data.action, data.entity_type);
+        debug!(
+            "Creating audit log: {} on {}",
+            data.action, data.entity_type
+        );
 
         let row = sqlx::query(
             r#"

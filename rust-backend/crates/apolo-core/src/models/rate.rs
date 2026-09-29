@@ -44,6 +44,10 @@ pub struct RateCard {
     /// Priority for conflict resolution (higher = preferred)
     pub priority: i32,
 
+    /// Tariff group ("standard" = normal outbound rate; anything else is a
+    /// dedicated tariff set, e.g. "overage_fibertel" for minute-bucket overage)
+    pub card_group: String,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -124,6 +128,7 @@ impl Default for RateCard {
             effective_start: Utc::now(),
             effective_end: None,
             priority: 0,
+            card_group: "standard".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

@@ -9,7 +9,7 @@ use crate::dto::management::{
 };
 use crate::dto::{ApiResponse, PaginationParams};
 use actix_web::{web, HttpResponse};
-use apolo_auth::AuthenticatedUser;
+use apolo_auth::{AdminUser, AuthenticatedUser};
 use apolo_core::models::{AuditLogBuilder, NetworkType, ZoneType};
 use apolo_core::AppError;
 use chrono::Utc;
@@ -25,18 +25,26 @@ use validator::Validate;
 /// List all zones
 ///
 /// GET /api/v1/zonas
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_zones(
     pool: web::Data<PgPool>,
     query: web::Query<PaginationParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("zones") {
+        return Err(AppError::Forbidden);
+    }
+
     query.validate().map_err(|e| {
         warn!("Pagination validation failed: {}", e);
         AppError::Validation(e.to_string())
     })?;
 
-    debug!(page = query.page, per_page = query.per_page, "Listing zones");
+    debug!(
+        page = query.page,
+        per_page = query.per_page,
+        "Listing zones"
+    );
 
     let rows = sqlx::query(
         r#"
@@ -85,10 +93,10 @@ pub async fn list_zones(
 /// Create a new zone
 ///
 /// POST /api/v1/zonas
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn create_zone(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<ZoneCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -139,7 +147,7 @@ pub async fn create_zone(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("create_zone")
         .entity_type("zone")
         .entity_id(id.to_string())
@@ -179,12 +187,16 @@ pub async fn create_zone(
 /// Get a zone by ID
 ///
 /// GET /api/v1/zonas/{id}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_zone(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("zones") {
+        return Err(AppError::Forbidden);
+    }
+
     let zone_id = path.into_inner();
     debug!(id = zone_id, "Getting zone");
 
@@ -226,11 +238,11 @@ pub async fn get_zone(
 /// Update a zone
 ///
 /// PUT /api/v1/zonas/{id}
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn update_zone(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<ZoneUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -326,7 +338,7 @@ pub async fn update_zone(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("update_zone")
         .entity_type("zone")
         .entity_id(zone_id.to_string())
@@ -457,12 +469,16 @@ pub async fn delete_zone(
 /// List prefixes for a zone
 ///
 /// GET /api/v1/prefijos?zone_id=X
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_prefixes(
     pool: web::Data<PgPool>,
     query: web::Query<PrefixFilterParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("zones") {
+        return Err(AppError::Forbidden);
+    }
+
     debug!(zone_id = ?query.zone_id, "Listing prefixes");
 
     let rows = if let Some(zone_id) = query.zone_id {
@@ -522,10 +538,10 @@ pub struct PrefixFilterParams {
 /// Create a new prefix
 ///
 /// POST /api/v1/prefijos
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn create_prefix(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<PrefixCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -536,12 +552,11 @@ pub async fn create_prefix(
     debug!(prefix = %req.prefix, zone_id = req.zone_id, "Creating prefix");
 
     // Verify zone exists
-    let zone_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM zones WHERE id = $1)")
-            .bind(req.zone_id)
-            .fetch_one(pool.get_ref())
-            .await
-            .map_err(|e| AppError::Database(format!("Failed to check zone: {}", e)))?;
+    let zone_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM zones WHERE id = $1)")
+        .bind(req.zone_id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to check zone: {}", e)))?;
 
     if !zone_exists {
         return Err(AppError::NotFound(format!(
@@ -590,7 +605,7 @@ pub async fn create_prefix(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("create_prefix")
         .entity_type("prefix")
         .entity_id(id.to_string())
@@ -692,12 +707,16 @@ pub async fn delete_prefix(
 /// List tariffs for a zone
 ///
 /// GET /api/v1/tarifas?zone_id=X
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_tariffs(
     pool: web::Data<PgPool>,
     query: web::Query<TariffFilterParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("zones") {
+        return Err(AppError::Forbidden);
+    }
+
     debug!(zone_id = ?query.zone_id, "Listing tariffs");
 
     let rows = if let Some(zone_id) = query.zone_id {
@@ -767,10 +786,10 @@ pub struct TariffFilterParams {
 /// Create a new tariff
 ///
 /// POST /api/v1/tarifas
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn create_tariff(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<TariffCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -781,12 +800,11 @@ pub async fn create_tariff(
     debug!(zone_id = req.zone_id, rate = %req.rate_per_minute, "Creating tariff");
 
     // Verify zone exists
-    let zone_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM zones WHERE id = $1)")
-            .bind(req.zone_id)
-            .fetch_one(pool.get_ref())
-            .await
-            .map_err(|e| AppError::Database(format!("Failed to check zone: {}", e)))?;
+    let zone_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM zones WHERE id = $1)")
+        .bind(req.zone_id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to check zone: {}", e)))?;
 
     if !zone_exists {
         return Err(AppError::NotFound(format!(
@@ -823,7 +841,11 @@ pub async fn create_tariff(
 
     let id: i32 = result.get("id");
 
-    info!(id = id, zone_id = req.zone_id, "Tariff created successfully");
+    info!(
+        id = id,
+        zone_id = req.zone_id,
+        "Tariff created successfully"
+    );
 
     // Audit log
     let audit_details = serde_json::json!({
@@ -834,7 +856,7 @@ pub async fn create_tariff(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("create_tariff")
         .entity_type("tariff")
         .entity_id(id.to_string())
@@ -878,11 +900,11 @@ pub async fn create_tariff(
 /// Update a tariff
 ///
 /// PUT /api/v1/tarifas/{id}
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, _admin, req))]
 pub async fn update_tariff(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    _admin: AdminUser,
     req: web::Json<TariffUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -996,7 +1018,7 @@ pub async fn update_tariff(
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
+        .username(_admin.username.clone())
         .action("update_tariff")
         .entity_type("tariff")
         .entity_id(tariff_id.to_string())
@@ -1241,10 +1263,7 @@ async fn sync_rate_cards(pool: &PgPool) -> Result<SyncResponse, AppError> {
         success: true,
         rate_cards_synced: synced,
         rate_cards_deleted: deleted,
-        message: format!(
-            "Synced {} rate cards, expired {} obsolete",
-            synced, deleted
-        ),
+        message: format!("Synced {} rate cards, expired {} obsolete", synced, deleted),
     })
 }
 

@@ -21,11 +21,15 @@ use validator::Validate;
 /// List all active calls
 ///
 /// GET /api/v1/active-calls
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_active_calls(
     pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("active_calls") {
+        return Err(AppError::Forbidden);
+    }
+
     debug!("Listing active calls");
 
     let rows = sqlx::query(

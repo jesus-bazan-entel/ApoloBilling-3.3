@@ -9,11 +9,19 @@
         <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
         <action application="set" data="call_timeout=120"/>
         <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="progress_timeout=120"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="bypass_media=false"/>
         <action application="set" data="inherit_codec=true"/>
         <action application="set" data="ringback=${us-ring}"/>
         <action application="set" data="instant_ringback=true"/>
         <action application="pre_answer"/>
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
         <action application="bridge" data="sofia/gateway/pbx-fibertel/${transformed_number}"/>
+        <action application="log" data="WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}"/>
+        <action application="transfer" data="_handle_bridge_failure_"/>
       </condition>
     </extension>
     <extension name="to-pbx-fibertel">
@@ -24,11 +32,42 @@
         <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
         <action application="set" data="call_timeout=120"/>
         <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="progress_timeout=120"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="bypass_media=false"/>
         <action application="set" data="inherit_codec=true"/>
         <action application="set" data="ringback=${us-ring}"/>
         <action application="set" data="instant_ringback=true"/>
         <action application="pre_answer"/>
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
         <action application="bridge" data="sofia/gateway/pbx-fibertel/${transformed_number}"/>
+        <action application="log" data="WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}"/>
+        <action application="transfer" data="_handle_bridge_failure_"/>
+      </condition>
+    </extension>
+    <extension name="from-entel-rn-20">
+      <condition field="destination_number" expression="^(6720.+)$">
+        <action application="log" data="INFO Inbound From ENTEL RN 20: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="original_destination=${destination_number}"/>
+        <action application="set" data="transformed_number=${destination_number:4}"/>
+        <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
+        <action application="set" data="call_timeout=55"/>
+        <action application="set" data="originate_timeout=55"/>
+        <action application="set" data="progress_timeout=55"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="ringback=${us-ring}"/>
+        <action application="set" data="instant_ringback=true"/>
+        <action application="pre_answer"/>
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <action application="bridge" data="user/${transformed_number}@10.10.22.4"/>
+        <action application="log" data="WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}"/>
+        <action application="transfer" data="_handle_bridge_failure_"/>
       </condition>
     </extension>
     <extension name="from-integratel-rn-22">
@@ -39,11 +78,148 @@
         <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
         <action application="set" data="call_timeout=120"/>
         <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="progress_timeout=120"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="bypass_media=false"/>
         <action application="set" data="inherit_codec=true"/>
         <action application="set" data="ringback=${us-ring}"/>
         <action application="set" data="instant_ringback=true"/>
         <action application="pre_answer"/>
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
         <action application="bridge" data="user/${transformed_number}@10.10.22.4"/>
+        <action application="log" data="WARNING FS: Bridge terminó - bridge_cause=${bridge_hangup_cause} originate_disp=${originate_disposition} last_bridge=${last_bridge_hangup_cause}"/>
+        <action application="transfer" data="_handle_bridge_failure_"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
+    <!-- IMS FAILURE HANDLERS: Post-bridge handling with tones       -->
+    <!-- Mapeo Q.850 → Tono + Respuesta SIP según causa               -->
+    <!-- ============================================================ -->
+
+    <!-- Dispatcher: evalúa originate_disposition y transfiere al handler correcto -->
+    <!-- SUCCESS/NORMAL_CLEARING después de llamada contestada = cuelgue normal, sin tonos -->
+    <extension name="handle-bridge-success">
+      <condition field="destination_number" expression="^_handle_bridge_failure_$"/>
+      <condition field="${originate_disposition}" expression="^SUCCESS$">
+        <action application="log" data="INFO Call completed successfully - normal hangup"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-dispatcher">
+      <condition field="destination_number" expression="^_handle_bridge_failure_$"/>
+      <!-- USER_BUSY → 486 Busy Here -->
+      <condition field="${originate_disposition}" expression="^USER_BUSY$">
+        <action application="transfer" data="_hangup_user_busy_"/>
+        <anti-action application="transfer" data="_hangup_check_no_answer_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-no-answer">
+      <condition field="destination_number" expression="^_hangup_check_no_answer_$"/>
+      <!-- NO_ANSWER, NO_USER_RESPONSE → 486 Busy Here (timeout = ocupado) -->
+      <condition field="${originate_disposition}" expression="^(NO_ANSWER|NO_USER_RESPONSE)$">
+        <action application="transfer" data="_hangup_originator_cancel_"/>
+        <anti-action application="transfer" data="_hangup_check_rejected_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-rejected">
+      <condition field="destination_number" expression="^_hangup_check_rejected_$"/>
+      <!-- CALL_REJECTED → 603 Decline -->
+      <condition field="${originate_disposition}" expression="^CALL_REJECTED$">
+        <action application="transfer" data="_hangup_call_rejected_"/>
+        <anti-action application="transfer" data="_hangup_check_cancel_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-cancel">
+      <condition field="destination_number" expression="^_hangup_check_cancel_$"/>
+      <!-- ORIGINATOR_CANCEL, NORMAL_CLEARING, TIMEOUT → 486 Busy Here -->
+      <condition field="${originate_disposition}" expression="^(ORIGINATOR_CANCEL|NORMAL_CLEARING|NORMAL_TEMPORARY_FAILURE|TIMEOUT|CANCEL)$">
+        <action application="transfer" data="_hangup_originator_cancel_"/>
+        <anti-action application="transfer" data="_hangup_check_unavailable_"/>
+      </condition>
+    </extension>
+
+    <extension name="handle-bridge-failure-unavailable">
+      <condition field="destination_number" expression="^_hangup_check_unavailable_$"/>
+      <!-- SUBSCRIBER_ABSENT, USER_NOT_REGISTERED → 480 Temporarily Unavailable -->
+      <condition field="${originate_disposition}" expression="^(SUBSCRIBER_ABSENT|USER_NOT_REGISTERED)$">
+        <action application="transfer" data="_hangup_unavailable_"/>
+        <anti-action application="transfer" data="_hangup_congestion_"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
+    <!-- HANDLERS: Reproducen tono apropiado + respuesta SIP          -->
+    <!-- ============================================================ -->
+
+    <!-- USER_BUSY: Tono ocupado (500ms on/500ms off) + 486 -->
+    <extension name="hangup-user-busy">
+      <condition field="destination_number" expression="^_hangup_user_busy_$">
+        <action application="log" data="INFO Hangup handler: USER_BUSY - sending 486 with busy tone"/>
+        <!-- Tono de ocupado: 480Hz + 620Hz, 500ms on / 500ms off, 4 repeticiones (~4s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=4"/>
+        <action application="set" data="sip_reason=Q.850;cause=17"/>
+        <action application="respond" data="486 Busy Here"/>
+      </condition>
+    </extension>
+
+    <!-- NO_ANSWER: Sin tono adicional (ya hubo ringback) + 480 -->
+    <extension name="hangup-no-answer">
+      <condition field="destination_number" expression="^_hangup_no_answer_$">
+        <action application="log" data="INFO Hangup handler: NO_ANSWER - sending 480"/>
+        <!-- No reproducir tono - el llamante ya escuchó ringback suficiente -->
+        <action application="set" data="sip_reason=Q.850;cause=18"/>
+        <action application="respond" data="480 Temporarily Unavailable"/>
+      </condition>
+    </extension>
+
+    <!-- CALL_REJECTED: Tono ocupado breve + 603 -->
+    <extension name="hangup-call-rejected">
+      <condition field="destination_number" expression="^_hangup_call_rejected_$">
+        <action application="log" data="INFO Hangup handler: CALL_REJECTED - sending 603 with busy tone"/>
+        <!-- Tono de ocupado breve: 2 repeticiones (~2s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=2"/>
+        <action application="set" data="sip_reason=Q.850;cause=21"/>
+        <action application="respond" data="603 Decline"/>
+      </condition>
+    </extension>
+
+    <!-- ORIGINATOR_CANCEL/NORMAL_CLEARING: Tono ocupado + 486 (timeout de llamada) -->
+    <extension name="hangup-originator-cancel">
+      <condition field="destination_number" expression="^_hangup_originator_cancel_$">
+        <action application="log" data="INFO Hangup handler: ORIGINATOR_CANCEL/TIMEOUT (${originate_disposition}) - sending 486"/>
+        <!-- Tono de ocupado: 480Hz + 620Hz, 500ms on / 500ms off, 7 repeticiones (~7s) -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=7"/>
+        <action application="set" data="sip_reason=Q.850;cause=17"/>
+        <action application="respond" data="486 Busy Here"/>
+      </condition>
+    </extension>
+
+    <!-- SUBSCRIBER_ABSENT/USER_NOT_REGISTERED: Tono congestión + 480 -->
+    <extension name="hangup-unavailable">
+      <condition field="destination_number" expression="^_hangup_unavailable_$">
+        <action application="log" data="INFO Hangup handler: UNAVAILABLE - sending 480 with congestion tone"/>
+        <!-- Tono de congestión: 480Hz + 620Hz, 250ms on / 250ms off, 6 repeticiones (~3s) -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="set" data="sip_reason=Q.850;cause=20"/>
+        <action application="respond" data="480 Temporarily Unavailable"/>
+      </condition>
+    </extension>
+
+    <!-- DEFAULT/CONGESTION: Tono congestión + 503 -->
+    <extension name="hangup-congestion">
+      <condition field="destination_number" expression="^_hangup_congestion_$">
+        <action application="log" data="INFO Hangup handler: CONGESTION/DEFAULT (${originate_disposition}) - sending 503"/>
+        <!-- Tono de congestión: 480Hz + 620Hz, 250ms on / 250ms off, 6 repeticiones (~3s) -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="set" data="sip_reason=Q.850;cause=42"/>
+        <action application="respond" data="503 Service Unavailable"/>
       </condition>
     </extension>
     <extension name="fallback-reject">

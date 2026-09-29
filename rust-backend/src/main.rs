@@ -7,11 +7,13 @@ use actix_cors::Cors;
 use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
-    configure_dashboard, configure_dialplan, configure_freeswitch_directory,
+    configure_carriers, configure_dashboard, configure_dialplan, configure_endpoint_monitor,
+    configure_endpoints, configure_freeswitch_directory, configure_inbound_routing,
     configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
-    configure_management, configure_plans, configure_rate_cards, configure_rates,
-    configure_reservations, configure_settings, configure_sip_devices, configure_stats,
-    configure_unified_routing, configure_users, create_cdr, ws_handler,
+    configure_management, configure_minute_buckets, configure_modules, configure_outbound_routing,
+    configure_plans, configure_rate_cards, configure_rates, configure_reservations, configure_settings,
+    configure_sip_devices, configure_stats, configure_unified_routing, configure_users, create_cdr,
+    ws_handler,
 };
 use apolo_auth::{JwtService, PasswordService};
 use apolo_db::create_pool;
@@ -43,9 +45,11 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_stats)
             // Auth endpoints
             .configure(configure_auth)
-            // User management endpoints (superadmin only)
+            // User management endpoints (admin+, hierarchy enforced per request)
             .configure(configure_users)
-            // Audit log endpoints (superadmin only)
+            // Module catalog endpoints (admin+)
+            .configure(configure_modules)
+            // Audit log endpoints (admin+)
             .configure(configure_audit)
             // Account endpoints
             .configure(configure_accounts)
@@ -55,6 +59,8 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_rates)
             // Plan endpoints
             .configure(configure_plans)
+            // Minute bucket billing (Plan Control / Plan Abierto)
+            .configure(configure_minute_buckets)
             // Active calls endpoints
             .configure(configure_active_calls)
             // Reservations endpoints
@@ -69,14 +75,24 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_settings)
             // SIP Device management
             .configure(configure_sip_devices)
-            // Unified Routing management (superadmin only)
+            // Unified Routing management (superadmin only) - legacy
             .configure(configure_unified_routing)
+            // NEW: Simplified carrier management (dr_gateways type=8)
+            .configure(configure_carriers)
+            // NEW: Simplified endpoint management (dr_gateways type=9)
+            .configure(configure_endpoints)
+            // NEW: Simplified outbound routing (carrier groups + routes)
+            .configure(configure_outbound_routing)
+            // Inbound Routing (Carrier → DID Override model)
+            .configure(configure_inbound_routing)
             // Internal routing (FreeSWITCH <-> Kamailio)
             .service(configure_internal_routes())
             // Kamailio Endpoints (PBX) - direct DB access
             .configure(configure_kamailio_endpoints)
             // FreeSWITCH mod_xml_curl directory (IP whitelist protected, no JWT)
             .configure(configure_freeswitch_directory)
+            // Endpoint Monitor (SIP connectivity monitoring)
+            .configure(configure_endpoint_monitor)
             // CDR endpoints - high-volume operations
             .service(
                 web::scope("/cdrs")
@@ -167,18 +183,16 @@ async fn main() -> std::io::Result<()> {
 
     // SIP Device encryption service (optional - if key not set, SIP device features will error)
     let sip_service = match env::var("SIP_ENCRYPTION_KEY") {
-        Ok(key) => {
-            match SipDeviceService::new(&key) {
-                Ok(service) => {
-                    info!("SIP Device service initialized with encryption");
-                    Some(Arc::new(service))
-                }
-                Err(e) => {
-                    warn!("Failed to initialize SIP Device service: {}. SIP device features will be unavailable.", e);
-                    None
-                }
+        Ok(key) => match SipDeviceService::new(&key) {
+            Ok(service) => {
+                info!("SIP Device service initialized with encryption");
+                Some(Arc::new(service))
             }
-        }
+            Err(e) => {
+                warn!("Failed to initialize SIP Device service: {}. SIP device features will be unavailable.", e);
+                None
+            }
+        },
         Err(_) => {
             info!("SIP_ENCRYPTION_KEY not set. Generate with: openssl rand -hex 32");
             info!("SIP device management features will be unavailable until configured.");
@@ -195,6 +209,12 @@ async fn main() -> std::io::Result<()> {
         "PostgreSQL connection established with {} max connections",
         max_connections
     );
+
+    // Minute bucket 80%/100% consumption alert dispatcher (background loop;
+    // no-ops if SMTP_HOST is not configured — alerts just stay queued).
+    tokio::spawn(apolo_services::minute_bucket_alerts::run_alert_dispatcher(
+        pool.clone(),
+    ));
 
     // Kamailio MySQL database (optional)
     let kamailio_mysql_pool = if let Ok(kamailio_url) = env::var("KAMAILIO_DATABASE_URL") {

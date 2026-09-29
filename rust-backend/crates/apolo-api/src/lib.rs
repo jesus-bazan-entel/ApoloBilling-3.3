@@ -19,8 +19,13 @@ pub use dto::{ApiResponse, PaginationParams};
 
 // Re-export handler configuration functions and CDR handlers
 pub use handlers::{
-    configure_accounts, configure_active_calls, configure_auth, configure_management,
-    configure_rate_cards, configure_rates, create_cdr,
     // CDR handlers (configured manually in main.rs)
     cdr,
+    configure_accounts,
+    configure_active_calls,
+    configure_auth,
+    configure_management,
+    configure_rate_cards,
+    configure_rates,
+    create_cdr,
 };

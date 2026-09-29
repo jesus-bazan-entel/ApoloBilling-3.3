@@ -22,13 +22,17 @@ use validator::Validate;
 /// List rate cards with pagination and filters
 ///
 /// GET /api/v1/rate-cards
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn list_rate_cards(
     pool: web::Data<PgPool>,
     query: web::Query<PaginationParams>,
     filters: web::Query<RateCardFilterParams>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("rates") {
+        return Err(AppError::Forbidden);
+    }
+
     query.validate().map_err(|e| {
         warn!("Pagination validation failed: {}", e);
         AppError::Validation(e.to_string())
@@ -57,8 +61,16 @@ pub async fn list_rate_cards(
     };
 
     // Filter effective only if requested
-    let rates = if filters.effective_only {
+    let rates: Vec<RateCard> = if filters.effective_only {
         rates.into_iter().filter(|r| r.is_effective()).collect()
+    } else {
+        rates
+    };
+
+    // Filter by tariff group if requested (defaults to showing every group,
+    // e.g. "standard" outbound rates together with "overage_*" tariff sets)
+    let rates: Vec<RateCard> = if let Some(group) = &filters.card_group {
+        rates.into_iter().filter(|r| &r.card_group == group).collect()
     } else {
         rates
     };
@@ -68,13 +80,32 @@ pub async fn list_rate_cards(
     Ok(HttpResponse::Ok().json(query.paginate(response_data, total)))
 }
 
+/// List distinct tariff groups currently defined (for the frontend selector
+/// used both in the Rate Cards page and in the minute-bucket overage config).
+///
+/// GET /api/v1/rate-cards/card-groups
+#[instrument(skip(pool, user))]
+pub async fn list_card_groups(
+    pool: web::Data<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<HttpResponse, AppError> {
+    if !user.has_module("rates") {
+        return Err(AppError::Forbidden);
+    }
+
+    let repo = PgRateRepository::new(pool.get_ref().clone());
+    let groups = repo.list_card_groups().await?;
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(groups)))
+}
+
 /// Create a new rate card
 ///
 /// POST /api/v1/rate-cards
 #[instrument(skip(pool, user, req))]
 pub async fn create_rate_card(
     pool: web::Data<PgPool>,
-    user: AuthenticatedUser,
+    user: apolo_auth::AdminUser,
     req: web::Json<RateCardCreateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -90,12 +121,17 @@ pub async fn create_rate_card(
 
     let repo = PgRateRepository::new(pool.get_ref().clone());
 
-    // Check for duplicate prefix
-    if let Some(_existing) = repo.find_by_destination(&req.destination_prefix).await? {
-        warn!(prefix = %req.destination_prefix, "Rate card creation failed: duplicate prefix");
+    // Check for duplicate prefix within the same tariff group (a prefix can
+    // exist once per card_group, e.g. once in "standard" and once in an
+    // "overage_*" group without conflicting).
+    if let Some(_existing) = repo
+        .find_by_destination_in_group(&req.destination_prefix, &req.card_group)
+        .await?
+    {
+        warn!(prefix = %req.destination_prefix, card_group = %req.card_group, "Rate card creation failed: duplicate prefix in group");
         return Err(AppError::Conflict(format!(
-            "Rate card for prefix {} already exists",
-            req.destination_prefix
+            "Rate card for prefix {} already exists in group {}",
+            req.destination_prefix, req.card_group
         )));
     }
 
@@ -136,12 +172,16 @@ pub async fn create_rate_card(
 /// Get a single rate card by ID
 ///
 /// GET /api/v1/rate-cards/{id}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn get_rate_card(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("rates") {
+        return Err(AppError::Forbidden);
+    }
+
     let rate_id = path.into_inner();
     debug!(id = rate_id, "Getting rate card");
 
@@ -162,7 +202,7 @@ pub async fn get_rate_card(
 pub async fn update_rate_card(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    user: AuthenticatedUser,
+    user: apolo_auth::AdminUser,
     req: web::Json<RateCardUpdateRequest>,
 ) -> Result<HttpResponse, AppError> {
     req.validate().map_err(|e| {
@@ -216,6 +256,11 @@ pub async fn update_rate_card(
         rate.effective_end = Some(end);
     }
 
+    if let Some(group) = &req.card_group {
+        changes["card_group"] = json!({ "old": rate.card_group, "new": group });
+        rate.card_group = group.clone();
+    }
+
     rate.updated_at = Utc::now();
 
     // Save updates
@@ -256,7 +301,7 @@ pub async fn update_rate_card(
 pub async fn delete_rate_card(
     pool: web::Data<PgPool>,
     path: web::Path<i32>,
-    user: AuthenticatedUser,
+    user: apolo_auth::AdminUser,
 ) -> Result<HttpResponse, AppError> {
     let rate_id = path.into_inner();
     debug!(id = rate_id, "Soft deleting rate card");
@@ -385,12 +430,16 @@ pub async fn bulk_create_rate_cards(
 /// Search rate for a phone number using LPM
 ///
 /// GET /api/v1/rate-cards/search/{phone_number}
-#[instrument(skip(pool, _user))]
+#[instrument(skip(pool, user))]
 pub async fn search_rate_for_number(
     pool: web::Data<PgPool>,
     path: web::Path<String>,
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
+    if !user.has_module("rates") {
+        return Err(AppError::Forbidden);
+    }
+
     let phone_number = path.into_inner();
     debug!(phone = %phone_number, "Searching rate for phone number");
 
@@ -422,6 +471,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("", web::get().to(list_rate_cards))
             .route("", web::post().to(create_rate_card))
             .route("/bulk", web::post().to(bulk_create_rate_cards))
+            .route("/card-groups", web::get().to(list_card_groups))
             .route(
                 "/search/{phone_number}",
                 web::get().to(search_rate_for_number),
@@ -446,6 +496,7 @@ mod tests {
             billing_increment: 6,
             connection_fee: dec!(0),
             priority: 0,
+            card_group: "standard".to_string(),
         };
         assert!(valid_req.validate().is_ok());
 
@@ -456,6 +507,7 @@ mod tests {
             billing_increment: 6,
             connection_fee: dec!(0),
             priority: 0,
+            card_group: "standard".to_string(),
         };
         assert!(invalid_req.validate().is_err());
     }

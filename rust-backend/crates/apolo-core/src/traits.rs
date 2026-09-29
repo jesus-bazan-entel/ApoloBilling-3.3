@@ -3,7 +3,9 @@
 //! Defines abstractions for database access and business logic.
 
 use crate::error::AppError;
-use crate::models::{Account, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User};
+use crate::models::{
+    Account, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User,
+};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::{de::DeserializeOwned, Serialize};

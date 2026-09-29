@@ -4,7 +4,11 @@
 
 use crate::jwt::JwtService;
 use crate::Claims;
-use actix_web::{dev::Payload, error::ErrorUnauthorized, web, FromRequest, HttpRequest};
+use actix_web::{
+    dev::Payload,
+    error::{ErrorForbidden, ErrorUnauthorized},
+    web, FromRequest, HttpRequest,
+};
 use apolo_core::error::AppError;
 use apolo_core::models::UserRole;
 use futures::future::{ready, Ready};
@@ -78,6 +82,23 @@ impl AuthenticatedUser {
     /// Check if user has superadmin privileges
     pub fn is_superadmin(&self) -> bool {
         self.claims.is_superadmin()
+    }
+
+    /// Check whether this session can view the given module.
+    ///
+    /// Admin/Superadmin always pass (they get full access to every module
+    /// their role qualifies for by construction — see
+    /// `UserRole::effective_modules`). A `Usuario` session passes only if
+    /// the module key is present in the effective-module list embedded in
+    /// their JWT at login time.
+    ///
+    /// Note: this reflects the module grants as of the last login/token
+    /// refresh (up to `JWT_EXPIRATION_SECS`, 30 minutes by default) — an
+    /// accepted trade-off so this check never needs a DB round trip. Admins
+    /// can force a user to re-authenticate immediately from the Usuarios
+    /// page if a change needs to apply sooner.
+    pub fn has_module(&self, module_key: &str) -> bool {
+        self.is_admin() || self.claims.modules.iter().any(|m| m == module_key)
     }
 }
 
@@ -177,7 +198,7 @@ impl FromRequest for AdminUser {
                 role = %auth_user.role,
                 "User attempted admin access without privileges"
             );
-            return ready(Err(ErrorUnauthorized(AppError::Forbidden)));
+            return ready(Err(ErrorForbidden(AppError::Forbidden)));
         }
 
         debug!(
@@ -236,7 +257,7 @@ impl FromRequest for SuperadminUser {
                 role = %auth_user.role,
                 "User attempted superadmin access without privileges"
             );
-            return ready(Err(ErrorUnauthorized(AppError::Forbidden)));
+            return ready(Err(ErrorForbidden(AppError::Forbidden)));
         }
 
         debug!(
@@ -262,7 +283,7 @@ mod tests {
     async fn test_extract_token_from_authorization_header() {
         let jwt_service = create_test_jwt_service();
         let token = jwt_service
-            .create_token_for_user("testuser", UserRole::Operator)
+            .create_token_for_user("testuser", UserRole::Usuario)
             .unwrap();
 
         let app = test::init_service(App::new().app_data(web::Data::new(jwt_service)).route(
@@ -347,7 +368,7 @@ mod tests {
     async fn test_admin_user_with_operator_role() {
         let jwt_service = create_test_jwt_service();
         let token = jwt_service
-            .create_token_for_user("operator", UserRole::Operator)
+            .create_token_for_user("operator", UserRole::Usuario)
             .unwrap();
 
         let app = test::init_service(
@@ -363,7 +384,7 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 401); // Forbidden
+        assert_eq!(resp.status(), 403); // Forbidden
     }
 
     #[actix_web::test]
@@ -410,7 +431,7 @@ mod tests {
             .to_request();
 
         let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 401); // Forbidden
+        assert_eq!(resp.status(), 403); // Forbidden
     }
 }
 

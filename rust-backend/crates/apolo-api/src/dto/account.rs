@@ -4,8 +4,8 @@
 
 use apolo_core::models::{Account, AccountStatus, AccountType};
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 

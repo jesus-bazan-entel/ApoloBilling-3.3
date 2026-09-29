@@ -10,7 +10,11 @@ use validator::Validate;
 /// Request to create a new user
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct UserCreateRequest {
-    #[validate(length(min = 3, max = 50, message = "Username must be between 3 and 50 characters"))]
+    #[validate(length(
+        min = 3,
+        max = 50,
+        message = "Username must be between 3 and 50 characters"
+    ))]
     pub username: String,
 
     #[validate(length(min = 6, message = "Password must be at least 6 characters"))]

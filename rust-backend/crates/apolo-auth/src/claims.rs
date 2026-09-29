@@ -17,6 +17,12 @@ pub struct Claims {
     /// User role
     pub role: UserRole,
 
+    /// Effective module keys for this session (computed at login time from
+    /// role + explicit grants — see `UserRole::effective_modules`). Empty on
+    /// tokens issued before this field existed, thanks to `#[serde(default)]`.
+    #[serde(default)]
+    pub modules: Vec<String>,
+
     /// Issued at (Unix timestamp)
     pub iat: i64,
 
@@ -43,11 +49,17 @@ impl Claims {
     /// assert_eq!(claims.role, UserRole::Admin);
     /// ```
     pub fn new(username: &str, role: UserRole) -> Self {
+        Self::new_with_modules(username, role, Vec::new())
+    }
+
+    /// Create new claims with an explicit effective-module list
+    pub fn new_with_modules(username: &str, role: UserRole, modules: Vec<String>) -> Self {
         let now = Utc::now();
 
         Self {
             sub: username.to_string(),
             role,
+            modules,
             iat: now.timestamp(),
             exp: 0, // Will be set by JwtService
         }
@@ -61,12 +73,24 @@ impl Claims {
     /// * `role` - The user's role
     /// * `expires_in_secs` - Token expiration time in seconds
     pub fn with_expiration(username: &str, role: UserRole, expires_in_secs: i64) -> Self {
+        Self::with_expiration_and_modules(username, role, Vec::new(), expires_in_secs)
+    }
+
+    /// Create new claims with custom expiration duration and an explicit
+    /// effective-module list
+    pub fn with_expiration_and_modules(
+        username: &str,
+        role: UserRole,
+        modules: Vec<String>,
+        expires_in_secs: i64,
+    ) -> Self {
         let now = Utc::now();
         let exp = now + Duration::seconds(expires_in_secs);
 
         Self {
             sub: username.to_string(),
             role,
+            modules,
             iat: now.timestamp(),
             exp: exp.timestamp(),
         }
@@ -80,7 +104,7 @@ impl Claims {
     /// use apolo_auth::Claims;
     /// use apolo_core::models::UserRole;
     ///
-    /// let claims = Claims::with_expiration("user", UserRole::Operator, 3600);
+    /// let claims = Claims::with_expiration("user", UserRole::Usuario, 3600);
     /// assert!(!claims.is_expired());
     /// ```
     pub fn is_expired(&self) -> bool {
@@ -116,9 +140,9 @@ mod tests {
 
     #[test]
     fn test_claims_creation() {
-        let claims = Claims::new("testuser", UserRole::Operator);
+        let claims = Claims::new("testuser", UserRole::Usuario);
         assert_eq!(claims.sub, "testuser");
-        assert_eq!(claims.role, UserRole::Operator);
+        assert_eq!(claims.role, UserRole::Usuario);
         assert!(claims.iat > 0);
     }
 
@@ -136,14 +160,14 @@ mod tests {
 
     #[test]
     fn test_expired_claims() {
-        let mut claims = Claims::new("user", UserRole::Operator);
+        let mut claims = Claims::new("user", UserRole::Usuario);
         claims.exp = (Utc::now() - Duration::hours(1)).timestamp();
         assert!(claims.is_expired());
     }
 
     #[test]
     fn test_role_checks() {
-        let operator_claims = Claims::new("operator", UserRole::Operator);
+        let operator_claims = Claims::new("operator", UserRole::Usuario);
         assert!(!operator_claims.is_admin());
         assert!(!operator_claims.is_superadmin());
 
@@ -158,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_username_getter() {
-        let claims = Claims::new("myuser", UserRole::Operator);
+        let claims = Claims::new("myuser", UserRole::Usuario);
         assert_eq!(claims.username(), "myuser");
     }
 

@@ -43,9 +43,9 @@ impl SipDeviceService {
             )));
         }
 
-        let key: [u8; 32] = key_bytes.try_into().map_err(|_| {
-            AppError::Config("Failed to convert key to fixed array".to_string())
-        })?;
+        let key: [u8; 32] = key_bytes
+            .try_into()
+            .map_err(|_| AppError::Config("Failed to convert key to fixed array".to_string()))?;
 
         let cipher = Aes256Gcm::new(&key.into());
 

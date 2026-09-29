@@ -1,6 +1,7 @@
 //! Kamailio Endpoints (PBX) handler - Gestión directa de endpoints en Kamailio
 //! Bypass de dSIPRouter API - acceso directo a la base de datos
 
+use crate::handlers::kamailio_gateway::{gateway_attrs, signalling_from_transport, GW_TYPE_PBX};
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use sqlx::{MySqlPool, Row};
@@ -41,9 +42,7 @@ pub struct CreateEndpointRequest {
 }
 
 /// Listar todos los endpoints (PBX) de Kamailio
-async fn list_endpoints(
-    kamailio_db: web::Data<MySqlPool>,
-) -> actix_web::Result<HttpResponse> {
+async fn list_endpoints(kamailio_db: web::Data<MySqlPool>) -> actix_web::Result<HttpResponse> {
     // Query que obtiene endpoints tipo PBX (type=9)
     let query = r#"
         SELECT
@@ -65,9 +64,7 @@ async fn list_endpoints(
     let rows = sqlx::query(query)
         .fetch_all(kamailio_db.get_ref())
         .await
-        .map_err(|e| {
-            actix_web::error::ErrorInternalServerError(format!("DB error: {}", e))
-        })?;
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("DB error: {}", e)))?;
 
     let endpoints: Vec<KamailioEndpoint> = rows
         .iter()
@@ -115,9 +112,7 @@ async fn list_endpoint_groups(
     let rows = sqlx::query(query)
         .fetch_all(kamailio_db.get_ref())
         .await
-        .map_err(|e| {
-            actix_web::error::ErrorInternalServerError(format!("DB error: {}", e))
-        })?;
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("DB error: {}", e)))?;
 
     let groups: Vec<EndpointGroup> = rows
         .iter()
@@ -167,9 +162,7 @@ async fn get_endpoint(
         .bind(gwid)
         .fetch_optional(kamailio_db.get_ref())
         .await
-        .map_err(|e| {
-            actix_web::error::ErrorInternalServerError(format!("DB error: {}", e))
-        })?;
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("DB error: {}", e)))?;
 
     match row {
         Some(row) => {
@@ -208,7 +201,10 @@ async fn create_endpoint(
 ) -> actix_web::Result<HttpResponse> {
     let port = body.port.unwrap_or(5060);
     let address = format!("{}:{}", body.address, port);
-    let description = body.description.clone().unwrap_or_else(|| body.name.clone());
+    let description = body
+        .description
+        .clone()
+        .unwrap_or_else(|| body.name.clone());
 
     // Iniciar transacción
     let mut tx = kamailio_db.begin().await.map_err(|e| {
@@ -218,8 +214,9 @@ async fn create_endpoint(
     // 1. Insertar gateway
     let result = sqlx::query(
         r#"INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description)
-           VALUES (9, ?, 0, '', '', ?)"#
+           VALUES (?, ?, 0, '', '', ?)"#,
     )
+    .bind(GW_TYPE_PBX)
     .bind(&address)
     .bind(&description)
     .execute(&mut *tx)
@@ -230,9 +227,14 @@ async fn create_endpoint(
 
     let gwid = result.last_insert_id();
 
-    // 2. Actualizar attrs con gwid,type
+    // 2. Actualizar attrs, que empieza por el gwid asignado en el INSERT.
+    // Este editor escribe directo en Kamailio y no recibe transporte, de ahi el None.
     sqlx::query("UPDATE dr_gateways SET attrs = ? WHERE gwid = ?")
-        .bind(format!("{},9", gwid))
+        .bind(gateway_attrs(
+            gwid as i32,
+            GW_TYPE_PBX,
+            signalling_from_transport(None),
+        ))
         .bind(gwid)
         .execute(&mut *tx)
         .await
@@ -242,17 +244,15 @@ async fn create_endpoint(
 
     // 3. Crear grupo
     let group_desc = format!("name:{},type:9", body.name);
-    sqlx::query(
-        r#"INSERT INTO dr_gw_lists (id, gwlist, description) VALUES (?, ?, ?)"#
-    )
-    .bind(gwid)
-    .bind(gwid.to_string())
-    .bind(&group_desc)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        actix_web::error::ErrorInternalServerError(format!("Insert group error: {}", e))
-    })?;
+    sqlx::query(r#"INSERT INTO dr_gw_lists (id, gwlist, description) VALUES (?, ?, ?)"#)
+        .bind(gwid)
+        .bind(gwid.to_string())
+        .bind(&group_desc)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            actix_web::error::ErrorInternalServerError(format!("Insert group error: {}", e))
+        })?;
 
     // 4. Mapping gw2gwgroup
     sqlx::query(
@@ -268,35 +268,31 @@ async fn create_endpoint(
 
     // 5. ACL en address
     let acl_tag = format!("name:{},gwgroup:{}", body.name, gwid);
-    sqlx::query(
-        r#"INSERT INTO address (grp, ip_addr, mask, port, tag) VALUES (9, ?, 32, ?, ?)"#
-    )
-    .bind(&body.address)
-    .bind(port)
-    .bind(&acl_tag)
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        actix_web::error::ErrorInternalServerError(format!("Insert ACL error: {}", e))
-    })?;
+    sqlx::query(r#"INSERT INTO address (grp, ip_addr, mask, port, tag) VALUES (9, ?, 32, ?, ?)"#)
+        .bind(&body.address)
+        .bind(port)
+        .bind(&acl_tag)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            actix_web::error::ErrorInternalServerError(format!("Insert ACL error: {}", e))
+        })?;
 
     // 6. Call settings
-    sqlx::query(
-        r#"INSERT INTO dsip_call_settings (gwgroupid, `limit`, timeout) VALUES (?, ?, ?)"#
-    )
-    .bind(gwid)
-    .bind(body.call_limit.unwrap_or(0))
-    .bind(body.call_timeout.unwrap_or(0))
-    .execute(&mut *tx)
-    .await
-    .map_err(|e| {
-        actix_web::error::ErrorInternalServerError(format!("Insert call settings error: {}", e))
-    })?;
+    sqlx::query(r#"INSERT INTO dsip_call_settings (gwgroupid, `limit`, timeout) VALUES (?, ?, ?)"#)
+        .bind(gwid)
+        .bind(body.call_limit.unwrap_or(0))
+        .bind(body.call_timeout.unwrap_or(0))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| {
+            actix_web::error::ErrorInternalServerError(format!("Insert call settings error: {}", e))
+        })?;
 
     // Commit
-    tx.commit().await.map_err(|e| {
-        actix_web::error::ErrorInternalServerError(format!("Commit error: {}", e))
-    })?;
+    tx.commit()
+        .await
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Commit error: {}", e)))?;
 
     // Recargar Kamailio
     reload_kamailio().await;
@@ -354,13 +350,11 @@ async fn delete_endpoint(
         .bind(gwid)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            actix_web::error::ErrorInternalServerError(format!("Delete error: {}", e))
-        })?;
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Delete error: {}", e)))?;
 
-    tx.commit().await.map_err(|e| {
-        actix_web::error::ErrorInternalServerError(format!("Commit error: {}", e))
-    })?;
+    tx.commit()
+        .await
+        .map_err(|e| actix_web::error::ErrorInternalServerError(format!("Commit error: {}", e)))?;
 
     reload_kamailio().await;
 
@@ -414,6 +408,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/groups", web::get().to(list_endpoint_groups))
             .route("/{gwid}", web::get().to(get_endpoint))
             .route("", web::post().to(create_endpoint))
-            .route("/{gwid}", web::delete().to(delete_endpoint))
+            .route("/{gwid}", web::delete().to(delete_endpoint)),
     );
 }

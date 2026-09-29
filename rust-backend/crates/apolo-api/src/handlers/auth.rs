@@ -12,7 +12,7 @@ use apolo_auth::{AuthenticatedUser, JwtService, PasswordService};
 use apolo_core::models::{AuditLogBuilder, User, UserInfo, UserRole};
 use apolo_core::traits::{Repository, UserRepository};
 use apolo_core::AppError;
-use apolo_db::PgUserRepository;
+use apolo_db::{PgModuleRepository, PgUserRepository};
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -35,21 +35,28 @@ pub async fn login(
         AppError::Validation(e.to_string())
     })?;
 
-    let username = req.username.trim();
+    let identifier = req.username.trim();
     let password = &req.password;
 
-    debug!(username = %username, "Processing login request");
+    debug!(identifier = %identifier, "Processing login request");
 
-    // Find user in database
+    // Accept either a username or an email in the same field: try username
+    // first (the common case), then fall back to email lookup.
     let user_repo = PgUserRepository::new(pool.get_ref().clone());
-    let user = user_repo.find_by_username(username).await?.ok_or_else(|| {
-        info!(username = %username, "Login failed: user not found");
-        AppError::InvalidCredentials
-    })?;
+    let user = match user_repo.find_by_username(identifier).await? {
+        Some(user) => user,
+        None => user_repo
+            .find_by_email(identifier)
+            .await?
+            .ok_or_else(|| {
+                info!(identifier = %identifier, "Login failed: user not found");
+                AppError::InvalidCredentials
+            })?,
+    };
 
     // Check if user is active
     if !user.can_login() {
-        warn!(username = %username, "Login failed: user is inactive");
+        warn!(identifier = %identifier, "Login failed: user is inactive");
         return Err(AppError::InvalidCredentials);
     }
 
@@ -62,7 +69,7 @@ pub async fn login(
         })?;
 
     if !password_valid {
-        info!(username = %username, "Login failed: invalid password");
+        info!(identifier = %identifier, "Login failed: invalid password");
         return Err(AppError::InvalidCredentials);
     }
 
@@ -71,11 +78,28 @@ pub async fn login(
         warn!("Failed to update last login for user {}: {}", user.id, e);
     }
 
+    // Compute this session's effective module list (role + explicit grants)
+    let module_repo = PgModuleRepository::new(pool.get_ref().clone());
+    let modules = module_repo
+        .effective_modules(&user)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(
+                "Failed to compute effective modules for {}: {}",
+                identifier, e
+            );
+            Vec::new()
+        });
+
     // Generate JWT token
-    let token = jwt_service.create_token_for_user(&user.username, user.role)?;
+    let token = jwt_service.create_token_for_user_with_modules(
+        &user.username,
+        user.role,
+        modules.clone(),
+    )?;
     let expires_in = jwt_service.expiration_secs();
 
-    info!(username = %username, role = ?user.role, "Login successful");
+    info!(username = %user.username, role = ?user.role, "Login successful");
 
     // Audit log
     if let Ok(audit_data) = AuditLogBuilder::default()
@@ -89,7 +113,7 @@ pub async fn login(
 
     // Create response
     let user_info = UserInfo::from(&user);
-    let response = LoginResponse::new(token.clone(), expires_in, user_info);
+    let response = LoginResponse::new(token.clone(), expires_in, user_info, modules);
 
     // Set cookie with token
     let cookie = Cookie::build("token", token)
@@ -153,8 +177,24 @@ pub async fn me(
     let user_info = UserInfo::from(&db_user);
     let token_expires_at = Utc::now() + Duration::seconds(user.claims.exp - Utc::now().timestamp());
 
+    // Recompute fresh (not from the JWT) so module grant changes made by an
+    // Admin show up in the menu within the next `/auth/me` poll, instead of
+    // waiting for the token to expire.
+    let module_repo = PgModuleRepository::new(pool.get_ref().clone());
+    let modules = module_repo
+        .effective_modules(&db_user)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(
+                "Failed to compute effective modules for {}: {}",
+                user.username, e
+            );
+            user.claims.modules.clone()
+        });
+
     let response = MeResponse {
         user: user_info,
+        modules,
         token_expires_at,
     };
 
@@ -184,14 +224,16 @@ pub async fn register(
     );
 
     // Parse role
-    let role = UserRole::from_str(&req.role).unwrap_or(UserRole::Operator);
+    let role = UserRole::from_str(&req.role).unwrap_or(UserRole::Usuario);
 
-    // Check if admin can create this role
-    if !admin.user_role().can_manage(&role) {
+    // Check if the creator is allowed to assign this role.
+    // Superadmin can assign any role (including another Superadmin);
+    // Admin can only ever create Usuario accounts.
+    if !admin.user_role().can_assign(&role) {
         warn!(
             admin = %admin.username,
             target_role = ?role,
-            "Admin cannot create user with higher role"
+            "Admin is not allowed to assign this role"
         );
         return Err(AppError::Forbidden);
     }

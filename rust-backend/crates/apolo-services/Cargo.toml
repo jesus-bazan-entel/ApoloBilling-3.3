@@ -10,6 +10,7 @@ apolo-core = { workspace = true }
 apolo-db = { workspace = true }
 apolo-cache = { workspace = true }
 apolo-auth = { workspace = true }
+lettre = { workspace = true }
 
 # Async
 tokio = { workspace = true }

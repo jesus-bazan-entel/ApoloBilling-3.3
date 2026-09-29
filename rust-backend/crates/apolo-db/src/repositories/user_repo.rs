@@ -25,7 +25,7 @@ impl PgUserRepository {
 
     /// Parse user role from string
     fn parse_role(s: &str) -> UserRole {
-        UserRole::from_str(s).unwrap_or(UserRole::Operator)
+        UserRole::from_str(s).unwrap_or(UserRole::Usuario)
     }
 }
 
@@ -363,11 +363,12 @@ mod tests {
     #[test]
     fn test_parse_role() {
         assert_eq!(PgUserRepository::parse_role("admin"), UserRole::Admin);
-        assert_eq!(PgUserRepository::parse_role("operator"), UserRole::Operator);
+        assert_eq!(PgUserRepository::parse_role("usuario"), UserRole::Usuario);
+        assert_eq!(PgUserRepository::parse_role("operator"), UserRole::Usuario);
         assert_eq!(
             PgUserRepository::parse_role("superadmin"),
             UserRole::Superadmin
         );
-        assert_eq!(PgUserRepository::parse_role("invalid"), UserRole::Operator);
+        assert_eq!(PgUserRepository::parse_role("invalid"), UserRole::Usuario);
     }
 }

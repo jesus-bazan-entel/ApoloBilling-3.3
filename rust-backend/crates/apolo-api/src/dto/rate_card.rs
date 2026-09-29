@@ -33,10 +33,19 @@ pub struct RateCardCreateRequest {
     /// Priority for LPM conflict resolution (default: 0)
     #[serde(default)]
     pub priority: i32,
+
+    /// Tariff group ("standard" = normal outbound rate; anything else is a
+    /// dedicated tariff set, e.g. "overage_fibertel" for minute-bucket overage)
+    #[serde(default = "default_card_group")]
+    pub card_group: String,
 }
 
 fn default_billing_increment() -> i32 {
     6
+}
+
+fn default_card_group() -> String {
+    "standard".to_string()
 }
 
 impl RateCardCreateRequest {
@@ -53,6 +62,7 @@ impl RateCardCreateRequest {
             effective_start: Utc::now(),
             effective_end: None,
             priority: self.priority,
+            card_group: self.card_group.clone(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -79,6 +89,9 @@ pub struct RateCardUpdateRequest {
 
     /// Effective end date (for soft delete or expiration)
     pub effective_end: Option<DateTime<Utc>>,
+
+    /// Tariff group
+    pub card_group: Option<String>,
 }
 
 /// Bulk create request
@@ -149,6 +162,9 @@ pub struct RateCardResponse {
     /// Priority
     pub priority: i32,
 
+    /// Tariff group
+    pub card_group: String,
+
     /// Whether rate is currently effective
     pub is_effective: bool,
 
@@ -170,6 +186,7 @@ impl From<RateCard> for RateCardResponse {
             effective_start: rate.effective_start,
             effective_end: rate.effective_end,
             priority: rate.priority,
+            card_group: rate.card_group,
             is_effective,
             rate_per_second,
         }
@@ -188,6 +205,7 @@ impl From<&RateCard> for RateCardResponse {
             effective_start: rate.effective_start,
             effective_end: rate.effective_end,
             priority: rate.priority,
+            card_group: rate.card_group.clone(),
             is_effective: rate.is_effective(),
             rate_per_second: rate.rate_per_second(),
         }
@@ -253,6 +271,9 @@ pub struct RateCardFilterParams {
     /// Only show effective rates
     #[serde(default)]
     pub effective_only: bool,
+
+    /// Filter by tariff group (e.g. "standard", "overage_fibertel")
+    pub card_group: Option<String>,
 }
 
 #[cfg(test)]
@@ -269,6 +290,7 @@ mod tests {
             billing_increment: 6,
             connection_fee: dec!(0.01),
             priority: 1,
+            card_group: "standard".to_string(),
         };
 
         let rate = req.to_rate_card();
@@ -290,6 +312,7 @@ mod tests {
             effective_start: Utc::now() - chrono::Duration::hours(1),
             effective_end: None,
             priority: 1,
+            card_group: "standard".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

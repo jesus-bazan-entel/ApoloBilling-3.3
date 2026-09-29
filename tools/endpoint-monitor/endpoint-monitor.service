@@ -1,0 +1,46 @@
+[Unit]
+Description=SIP Endpoint Connectivity Monitor - Probes SIP endpoints and logs to PostgreSQL
+Documentation=file:///opt/ApoloBilling/docs/endpoint-monitor-prd.md
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/ApoloBilling/tools/endpoint-monitor
+
+# Load environment from the main backend config
+EnvironmentFile=/opt/ApoloBilling/rust-backend/.env
+
+# Run the monitor
+ExecStart=/usr/bin/python3 /opt/ApoloBilling/tools/endpoint-monitor/monitor.py \
+    --interval 60 \
+    --timeout 2 \
+    --workers 8 \
+    --retention-days 7
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Nice settings - low priority to not interfere with call processing
+Nice=10
+IOSchedulingClass=idle
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/log
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=endpoint-monitor
+
+[Install]
+WantedBy=multi-user.target

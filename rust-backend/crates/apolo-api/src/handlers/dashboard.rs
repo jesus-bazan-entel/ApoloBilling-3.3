@@ -97,10 +97,7 @@ pub async fn get_stats(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError
             .1
             .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
             .unwrap_or(0.0),
-        minutes_today: cdr_stats
-            .2
-            .map(|s| s as f64 / 60.0)
-            .unwrap_or(0.0),
+        minutes_today: cdr_stats.2.map(|s| s as f64 / 60.0).unwrap_or(0.0),
     };
 
     Ok(HttpResponse::Ok().json(stats))

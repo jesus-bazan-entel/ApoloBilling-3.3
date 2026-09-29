@@ -10,7 +10,8 @@ use validator::Validate;
 /// Login request
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct LoginRequest {
-    /// Username
+    /// Username or email — the login handler tries username first, then
+    /// falls back to an email lookup.
     #[validate(length(min = 1, max = 100, message = "Username is required"))]
     pub username: String,
 
@@ -33,16 +34,25 @@ pub struct LoginResponse {
 
     /// User information
     pub user: UserInfo,
+
+    /// Effective module keys for this session
+    pub modules: Vec<String>,
 }
 
 impl LoginResponse {
     /// Create a new login response
-    pub fn new(access_token: String, expires_in: i64, user: UserInfo) -> Self {
+    pub fn new(
+        access_token: String,
+        expires_in: i64,
+        user: UserInfo,
+        modules: Vec<String>,
+    ) -> Self {
         Self {
             access_token,
             token_type: "Bearer".to_string(),
             expires_in,
             user,
+            modules,
         }
     }
 }
@@ -72,13 +82,13 @@ pub struct RegisterRequest {
     /// Last name
     pub apellido: Option<String>,
 
-    /// Role (admin, operator, superadmin)
+    /// Role (admin, usuario, superadmin). Accepts legacy "operator" as an alias.
     #[serde(default = "default_role")]
     pub role: String,
 }
 
 fn default_role() -> String {
-    "operator".to_string()
+    "usuario".to_string()
 }
 
 /// Current user response
@@ -86,6 +96,10 @@ fn default_role() -> String {
 pub struct MeResponse {
     /// User information
     pub user: UserInfo,
+
+    /// Effective module keys for this session (drives the frontend menu and
+    /// route guards)
+    pub modules: Vec<String>,
 
     /// Token expiration timestamp
     pub token_expires_at: DateTime<Utc>,
@@ -152,7 +166,7 @@ mod tests {
             email: Some("user@example.com".to_string()),
             nombre: Some("John".to_string()),
             apellido: Some("Doe".to_string()),
-            role: "operator".to_string(),
+            role: "usuario".to_string(),
         };
         assert!(valid_request.validate().is_ok());
 
@@ -162,7 +176,7 @@ mod tests {
             email: Some("invalid-email".to_string()), // Invalid email
             nombre: None,
             apellido: None,
-            role: "operator".to_string(),
+            role: "usuario".to_string(),
         };
         assert!(invalid_request.validate().is_err());
     }
@@ -180,7 +194,12 @@ mod tests {
             ultimo_login: None,
         };
 
-        let response = LoginResponse::new("jwt_token".to_string(), 3600, user_info);
+        let response = LoginResponse::new(
+            "jwt_token".to_string(),
+            3600,
+            user_info,
+            vec!["dashboard".to_string()],
+        );
         assert_eq!(response.token_type, "Bearer");
         assert_eq!(response.expires_in, 3600);
         assert_eq!(response.user.username, "admin");
