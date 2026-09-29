@@ -736,3 +736,394 @@ fn calculate_a1_hash(username: &str, realm: &str, password: &str) -> String {
 | 3306 | MySQL | TCP | Kamailio database |
 | 6379 | Redis | TCP | Cache |
 | 10000-20000 | RTPEngine | UDP | Media relay |
+
+---
+
+## INTEGRATEL - Tono de Ocupado + 486 (IMPLEMENTADO)
+
+### Requerimiento
+
+INTEGRATEL (carrier, IP: 10.35.13.100) requiere que cuando una llamada entrante no sea contestada o el destino esté ocupado, se reproduzca un **tono de ocupado por 7 segundos** antes de enviar la respuesta SIP final.
+
+### Estado Actual
+
+**IMPLEMENTADO Y FUNCIONANDO** ✓
+
+### Configuración Implementada
+
+- **Dialplan**: `/opt/ApoloBilling/config/freeswitch/dialplan/to-kamailio.xml`
+- **Extensión principal**: `from-integratel-rn-22` (patrón `^(6722.+)$`)
+- **Timeout FreeSWITCH**: 55 segundos (antes del CANCEL de INTEGRATEL ~62s)
+- **Transformación**: `672217402002` → `17402002` (quita prefijo `6722`)
+
+### Flujo de Decisión Post-Bridge
+
+El sistema usa `${originate_disposition}` para determinar la respuesta:
+
+| Causa | Tono | Duración | Respuesta SIP | Q.850 |
+|-------|------|----------|---------------|-------|
+| `USER_BUSY` | Ocupado | 4s | 486 Busy Here | 17 |
+| `NO_ANSWER` | Ocupado | **7s** | **486 Busy Here** | 17 |
+| `NO_USER_RESPONSE` | Ocupado | 7s | 486 Busy Here | 17 |
+| `ORIGINATOR_CANCEL` | Ocupado | 7s | 486 Busy Here | 17 |
+| `NORMAL_CLEARING` | Ocupado | 7s | 486 Busy Here | 17 |
+| `CALL_REJECTED` | Ocupado | 2s | 603 Decline | 21 |
+| `SUBSCRIBER_ABSENT` | Congestión | 3s | 480 Unavailable | 20 |
+| `USER_NOT_REGISTERED` | Congestión | 3s | 480 Unavailable | 20 |
+| Otros | Congestión | 3s | 503 Service Unavailable | 42 |
+
+### Handler Principal (7 segundos)
+
+```xml
+<extension name="hangup-originator-cancel">
+  <condition field="destination_number" expression="^_hangup_originator_cancel_$">
+    <action application="log" data="INFO Hangup handler: ORIGINATOR_CANCEL/TIMEOUT (${originate_disposition}) - sending 486"/>
+    <!-- Tono de ocupado: 480Hz + 620Hz, 500ms on / 500ms off, 7 repeticiones (~7s) -->
+    <action application="playback" data="tone_stream://%(500,500,480,620);loops=7"/>
+    <action application="set" data="sip_reason=Q.850;cause=17"/>
+    <action application="respond" data="486 Busy Here"/>
+  </condition>
+</extension>
+```
+
+### Parámetros del Tono
+
+- **Frecuencias**: 480Hz + 620Hz (estándar de ocupado)
+- **Cadencia**: 500ms on / 500ms off (1 segundo por ciclo)
+- **Loops**: 7 repeticiones = **7 segundos de tono**
+
+### Flujo SIP Verificado
+
+```
+INTEGRATEL (10.35.13.100)
+    │
+    │ INVITE sip:672217402002@10.124.194.14
+    ▼
+Kamailio (10.124.194.14:5060)
+    │
+    │ INVITE (P-hint: inbound)
+    ▼
+FreeSWITCH (10.10.22.4:5082)
+    │
+    │ 183 Session Progress + SDP (early media)
+    │ INVITE sip:17402002@softphone
+    ▼
+Softphone (no contesta, timeout 55s)
+    │
+    ▼
+FreeSWITCH detecta: originate_disposition=NO_ANSWER
+    │
+    │ playback tone_stream://%(500,500,480,620);loops=7
+    │ (7 segundos de tono en early media)
+    │
+    ▼
+FreeSWITCH → Kamailio → INTEGRATEL: 486 Busy Here
+```
+
+### Archivos de Audio (legacy)
+
+- `/var/lib/rtpengine/audio/congestion_7sec.wav` - Tono de congestión 7 segundos
+- `/var/lib/rtpengine/audio/congestion_tone.wav` - Tono de congestión 3 segundos
+- `/usr/share/freeswitch/sounds/ringback_congestion.wav` - Ringback con tono intercalado (66s)
+
+---
+
+## Enrutamiento Saliente a INTEGRATEL — Runbook de Configuración y Troubleshooting
+
+**Plataforma:** Apolo SBC (FreeSWITCH + Kamailio `drouting` + RTPEngine)
+**Carrier objetivo:** INTEGRATEL — `10.35.13.100:5060` (gwid `60`, type `8`)
+
+---
+
+### 1. Arquitectura del Sistema (Verificada)
+
+#### 1.1 Versiones de Software
+
+| Componente | Versión |
+|------------|---------|
+| Kamailio | 5.8.3 |
+| FreeSWITCH | 1.10.12 |
+| RTPEngine | 11.5.1.11 |
+
+#### 1.2 Interfaces de Red
+
+| Interface | IP | Función |
+|-----------|-----|---------|
+| ens18 | 10.10.22.4/28 | Internal (SIP signaling local) |
+| ens19 | 10.124.194.14/30 | External (SIP signaling hacia carriers) |
+| ens20 | 10.124.194.142/30 | External (RTP media hacia carriers) |
+
+#### 1.3 FreeSWITCH Profiles
+
+| Profile | IP:Puerto | Contexto | Función |
+|---------|-----------|----------|---------|
+| internal | 10.10.22.4:5080 | from-pbx | Recibe llamadas de softphones |
+| external | 10.10.22.4:5062 | to-kamailio | Envía/recibe de Kamailio |
+| inbound | 10.10.22.4:5082 | — | Registrado en Kamailio como PBX |
+
+#### 1.4 Gateways FreeSWITCH
+
+| Gateway | Destino | Estado |
+|---------|---------|--------|
+| kamailio-internal | 10.10.22.4:5080 | NOREG |
+| pbx-fibertel | 10.30.0.26:5160 | NOREG |
+| fibertel-interno | sip.fibertelperu.com:5060 | REGED |
+
+---
+
+### 2. Configuración Kamailio drouting (Verificada)
+
+#### 2.1 Pasarelas — `dr_gateways`
+
+| gwid | type | address | strip | descripción |
+|------|------|---------|-------|-------------|
+| 59 | 8 (carrier) | sip.fibertelperu.com:5060 | 0 | FIBERTEL-Interno |
+| **60** | **8 (carrier)** | **10.35.13.100:5060** | **0** | **Trunk Integratel Principal** |
+| 100 | 9 (PBX) | 10.10.22.4:5082 | 0 | FreeSWITCH PBX Local |
+
+#### 2.2 Grupos de Pasarelas — `dr_gw_lists`
+
+| id | gwlist | descripción |
+|----|--------|-------------|
+| 11 | 60 | Integratel (type:8) |
+| 12 | 59 | Softswitch FIBERTEL |
+| 100 | 100 | FreeSWITCH Local |
+| 101 | 60 | Integratel_Principal |
+
+#### 2.3 Reglas de Ruteo — `dr_rules`
+
+| groupid | prefix | gwlist | destino |
+|---------|--------|--------|---------|
+| 8000 (outbound) | 2067 | 60 | ENTEL Móviles |
+| 8000 (outbound) | 2167 | 60 | CLARO Móvil |
+| 8000 (outbound) | 2267 | 60 | MOVISTAR |
+| 8000 (outbound) | 3267 | 60 | TELEFONICA |
+| 9000 (inbound) | — | #100 | Inbound → FreeSWITCH |
+
+#### 2.4 Prefijos de Marcación
+
+```
+2067 + número  →  ENTEL Móviles   (vía Integratel)
+2167 + número  →  CLARO Móvil     (vía Integratel)
+2267 + número  →  MOVISTAR        (vía Integratel)
+3267 + número  →  TELEFONICA      (vía Integratel)
+```
+
+**Ejemplo:** Llamar a MOVISTAR `938391839` → discar `2267938391839`
+
+---
+
+### 3. Flujo de Llamada Saliente
+
+```
+  [Softphone 10.212.134.51]
+            │  INVITE  (disca 2267 + número)
+            ▼
+  ┌───────────────────────┐
+  │   FreeSWITCH          │  10.10.22.4:5080 (profile internal)
+  │  - Autentica          │  contexto: from-pbx
+  │  - Dialplan XML       │  extensión: outbound-to-kamailio
+  │  - bridge a Kamailio  │  → sofia/external/$1@10.10.22.4:5060
+  └───────────┬───────────┘
+              │  INVITE  (desde 10.10.22.4:5062)
+              ▼
+  ┌───────────────────────┐
+  │      Kamailio         │  10.10.22.4:5060
+  │  - Clasifica origen   │  isbflagset(FLB_SRC_PBX)
+  │  - drouting           │  do_routing(8000)
+  │  - match prefijo      │  2267 → gwlist 60 (Integratel)
+  │  - RTPEngine offer    │  udp:localhost:7722
+  └───────────┬───────────┘
+              │  INVITE  (desde 10.124.194.14:5060)
+              ▼
+  ┌───────────────────────┐
+  │   INTEGRATEL          │  10.35.13.100:5060
+  │  - ACL por IP origen  │
+  │  - Valida From/PAI    │
+  │  - 100/183/180/200    │
+  └───────────────────────┘
+```
+
+---
+
+### 4. P-Early-Media + 100rel (RFC 5009)
+
+INTEGRATEL es un carrier **IMS/3GPP** que entrega early media (ringback, anuncios) en un `183 Session Progress` **fiable**. Requiere negociación conjunta de:
+
+1. **100rel/PRACK** — para acusar el 183 con SDP
+2. **P-Early-Media** — para autorizar el flujo de early media
+
+#### 4.1 Configuración en Kamailio
+
+**Archivo:** `/etc/kamailio/kamailio.cfg`
+
+**Sección "To Carrier" (línea ~1365):**
+
+```kamailio
+else if (isbflagset(FLB_SRC_PBX) || isflagset(FLT_PBX_AUTH) || isbflagset(FLB_SRC_MSTEAMS)) {
+    xlog("L_INFO", "Call from $si routed to carrier via drouting\n");
+
+    append_hf("P-hint: outbound\r\n");
+    $avp(calltype) = "outbound";
+
+    ### 100rel / PRACK — requisito de Integratel
+    if (!is_present_hf("Supported")) {
+        append_hf("Supported: 100rel\r\n");
+    }
+    if (is_present_hf("Allow") && !search("^Allow:.*PRACK")) {
+        remove_hf("Allow");
+        append_hf("Allow: INVITE, ACK, PRACK, OPTIONS, BYE, CANCEL, REGISTER, INFO, NOTIFY, MESSAGE, SUBSCRIBE, REFER, PUBLISH, UPDATE\r\n");
+    }
+
+    ### P-Early-Media (RFC 5009)
+    if (!is_present_hf("P-Early-Media")) {
+        append_hf("P-Early-Media: supported\r\n");
+    }
+    $dlg_var(pem_supported) = "1";
+
+    # ... do_routing(8000), RTPENGINE offer, t_relay ...
+}
+```
+
+**Sección `onreply_route[MANAGE_REPLY]` (línea ~4096):**
+
+```kamailio
+onreply_route[MANAGE_REPLY] {
+    if (t_check_status("[12][0-9][0-9]")) {
+        if (has_body("application/sdp")) {
+            route(RTPENGINEANSWER);
+        }
+
+        # P-Early-Media: abrir el 183 hacia el caller
+        if (t_check_status("183")) {
+            if ($dlg_var(pem_supported) == "1") {
+                if (!is_present_hf("P-Early-Media")) {
+                    append_hf("P-Early-Media: sendrecv\r\n");
+                    xlog("L_INFO", "P-Early-Media: sendrecv added to 183 for $ci\n");
+                }
+            }
+        }
+    }
+}
+```
+
+#### 4.2 Procedimiento de Activación
+
+```bash
+# 1. Editar
+vi /etc/kamailio/kamailio.cfg
+
+# 2. Validar sintaxis
+kamailio -c -f /etc/kamailio/kamailio.cfg
+
+# 3. Corregir permisos (instalación dSIPRouter)
+chown dsiprouter:kamailio /etc/kamailio/kamailio.cfg
+chmod 640 /etc/kamailio/kamailio.cfg
+
+# 4. Reiniciar Kamailio (los cambios de append_hf requieren reinicio)
+systemctl restart kamailio
+
+# 5. Recargar rutas drouting
+kamcmd drouting.reload
+
+# 6. Verificar estado
+systemctl status kamailio --no-pager
+```
+
+#### 4.3 Checkpoints de Validación en Traza SIP
+
+| # | Hop | Mensaje | Headers que DEBEN estar |
+|---|-----|---------|-------------------------|
+| 1 | Kamailio → Integratel | INVITE | `Supported: 100rel` · `Allow: ...PRACK...` · `P-Early-Media: supported` · `P-Asserted-Identity` |
+| 2 | Integratel → Kamailio | 183 | `Require: 100rel` · `RSeq: 1` · `P-Early-Media: supported` · SDP |
+| 3 | FreeSWITCH → Integratel | PRACK | `RAck: 1 <CSeq> INVITE` |
+| 4 | Integratel → Kamailio | 200 OK (PRACK) | `CSeq: ... PRACK` |
+| 5 | Integratel → Kamailio | 183 | `P-Early-Media: sendrecv` |
+| 6 | FreeSWITCH → Softphone | 183/180 | `P-Early-Media: sendrecv` + SDP |
+
+---
+
+### 5. Troubleshooting
+
+#### 5.1 Capas de Decisión
+
+| Capa | Componente | Decisión | Síntoma si falla |
+|------|------------|----------|------------------|
+| L1 | FreeSWITCH dialplan | ¿Prefijo hace match y bridge a Kamailio? | "Número no válido" / sin INVITE hacia Kamailio |
+| L2 | FreeSWITCH → Kamailio | ¿INVITE sale hacia Kamailio? | Sin INVITE en sngrep |
+| L3 | Kamailio drouting | ¿dr_rules matchea y elige gw60? | 404/478/500 desde Kamailio |
+| L4 | Kamailio → Integratel | ¿Integratel acepta IP/From/codecs? | 403/407/488/503 de Integratel |
+
+#### 5.2 Comandos de Diagnóstico
+
+**Kamailio:**
+```bash
+kamcmd drouting.reload                 # Recargar tras editar BD
+kamcmd drouting.dump                   # Ver reglas en memoria
+kamcmd debug.level 3                   # Subir verbosidad (bajar a 1 al terminar)
+journalctl -u kamailio -f              # Logs en vivo
+```
+
+**FreeSWITCH:**
+```bash
+fs_cli -x "sofia status"
+fs_cli -x "sofia status profile internal"
+fs_cli -x "sofia global siptrace on"
+fs_cli -x "originate sofia/external/226717402002@10.10.22.4:5060 &echo"
+```
+
+**Captura SIP:**
+```bash
+sngrep host 10.35.13.100               # Filtrar por Integratel
+sngrep -O /tmp/test.pcap               # Guardar a archivo
+```
+
+**RTPEngine:**
+```bash
+rtpengine-ctl list sessions
+rtpengine-ctl list totals
+```
+
+**BD Kamailio (consultas de diagnóstico):**
+```bash
+mysql -u kamailio -p'$KAMAILIO_DB_PASS' kamailio -e \
+  "SELECT gwid,address,strip,description FROM dr_gateways WHERE gwid=60;"
+
+mysql -u kamailio -p'$KAMAILIO_DB_PASS' kamailio -e \
+  "SELECT ruleid,groupid,prefix,gwlist FROM dr_rules WHERE groupid=8000 ORDER BY prefix;"
+```
+
+#### 5.3 Catálogo de Fallas
+
+| Síntoma | Capa | Causa | Solución |
+|---------|------|-------|----------|
+| Sin INVITE hacia Kamailio | L1 | Dialplan no matchea | Revisar `/etc/freeswitch/dialplan/from-pbx.xml` |
+| 404/478 desde Kamailio | L3 | `dr_rules` no matchea o no recargado | `kamcmd drouting.reload` |
+| 403 Forbidden de Integratel | L4 | IP origen no autorizada | Verificar que sale desde 10.124.194.14 |
+| 488 Not Acceptable | L4 | Codecs incompatibles | Alinear codecs en SDP |
+| Sin ringback (pero conecta) | L4 | P-Early-Media no negociado | Verificar checkpoints 1-6 |
+| 420 Bad Extension | L4 | 100rel no anunciado | Verificar `Supported: 100rel` en INVITE |
+| 183 se retransmite sin avanzar | L4 | PRACK no enviado | Verificar `RAck` en PRACK |
+| Permisos al reiniciar | — | Permisos de archivo | `chown dsiprouter:kamailio`, `chmod 640` |
+
+---
+
+### 6. Archivos de Configuración
+
+| Archivo | Función |
+|---------|---------|
+| `/etc/kamailio/kamailio.cfg` | Config principal Kamailio |
+| `/etc/freeswitch/dialplan/from-pbx.xml` | Dialplan llamadas salientes FS |
+| `/etc/freeswitch/dialplan/to-kamailio.xml` | Dialplan llamadas entrantes FS |
+| `/etc/freeswitch/sip_profiles/internal.xml` | Profile interno FS (:5080) |
+| `/etc/freeswitch/sip_profiles/external.xml` | Profile externo FS (:5062) |
+
+---
+
+### 7. Variables de Diálogo Kamailio
+
+| Variable | Valor | Uso |
+|----------|-------|-----|
+| `$dlg_var(pem_supported)` | "1" | Marca para agregar `P-Early-Media: sendrecv` en 183 |
+| `$avp(calltype)` | "outbound" | Tipo de llamada |
+| `$avp(dr_groupid)` | 8000 | Grupo de drouting para salientes |

@@ -1,0 +1,777 @@
+<title>Roles y Módulos</title>
+<style>
+  :root {
+    --paper: #EEF1F5;
+    --surface: #FFFFFF;
+    --surface-2: #F6F8FA;
+    --ink: #151A24;
+    --ink-muted: #55606F;
+    --ink-faint: #8994A3;
+    --line: #DCE2E9;
+    --line-soft: #E9EDF1;
+    --accent: #0C7C84;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #E1F1F1;
+    --role-super: #B83A32;
+    --role-super-bg: #FAEBE9;
+    --role-admin: #96690C;
+    --role-admin-bg: #FBF2E1;
+    --role-user: #2E4E8F;
+    --role-user-bg: #E9EEF9;
+    --code-bg: #F2F4F7;
+    --shadow: 0 1px 2px rgba(20, 26, 38, 0.06), 0 8px 24px rgba(20, 26, 38, 0.05);
+    --font-head: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #10141C;
+      --surface: #171D28;
+      --surface-2: #1D2432;
+      --ink: #E7EAEF;
+      --ink-muted: #97A2B3;
+      --ink-faint: #626E80;
+      --line: #2A3140;
+      --line-soft: #232A38;
+      --accent: #3FC7CF;
+      --accent-ink: #0B1015;
+      --accent-soft: #143336;
+      --role-super: #E2766C;
+      --role-super-bg: #2C1917;
+      --role-admin: #E3B14D;
+      --role-admin-bg: #2A2312;
+      --role-user: #8FADEE;
+      --role-user-bg: #18223A;
+      --code-bg: #1B212E;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #10141C;
+    --surface: #171D28;
+    --surface-2: #1D2432;
+    --ink: #E7EAEF;
+    --ink-muted: #97A2B3;
+    --ink-faint: #626E80;
+    --line: #2A3140;
+    --line-soft: #232A38;
+    --accent: #3FC7CF;
+    --accent-ink: #0B1015;
+    --accent-soft: #143336;
+    --role-super: #E2766C;
+    --role-super-bg: #2C1917;
+    --role-admin: #E3B14D;
+    --role-admin-bg: #2A2312;
+    --role-user: #8FADEE;
+    --role-user-bg: #18223A;
+    --code-bg: #1B212E;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .shell {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead {
+    padding: 56px 0 36px;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+  }
+  h1.doc-title {
+    font-family: var(--font-head);
+    font-weight: 500;
+    font-size: clamp(32px, 4.2vw, 46px);
+    line-height: 1.12;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    max-width: 20ch;
+  }
+  .doc-subtitle {
+    font-size: 17px;
+    color: var(--ink-muted);
+    max-width: 62ch;
+    margin: 0 0 26px;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-size: 13.5px;
+    color: var(--ink-muted);
+  }
+  .meta-row div { display: flex; flex-direction: column; gap: 2px; }
+  .meta-row span.k {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .meta-row span.v { color: var(--ink); font-weight: 600; }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 8px;
+    border-radius: 100px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12.5px;
+    width: fit-content;
+  }
+
+  /* ---------- Layout: rail + content ---------- */
+  .layout {
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: 56px;
+    padding-top: 40px;
+    align-items: start;
+  }
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; }
+    .rail { position: static !important; order: 2; }
+  }
+
+  .rail {
+    position: sticky;
+    top: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .rail h2 {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+    font-weight: 700;
+  }
+  .toc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .toc a {
+    display: block;
+    padding: 5px 0;
+    color: var(--ink-muted);
+    text-decoration: none;
+    font-size: 13.5px;
+    border-left: 2px solid transparent;
+    padding-left: 10px;
+    margin-left: -11px;
+    transition: color .15s, border-color .15s;
+  }
+  .toc a:hover { color: var(--ink); border-color: var(--line); }
+  .toc a.sub { padding-left: 22px; font-size: 13px; color: var(--ink-faint); }
+
+  .rail-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .rail-card p { margin: 0; font-size: 13px; color: var(--ink-muted); }
+  .rail-card + .rail-card { margin-top: 0; }
+
+  .decisions { display: flex; flex-direction: column; gap: 10px; }
+  .decision {
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-muted);
+    padding-left: 14px;
+    border-left: 2px solid var(--accent);
+  }
+  .decision b { color: var(--ink); }
+
+  /* ---------- Content ---------- */
+  .content { min-width: 0; max-width: 780px; }
+  section.doc-section { padding-top: 8px; scroll-margin-top: 24px; }
+  section.doc-section + section.doc-section {
+    margin-top: 52px;
+    padding-top: 44px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .sec-num {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  h2.sec-title {
+    font-family: var(--font-head);
+    font-size: 26px;
+    font-weight: 500;
+    margin: 4px 0 18px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--font-head);
+    font-size: 18.5px;
+    font-weight: 600;
+    margin: 30px 0 12px;
+  }
+  .content p { margin: 0 0 15px; max-width: 68ch; color: var(--ink); }
+  .content p.lede { font-size: 17px; color: var(--ink-muted); }
+  .content ul, .content ol { margin: 0 0 15px; padding-left: 22px; max-width: 66ch; }
+  .content li { margin-bottom: 6px; }
+  strong { font-weight: 650; }
+
+  code {
+    font-family: var(--font-mono);
+    background: var(--code-bg);
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    font-size: 0.87em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  pre code { background: none; padding: 0; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; margin: 0 0 18px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 480px; }
+  thead th {
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 700;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--ink);
+    vertical-align: top;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td code { white-space: nowrap; }
+  td.center, th.center { text-align: center; }
+  .yes { color: var(--accent); font-weight: 700; }
+  .no { color: var(--ink-faint); }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 100px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-family: var(--font-body);
+  }
+  .badge.super { background: var(--role-super-bg); color: var(--role-super); }
+  .badge.admin { background: var(--role-admin-bg); color: var(--role-admin); }
+  .badge.user  { background: var(--role-user-bg); color: var(--role-user); }
+
+  .callout {
+    display: flex;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 0 0 18px;
+    font-size: 14.5px;
+  }
+  .callout.risk { border-left-color: var(--role-super); }
+  .callout b { display: block; margin-bottom: 3px; font-size: 12.5px; letter-spacing: .03em; text-transform: uppercase; color: var(--ink-faint); }
+  .callout p { margin: 0; color: var(--ink); max-width: none; }
+
+  /* Hierarchy diagram */
+  .hierarchy {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 8px 0 22px;
+    font-size: 13.5px;
+  }
+  .h-node {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .h-node .role-name { font-weight: 700; font-size: 14.5px; }
+  .h-node .role-desc { color: var(--ink-muted); font-size: 12.5px; line-height: 1.45; }
+  .h-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 16px;
+  }
+  @media (max-width: 620px) {
+    .hierarchy { flex-direction: column; gap: 8px; }
+    .h-arrow { width: auto; transform: rotate(90deg); padding: 2px 0; }
+  }
+
+  .checklist { list-style: none; margin: 0 0 15px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .checklist li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .checklist .box {
+    flex: none;
+    width: 16px; height: 16px;
+    border: 1.5px solid var(--ink-faint);
+    border-radius: 4px;
+    margin-top: 3px;
+  }
+
+  .footer-note {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <div class="eyebrow"><span class="dot"></span>ApoloBilling · Documento de Producto</div>
+    <h1 class="doc-title">Gestión de Usuarios y Permisos por Módulo</h1>
+    <p class="doc-subtitle">Rediseño del modelo de roles — de un esquema binario "superadmin ve todo / el resto ve lo mismo" a tres roles con jerarquía real y visibilidad de módulos configurable por usuario.</p>
+    <div class="meta-row">
+      <div><span class="k">Autor</span><span class="v">Jesus Bazan</span></div>
+      <div><span class="k">Versión</span><span class="v">1.0</span></div>
+      <div><span class="k">Fecha</span><span class="v">23 sep. 2026</span></div>
+      <div><span class="k">Estado</span><span class="status-pill">Propuesta — pendiente de validación</span></div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="rail">
+      <div>
+        <h2>Contenido</h2>
+        <ul class="toc">
+          <li><a href="#resumen">1. Resumen ejecutivo</a></li>
+          <li><a href="#contexto">2. Contexto actual</a></li>
+          <li><a href="#objetivos">3. Objetivos y alcance</a></li>
+          <li><a href="#roles">4. Roles y capacidades</a></li>
+          <li><a href="#modulos">5. Catálogo de módulos</a></li>
+          <li><a href="#datos">6. Modelo de datos</a></li>
+          <li><a href="#reglas">7. Reglas de negocio</a></li>
+          <li><a href="#backend">8. Cambios de backend</a></li>
+          <li><a href="#frontend">9. Cambios de frontend</a></li>
+          <li><a href="#migracion">10. Migración de datos</a></li>
+          <li><a href="#fases">11. Plan por fases</a></li>
+          <li><a href="#aceptacion">12. Criterios de aceptación</a></li>
+          <li><a href="#riesgos">13. Riesgos</a></li>
+          <li><a href="#abiertas">14. Preguntas abiertas</a></li>
+        </ul>
+      </div>
+      <div>
+        <h2>Decisiones ya validadas</h2>
+        <div class="decisions">
+          <div class="decision"><b>Solo visibilidad.</b> No hay permisos de acción (ver/editar) dentro de un módulo — queda para una fase futura.</div>
+          <div class="decision"><b>Admin = acceso completo</b> salvo un set fijo exclusivo de fábrica (infra core / config avanzada).</div>
+          <div class="decision"><b>Sin jerarquía entre Admins.</b> Un solo pool de Usuarios, cualquier Admin los gestiona.</div>
+        </div>
+      </div>
+    </nav>
+
+    <main class="content">
+
+      <section class="doc-section" id="resumen">
+        <div class="sec-num">01</div>
+        <h2 class="sec-title">Resumen ejecutivo</h2>
+        <p class="lede">Hoy el sistema distingue en la práctica solo dos niveles: <em>superadmin</em> (ve todo) y <em>todos los demás</em> (ven un subconjunto fijo, hardcodeado por ruta en el frontend). No existe forma de que el cliente administre el acceso de su propio personal.</p>
+        <p>Este documento define un modelo de tres roles con significado real de negocio, y un catálogo de módulos que Superadmin y Admin pueden asignar individualmente a cada usuario "normal", sin tocar código.</p>
+      </section>
+
+      <section class="doc-section" id="contexto">
+        <div class="sec-num">02</div>
+        <h2 class="sec-title">Contexto actual</h2>
+        <p>Verificado directamente en el repo:</p>
+        <ul>
+          <li><code>UserRole</code> ya es <code>Operator | Admin | Superadmin</code>, con <code>level()</code> y <code>can_manage()</code> implementados por jerarquía — reutilizable tal cual.</li>
+          <li><code>main.rs</code> registra casi todas las rutas de administración como <strong>superadmin only</strong>. No existe distinción real de "admin".</li>
+          <li><code>Layout.tsx</code> filtra el menú con un único booleano <code>adminOnly</code> comparado contra <code>role === 'superadmin'</code>. <code>App.tsx</code> protege rutas con <code>requiredRole="superadmin"</code> hardcodeado.</li>
+          <li>No existe ninguna tabla de catálogo de módulos ni de permisos granulares.</li>
+        </ul>
+        <div class="callout risk">
+          <div>
+            <b>Problema central</b>
+            <p><code>operator</code> no tiene hoy ningún propósito de negocio distinto de "no-admin", y no hay manera de que el cliente autogestione qué ve su propio personal sin pedirle un cambio de código a Jesus.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="objetivos">
+        <div class="sec-num">03</div>
+        <h2 class="sec-title">Objetivos y alcance</h2>
+        <ol>
+          <li>Redefinir los tres roles con semántica de negocio clara.</li>
+          <li>Que Superadmin y Admin habiliten o deshabiliten, por usuario, qué módulos ve un usuario "normal".</li>
+          <li>Que la restricción sea real — aplicada en el servidor, no solo ocultando un botón.</li>
+          <li>Migrar usuarios existentes sin dejar a nadie fuera el día del corte.</li>
+          <li>Dejar trazabilidad en auditoría de cada cambio de acceso.</li>
+        </ol>
+        <h3>Fuera de alcance</h3>
+        <ul>
+          <li>Permisos por acción (crear/editar/eliminar) dentro de un módulo.</li>
+          <li>Multi-tenancy real (varias empresas cliente aisladas en la misma instancia).</li>
+          <li>Jerarquía o "propiedad" entre distintos Admin sobre distintos Usuarios.</li>
+          <li>Cambios a la infraestructura de FreeSWITCH/Kamailio en sí.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="roles">
+        <div class="sec-num">04</div>
+        <h2 class="sec-title">Roles y capacidades</h2>
+
+        <div class="hierarchy">
+          <div class="h-node">
+            <span class="badge super">SUPERADMIN</span>
+            <span class="role-name">Jesus — soporte de fábrica</span>
+            <span class="role-desc">Acceso total, incluida infraestructura core del SBC y gestión de administradores.</span>
+          </div>
+          <div class="h-arrow">crea →</div>
+          <div class="h-node">
+            <span class="badge admin">ADMIN</span>
+            <span class="role-name">Administrador del cliente</span>
+            <span class="role-desc">Acceso completo a los módulos operativos/negocio. Crea y gestiona usuarios de su empresa.</span>
+          </div>
+          <div class="h-arrow">crea →</div>
+          <div class="h-node">
+            <span class="badge user">USUARIO</span>
+            <span class="role-name">Personal de otras áreas</span>
+            <span class="role-desc">Solo ve los módulos que Admin o Superadmin le habiliten explícitamente.</span>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Capacidad</th><th class="center">Superadmin</th><th class="center">Admin</th><th class="center">Usuario</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Login / cambiar su propia contraseña</td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center yes">✓</td></tr>
+              <tr><td>Ver módulos operativos/negocio</td><td class="center yes">Todos</td><td class="center yes">Todos</td><td class="center">Solo los habilitados</td></tr>
+              <tr><td>Crear/editar/eliminar cuentas con rol Usuario</td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center no">—</td></tr>
+              <tr><td>Otorgar/quitar módulos a un Usuario</td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center no">—</td></tr>
+              <tr><td>Crear/editar cuentas Admin o Superadmin</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td></tr>
+              <tr><td>Módulos exclusivos de fábrica (Dialplan XML, Routing Legacy, Config. Sistema)</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">—</td></tr>
+              <tr><td>Ver auditoría del sistema</td><td class="center yes">✓</td><td class="center">De su operación</td><td class="center no">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Esta tabla usa el <code>can_manage()</code> que <strong>ya existe</strong> en <code>UserRole</code> (nivel 3 &gt; 2 &gt; 1) — no hay que reinventar la jerarquía, solo empezar a <em>aplicarla</em> en los handlers de <code>/users</code>, hoy ciegamente superadmin-only.</p>
+      </section>
+
+      <section class="doc-section" id="modulos">
+        <div class="sec-num">05</div>
+        <h2 class="sec-title">Catálogo de módulos</h2>
+        <p>Cada módulo tiene una clave estable (<code>module_key</code>), un nombre visible, una sección de menú y un <code>min_role</code>: el rol mínimo que accede sin necesidad de permiso explícito.</p>
+        <ul>
+          <li><code>min_role = usuario</code> → visible para Admin/Superadmin siempre; para Usuario <strong>solo si tiene el permiso explícito</strong>.</li>
+          <li><code>min_role = admin</code> → visible para Admin/Superadmin; nunca asignable a Usuario.</li>
+          <li><code>min_role = superadmin</code> → exclusivo de fábrica; nunca asignable a Admin ni a Usuario.</li>
+        </ul>
+
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>module_key</th><th>Nombre en menú</th><th>Sección</th><th class="center">min_role</th></tr></thead>
+            <tbody>
+              <tr><td><code>dashboard</code></td><td>Panel de Control</td><td>Principal</td><td class="center"><span class="badge user">siempre visible</span></td></tr>
+              <tr><td><code>active_calls</code></td><td>Llamadas Activas</td><td>Principal</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>cdr</code></td><td>Registros CDR</td><td>Principal</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>accounts</code></td><td>Cuentas</td><td>Facturación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>plans</code></td><td>Planes</td><td>Facturación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>balance</code></td><td>Saldos</td><td>Facturación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>zones</code></td><td>Zonas</td><td>Tarifas</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>rates</code></td><td>Tarifas</td><td>Tarifas</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>sip_devices</code></td><td>Dispositivos SIP</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>inbound_routing</code></td><td>Rutas Entrantes</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>outbound_routing</code></td><td>Rutas Salientes</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>carriers</code></td><td>Carriers</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>carrier_groups</code></td><td>Carrier Groups</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>endpoints</code></td><td>Endpoints</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>endpoint_monitor</code></td><td>Monitor de Endpoints</td><td>Operación</td><td class="center"><span class="badge user">usuario</span></td></tr>
+              <tr><td><code>audit_logs</code></td><td>Auditoría</td><td>Sistema</td><td class="center"><span class="badge admin">admin</span></td></tr>
+              <tr><td><code>users</code></td><td>Usuarios y Permisos</td><td>Sistema</td><td class="center"><span class="badge admin">admin</span></td></tr>
+              <tr><td><code>dialplan</code></td><td>Dialplan FreeSWITCH (XML)</td><td>Sistema Avanzado</td><td class="center"><span class="badge super">superadmin</span></td></tr>
+              <tr><td><code>legacy_routing</code></td><td>Routing Legacy</td><td>Sistema Avanzado</td><td class="center"><span class="badge super">superadmin</span></td></tr>
+              <tr><td><code>system_settings</code></td><td>Configuración del Sistema</td><td>Sistema Avanzado</td><td class="center"><span class="badge super">superadmin</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Este catálogo es la propuesta inicial de arranque — queda como <strong>dato de configuración</strong>, no hardcodeado, para poder agregar o quitar módulos sin migración de esquema.</p>
+        <p><code>dashboard</code> se marca <code>always_visible = true</code>: actúa como home tras el login y debe verse siempre, sin requerir grant explícito, para evitar pantallas en blanco.</p>
+      </section>
+
+      <section class="doc-section" id="datos">
+        <div class="sec-num">06</div>
+        <h2 class="sec-title">Modelo de datos</h2>
+
+        <h3>6.1 — Renombrar <code>operator</code> → <code>usuario</code></h3>
+<pre><code>-- 015_rename_role_operator_to_usuario.sql
+BEGIN;
+
+ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_role_check;
+ALTER TABLE usuarios ADD CONSTRAINT usuarios_role_check
+    CHECK (role IN ('usuario', 'admin', 'superadmin', 'operator')); -- alias temporal
+
+UPDATE usuarios SET role = 'usuario' WHERE role = 'operator';
+
+COMMIT;</code></pre>
+        <p>En Rust, <code>UserRole::Operator</code> se renombra a <code>UserRole::Usuario</code> (serde <code>rename = "usuario"</code>). <code>from_str()</code> acepta temporalmente ambos strings como alias durante el corte.</p>
+
+        <h3>6.2 — Catálogo de módulos</h3>
+<pre><code>-- 016_module_catalog.sql
+CREATE TABLE system_modules (
+    id SERIAL PRIMARY KEY,
+    module_key VARCHAR(50) UNIQUE NOT NULL,
+    nombre VARCHAR(100) NOT NULL,
+    seccion VARCHAR(50) NOT NULL,
+    min_role VARCHAR(20) NOT NULL DEFAULT 'usuario'
+        CHECK (min_role IN ('usuario', 'admin', 'superadmin')),
+    always_visible BOOLEAN NOT NULL DEFAULT false,
+    orden INTEGER NOT NULL DEFAULT 0,
+    activo BOOLEAN NOT NULL DEFAULT true
+);
+-- + seed de las 20 filas de la sección 05</code></pre>
+
+        <h3>6.3 — Permisos por usuario</h3>
+<pre><code>-- 017_usuario_modulos.sql
+CREATE TABLE usuario_modulos (
+    id SERIAL PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    module_key VARCHAR(50) NOT NULL REFERENCES system_modules(module_key) ON DELETE CASCADE,
+    otorgado_por INTEGER REFERENCES usuarios(id),
+    otorgado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (usuario_id, module_key)
+);
+CREATE INDEX idx_usuario_modulos_usuario ON usuario_modulos(usuario_id);</code></pre>
+        <p>Solo tiene sentido para cuentas con <code>role = 'usuario'</code>. Para <code>admin</code>/<code>superadmin</code> el acceso se calcula en código a partir del rol — evita duplicar datos y evita que una fila desincronizada rompa el acceso de un admin.</p>
+      </section>
+
+      <section class="doc-section" id="reglas">
+        <div class="sec-num">07</div>
+        <h2 class="sec-title">Reglas de negocio</h2>
+        <p>Todo aplicado en el servidor — no solo en la UI.</p>
+
+        <h3>7.1 — Módulos efectivos de una sesión</h3>
+        <ul>
+          <li>Si <code>role ∈ {admin, superadmin}</code>: módulos efectivos = todos los <code>system_modules</code> con <code>min_role ≤ role</code>.</li>
+          <li>Si <code>role = usuario</code>: módulos efectivos = <code>{dashboard}</code> ∪ <code>usuario_modulos</code> del usuario, filtrado a <code>min_role = usuario</code> y <code>activo = true</code>.</li>
+        </ul>
+
+        <h3>7.2 — Gestión de cuentas</h3>
+        <ul>
+          <li>Guard de ruta pasa de <code>SuperadminUser</code> a <code>AdminUser</code>.</li>
+          <li>Dentro del handler: <code>current_user.role.can_manage(&target.role)</code> antes de editar/eliminar. Un Admin que edita a otro Admin recibe <code>403</code>.</li>
+          <li>Al crear un usuario, el rol solicitado se valida contra lo que el creador puede otorgar: Admin solo <code>usuario</code>; Superadmin, cualquiera.</li>
+        </ul>
+
+        <h3>7.3 — Gestión de módulos</h3>
+        <ul>
+          <li>Solo Admin/Superadmin.</li>
+          <li><code>target_user.role</code> debe ser <code>usuario</code> — si no, <code>400</code>.</li>
+          <li>Los <code>module_key</code> enviados deben existir y tener <code>min_role = usuario</code> — no se puede otorgar un módulo de fábrica burlando el catálogo.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="backend">
+        <div class="sec-num">08</div>
+        <h2 class="sec-title">Cambios de backend (Rust)</h2>
+
+        <h3>apolo-core</h3>
+        <ul>
+          <li>Renombrar <code>UserRole::Operator</code> → <code>UserRole::Usuario</code> (alias de parseo <code>"operator"</code>).</li>
+          <li>Nuevos modelos: <code>SystemModule</code>, <code>ModuleGrant</code>.</li>
+          <li><code>UserRole::effective_modules(&self, grants, catalog)</code> — centraliza la regla 7.1.</li>
+        </ul>
+
+        <h3>apolo-auth</h3>
+        <ul>
+          <li>Nuevo extractor <code>ModuleAccess&lt;"cdr"&gt;</code>, análogo a <code>AdminUser</code>/<code>SuperadminUser</code>, que lee la lista de módulos embebida en el JWT.</li>
+          <li><code>Claims</code> suma <code>modules: Vec&lt;String&gt;</code>, calculado en el login — sin consulta a DB por request.</li>
+        </ul>
+        <div class="callout">
+          <div>
+            <b>Trade-off aceptado</b>
+            <p>Si a un Usuario logueado le quitan un módulo, el cambio tarda hasta <code>JWT_EXPIRATION_SECS</code> (30 min hoy) en aplicarse — salvo que el Admin fuerce su cierre de sesión desde <code>Usuarios</code>.</p>
+          </div>
+        </div>
+
+        <h3>apolo-api</h3>
+        <ul>
+          <li><code>GET /api/v1/modules</code> — catálogo completo (Admin+).</li>
+          <li><code>GET /api/v1/users/{id}/modules</code> — módulos otorgados (Admin+).</li>
+          <li><code>PUT /api/v1/users/{id}/modules</code> — reemplaza el set completo (Admin+, reglas 7.3).</li>
+          <li>Handlers de <code>/users/*</code> existentes: guard <code>SuperadminUser</code> → <code>AdminUser</code> + <code>can_manage()</code>.</li>
+          <li><code>GET /auth/me</code> suma <code>"modules": [...]</code>.</li>
+          <li>Auditoría: <code>user_created</code>, <code>user_role_changed</code>, <code>module_grant_updated</code>, <code>user_force_logout</code>.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="frontend">
+        <div class="sec-num">09</div>
+        <h2 class="sec-title">Cambios de frontend (React)</h2>
+        <ul>
+          <li><strong>types/index.ts</strong> — <code>UserRole</code> pasa a <code>'usuario' | 'admin' | 'superadmin'</code>; <code>CurrentUser</code> suma <code>modules: string[]</code>.</li>
+          <li><strong>App.tsx</strong> — <code>requiredRole="superadmin"</code> se reemplaza por <code>requiredModule="carriers"</code> usando las mismas claves del catálogo backend.</li>
+          <li><strong>Layout.tsx</strong> — el filtro de menú deja el booleano <code>adminOnly</code> y pasa a comprobar si <code>moduleKey</code> está en los módulos efectivos de <code>currentUser</code>.</li>
+          <li><strong>Users.tsx</strong> — selector de rol restringido por quién crea; nueva pestaña "Módulos visibles" (checklist por sección) con botón "Guardar módulos"; acción "Cerrar sesión del usuario".</li>
+        </ul>
+        <div class="callout risk">
+          <div>
+            <b>Importante</b>
+            <p>Ocultar el ítem del menú es solo UX. La seguridad real la da el guard de módulo en el backend — nunca confiar solo en el ocultamiento del menú.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="doc-section" id="migracion">
+        <div class="sec-num">10</div>
+        <h2 class="sec-title">Migración de datos existentes</h2>
+        <div class="callout risk">
+          <div>
+            <b>Riesgo principal</b>
+            <p>Hoy cualquier cuenta <code>operator</code> ya ve Dashboard, Llamadas, CDR, Cuentas, Planes, Saldos, Zonas y Tarifas. Migrarlas a <code>usuario</code> con cero módulos otorgados las deja solo con Dashboard el día del corte — incidente de soporte garantizado.</p>
+          </div>
+        </div>
+        <p><strong>Mitigación obligatoria:</strong> otorgar automáticamente, al migrar, el mismo set de módulos que ya tenían:</p>
+<pre><code>INSERT INTO usuario_modulos (usuario_id, module_key, otorgado_por)
+SELECT u.id, m.module_key, NULL
+FROM usuarios u
+CROSS JOIN system_modules m
+WHERE u.role = 'usuario'
+  AND m.module_key IN ('dashboard','active_calls','cdr','accounts',
+                        'plans','balance','zones','rates')
+ON CONFLICT DO NOTHING;</code></pre>
+        <p>A partir de ahí, Admin/Superadmin ajustan por usuario según corresponda.</p>
+      </section>
+
+      <section class="doc-section" id="fases">
+        <div class="sec-num">11</div>
+        <h2 class="sec-title">Plan de implementación por fases</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="center">Fase</th><th>Contenido</th><th>Entregable</th></tr></thead>
+            <tbody>
+              <tr><td class="center"><strong>0</strong></td><td>Validación del PRD</td><td>Sign-off del catálogo y de las 3 decisiones de alcance</td></tr>
+              <tr><td class="center"><strong>1</strong></td><td>Backend — esquema</td><td>Migraciones 015/016/017, seed del catálogo, rename en Rust</td></tr>
+              <tr><td class="center"><strong>2</strong></td><td>Backend — API y enforcement</td><td>Endpoints de módulos, <code>Claims.modules</code>, <code>ModuleAccess</code>, <code>/users/*</code> a Admin+, auditoría</td></tr>
+              <tr><td class="center"><strong>3</strong></td><td>Frontend</td><td><code>ProtectedRoute</code> por módulo, menú dinámico, UI de asignación en Users.tsx</td></tr>
+              <tr><td class="center"><strong>4</strong></td><td>Migración de datos</td><td>Backfill de módulos, verificación en staging</td></tr>
+              <tr><td class="center"><strong>5</strong></td><td>QA y rollout</td><td>Matriz de pruebas por rol, despliegue, aviso al Admin del cliente</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Fases 1–2 pueden avanzar en paralelo con Fase 3 una vez el contrato de API esté congelado.</p>
+      </section>
+
+      <section class="doc-section" id="aceptacion">
+        <div class="sec-num">12</div>
+        <h2 class="sec-title">Criterios de aceptación</h2>
+        <ul class="checklist">
+          <li><span class="box"></span>Un Superadmin puede crear un Admin; un Admin no puede crear otro Admin ni un Superadmin (403).</li>
+          <li><span class="box"></span>Un Admin puede crear un Usuario y elegir qué módulos ve.</li>
+          <li><span class="box"></span>Un Usuario sin módulos otorgados solo ve el Dashboard al iniciar sesión.</li>
+          <li><span class="box"></span>Acceso por URL directa a un módulo no otorgado responde 403 en el backend.</li>
+          <li><span class="box"></span>Forzar cierre de sesión aplica el cambio de módulos de inmediato.</li>
+          <li><span class="box"></span><code>dialplan</code>, <code>legacy_routing</code> y <code>system_settings</code> nunca son asignables, ni para Admin.</li>
+          <li><span class="box"></span>Las cuentas <code>operator</code> existentes conservan su acceso actual tras la migración.</li>
+          <li><span class="box"></span>Cada cambio de módulo o de rol queda registrado en <code>audit_logs</code>.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section" id="riesgos">
+        <div class="sec-num">13</div>
+        <h2 class="sec-title">Riesgos y mitigaciones</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Riesgo</th><th>Mitigación</th></tr></thead>
+            <tbody>
+              <tr><td>Seguridad "de mentira" (solo se oculta el menú)</td><td>Guard de módulo aplicado en backend; frontend es solo UX</td></tr>
+              <tr><td>Usuarios <code>operator</code> pierden acceso el día del corte</td><td>Backfill automático obligatorio, no opcional</td></tr>
+              <tr><td>Cambios de permiso tardan hasta 30 min en aplicar (TTL del JWT)</td><td>Botón de "forzar cierre de sesión" desde Usuarios</td></tr>
+              <tr><td>Referencias a <code>"operator"</code> hardcodeadas en otras partes del repo</td><td><code>grep -ri operator</code> sobre todo el repo antes de cerrar Fase 1</td></tr>
+              <tr><td>Catálogo desincronizado si se agrega una página sin sumarla</td><td>Checklist de PR: toda página nueva declara su <code>module_key</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="doc-section" id="abiertas">
+        <div class="sec-num">14</div>
+        <h2 class="sec-title">Preguntas abiertas / trabajo futuro</h2>
+        <ul>
+          <li>¿Se quiere, en una Fase 2, granularidad de acciones (ver vs. editar) dentro de un módulo? Fuera de alcance por ahora, por decisión explícita.</li>
+          <li>¿<code>audit_logs</code> debería ser parcialmente visible para Usuario en el futuro (su propio historial)?</li>
+          <li>Si en el futuro se necesita multi-tenant real, el modelo de "un solo pool de Admin/Usuario sin jerarquía" habría que revisitarlo — hoy descartado por decisión del usuario.</li>
+        </ul>
+      </section>
+
+      <p class="footer-note">ApoloBilling — Documento interno de planificación. Fuente también disponible en <code>docs/PRD_USER_MANAGEMENT_MODULES.md</code> dentro del repositorio.</p>
+    </main>
+  </div>
+</div>
