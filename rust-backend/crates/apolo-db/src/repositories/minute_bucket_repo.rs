@@ -7,9 +7,8 @@
 
 use apolo_core::{
     models::{
-        AccountBucketConfig, BillingModel, BucketConfig, BucketType, MinuteBucketAddition,
-        MinuteBucketAlert, MinuteBucketCycle, MinuteBucketReportRow, PlanBucketConfig,
-        ProrationMode,
+        AccountBucketConfig, BucketConfig, BucketType, MinuteBucketAddition, MinuteBucketAlert,
+        MinuteBucketCycle, MinuteBucketReportRow, PlanBucketConfig, ProrationMode,
     },
     AppError, AppResult,
 };
@@ -102,10 +101,13 @@ impl PgMinuteBucketRepository {
 
     /// Read a plan's minute-bucket template.
     #[instrument(skip(self))]
-    pub async fn get_plan_bucket_config(&self, plan_id: i32) -> AppResult<Option<PlanBucketConfig>> {
-        let row = sqlx::query_as::<_, (i32, String, Option<String>, i32, String, Option<Decimal>, Option<String>)>(
+    pub async fn get_plan_bucket_config(
+        &self,
+        plan_id: i32,
+    ) -> AppResult<Option<PlanBucketConfig>> {
+        let row = sqlx::query_as::<_, (i32, String, i32, String, Option<Decimal>, Option<String>)>(
             r#"
-            SELECT id, billing_model, bucket_type, included_minutes, proration_mode,
+            SELECT id, bucket_type, included_minutes, proration_mode,
                    overage_flat_rate_per_minute, overage_tariff_group
             FROM plans WHERE id = $1
             "#,
@@ -114,17 +116,20 @@ impl PgMinuteBucketRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
-            error!("Database error reading plan bucket config {}: {}", plan_id, e);
+            error!(
+                "Database error reading plan bucket config {}: {}",
+                plan_id, e
+            );
             AppError::Database(format!("Failed to read plan bucket config: {}", e))
         })?;
 
         Ok(row.map(
-            |(id, billing_model, bucket_type, included_minutes, proration_mode, flat_rate, group)| {
+            |(id, bucket_type, included_minutes, proration_mode, flat_rate, group)| {
                 PlanBucketConfig {
                     plan_id: id,
                     config: BucketConfig {
-                        billing_model: BillingModel::from_str(&billing_model),
-                        bucket_type: bucket_type.and_then(|s| BucketType::from_str(&s)),
+                        bucket_type: BucketType::from_str(&bucket_type)
+                            .unwrap_or(BucketType::Control),
                         included_minutes,
                         proration_mode: ProrationMode::from_str(&proration_mode),
                         overage_flat_rate_per_minute: flat_rate,
@@ -142,24 +147,20 @@ impl PgMinuteBucketRepository {
         plan_id: i32,
         cfg: &BucketConfig,
     ) -> AppResult<PlanBucketConfig> {
-        let bucket_type = cfg.bucket_type.map(|b| b.to_string());
-
         sqlx::query(
             r#"
             UPDATE plans
-            SET billing_model = $2,
-                bucket_type = $3,
-                included_minutes = $4,
-                proration_mode = $5,
-                overage_flat_rate_per_minute = $6,
-                overage_tariff_group = $7,
+            SET bucket_type = $2,
+                included_minutes = $3,
+                proration_mode = $4,
+                overage_flat_rate_per_minute = $5,
+                overage_tariff_group = $6,
                 updated_at = NOW()
             WHERE id = $1
             "#,
         )
         .bind(plan_id)
-        .bind(cfg.billing_model.to_string())
-        .bind(&bucket_type)
+        .bind(cfg.bucket_type.to_string())
         .bind(cfg.included_minutes)
         .bind(cfg.proration_mode.to_string())
         .bind(cfg.overage_flat_rate_per_minute)
@@ -167,7 +168,10 @@ impl PgMinuteBucketRepository {
         .execute(&self.pool)
         .await
         .map_err(|e| {
-            error!("Database error updating plan bucket config {}: {}", plan_id, e);
+            error!(
+                "Database error updating plan bucket config {}: {}",
+                plan_id, e
+            );
             AppError::Database(format!("Failed to update plan bucket config: {}", e))
         })?;
 
@@ -186,9 +190,20 @@ impl PgMinuteBucketRepository {
         &self,
         account_id: i32,
     ) -> AppResult<Option<AccountBucketConfig>> {
-        let row = sqlx::query_as::<_, (i32, String, Option<String>, i32, String, Option<Decimal>, Option<String>, Option<String>)>(
+        let row = sqlx::query_as::<
+            _,
+            (
+                i32,
+                String,
+                i32,
+                String,
+                Option<Decimal>,
+                Option<String>,
+                Option<String>,
+            ),
+        >(
             r#"
-            SELECT id, billing_model, bucket_type, included_minutes, proration_mode,
+            SELECT id, bucket_type, included_minutes, proration_mode,
                    overage_flat_rate_per_minute, overage_tariff_group, notification_email
             FROM accounts WHERE id = $1
             "#,
@@ -197,17 +212,20 @@ impl PgMinuteBucketRepository {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| {
-            error!("Database error reading account bucket config {}: {}", account_id, e);
+            error!(
+                "Database error reading account bucket config {}: {}",
+                account_id, e
+            );
             AppError::Database(format!("Failed to read account bucket config: {}", e))
         })?;
 
         Ok(row.map(
-            |(id, billing_model, bucket_type, included_minutes, proration_mode, flat_rate, group, email)| {
+            |(id, bucket_type, included_minutes, proration_mode, flat_rate, group, email)| {
                 AccountBucketConfig {
                     account_id: id,
                     config: BucketConfig {
-                        billing_model: BillingModel::from_str(&billing_model),
-                        bucket_type: bucket_type.and_then(|s| BucketType::from_str(&s)),
+                        bucket_type: BucketType::from_str(&bucket_type)
+                            .unwrap_or(BucketType::Control),
                         included_minutes,
                         proration_mode: ProrationMode::from_str(&proration_mode),
                         overage_flat_rate_per_minute: flat_rate,
@@ -227,25 +245,21 @@ impl PgMinuteBucketRepository {
         cfg: &BucketConfig,
         notification_email: Option<&str>,
     ) -> AppResult<AccountBucketConfig> {
-        let bucket_type = cfg.bucket_type.map(|b| b.to_string());
-
         sqlx::query(
             r#"
             UPDATE accounts
-            SET billing_model = $2,
-                bucket_type = $3,
-                included_minutes = $4,
-                proration_mode = $5,
-                overage_flat_rate_per_minute = $6,
-                overage_tariff_group = $7,
-                notification_email = COALESCE($8, notification_email),
+            SET bucket_type = $2,
+                included_minutes = $3,
+                proration_mode = $4,
+                overage_flat_rate_per_minute = $5,
+                overage_tariff_group = $6,
+                notification_email = COALESCE($7, notification_email),
                 updated_at = NOW()
             WHERE id = $1
             "#,
         )
         .bind(account_id)
-        .bind(cfg.billing_model.to_string())
-        .bind(&bucket_type)
+        .bind(cfg.bucket_type.to_string())
         .bind(cfg.included_minutes)
         .bind(cfg.proration_mode.to_string())
         .bind(cfg.overage_flat_rate_per_minute)
@@ -254,7 +268,10 @@ impl PgMinuteBucketRepository {
         .execute(&self.pool)
         .await
         .map_err(|e| {
-            error!("Database error updating account bucket config {}: {}", account_id, e);
+            error!(
+                "Database error updating account bucket config {}: {}",
+                account_id, e
+            );
             AppError::Database(format!("Failed to update account bucket config: {}", e))
         })?;
 
@@ -287,7 +304,10 @@ impl PgMinuteBucketRepository {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
-                error!("Database error reading bucket cycle for account {}: {}", account_id, e);
+                error!(
+                    "Database error reading bucket cycle for account {}: {}",
+                    account_id, e
+                );
                 AppError::Database(format!("Failed to read bucket cycle: {}", e))
             })?;
 
@@ -353,7 +373,10 @@ impl PgMinuteBucketRepository {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
-                error!("Database error opening bucket cycle for account {}: {}", account_id, e);
+                error!(
+                    "Database error opening bucket cycle for account {}: {}",
+                    account_id, e
+                );
                 AppError::Database(format!("Failed to open bucket cycle: {}", e))
             })?;
 
@@ -363,7 +386,9 @@ impl PgMinuteBucketRepository {
             None => self
                 .get_cycle_for_date(account_id, today)
                 .await?
-                .ok_or_else(|| AppError::Internal("Failed to open or read bucket cycle".to_string())),
+                .ok_or_else(|| {
+                    AppError::Internal("Failed to open or read bucket cycle".to_string())
+                }),
         }
     }
 
@@ -388,7 +413,10 @@ impl PgMinuteBucketRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| {
-                error!("Database error updating cycle {} included_minutes: {}", cycle.id, e);
+                error!(
+                    "Database error updating cycle {} included_minutes: {}",
+                    cycle.id, e
+                );
                 AppError::Database(format!("Failed to update cycle: {}", e))
             })?;
 
@@ -408,7 +436,10 @@ impl PgMinuteBucketRepository {
             .fetch_all(&self.pool)
             .await
             .map_err(|e| {
-                error!("Database error reading bucket history for account {}: {}", account_id, e);
+                error!(
+                    "Database error reading bucket history for account {}: {}",
+                    account_id, e
+                );
                 AppError::Database(format!("Failed to read bucket history: {}", e))
             })?;
 
@@ -418,21 +449,25 @@ impl PgMinuteBucketRepository {
     /// Additions registered for a given cycle (most recent first).
     #[instrument(skip(self))]
     pub async fn additions_for_cycle(&self, cycle_id: i32) -> AppResult<Vec<MinuteBucketAddition>> {
-        let rows = sqlx::query_as::<_, (i32, i32, i32, i32, Option<String>, String, DateTime<Utc>)>(
-            r#"
+        let rows =
+            sqlx::query_as::<_, (i32, i32, i32, i32, Option<String>, String, DateTime<Utc>)>(
+                r#"
             SELECT id, account_id, cycle_id, minutes_added, reason, created_by, created_at
             FROM minute_bucket_additions
             WHERE cycle_id = $1
             ORDER BY created_at DESC
             "#,
-        )
-        .bind(cycle_id)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error reading additions for cycle {}: {}", cycle_id, e);
-            AppError::Database(format!("Failed to read additions: {}", e))
-        })?;
+            )
+            .bind(cycle_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Database error reading additions for cycle {}: {}",
+                    cycle_id, e
+                );
+                AppError::Database(format!("Failed to read additions: {}", e))
+            })?;
 
         Ok(rows
             .into_iter()
@@ -536,7 +571,7 @@ impl PgMinuteBucketRepository {
         let (cycle_start, _) = month_bounds(month);
 
         let rows = sqlx::query_as::<_, (
-            i32, String, Option<String>, Option<String>, i32, bool, i32, i64,
+            i32, String, Option<String>, String, i32, bool, i32, i64,
             Decimal, Decimal, Decimal, Decimal, String, bool,
         )>(
             r#"
@@ -564,8 +599,7 @@ impl PgMinuteBucketRepository {
             LEFT JOIN (
                 SELECT cycle_id, COUNT(*) AS cnt FROM minute_bucket_additions GROUP BY cycle_id
             ) add_count ON add_count.cycle_id = c.id
-            WHERE a.billing_model = 'minute_bucket'
-                AND ($2::int IS NULL OR a.id = $2)
+            WHERE ($2::int IS NULL OR a.id = $2)
                 AND ($3::text IS NULL OR a.bucket_type = $3)
             ORDER BY a.account_number
             "#,
@@ -628,11 +662,24 @@ impl PgMinuteBucketRepository {
     /// to send them; the caller should just leave them pending or the
     /// billing engine should not enqueue them in the first place.
     #[instrument(skip(self))]
-    pub async fn pending_alerts(&self) -> AppResult<Vec<(MinuteBucketAlert, String, Option<String>)>> {
-        let rows = sqlx::query_as::<_, (
-            i32, i32, i32, i16, String, Option<String>, DateTime<Utc>, Option<DateTime<Utc>>,
-            String, Option<String>,
-        )>(
+    pub async fn pending_alerts(
+        &self,
+    ) -> AppResult<Vec<(MinuteBucketAlert, String, Option<String>)>> {
+        let rows = sqlx::query_as::<
+            _,
+            (
+                i32,
+                i32,
+                i32,
+                i16,
+                String,
+                Option<String>,
+                DateTime<Utc>,
+                Option<DateTime<Utc>>,
+                String,
+                Option<String>,
+            ),
+        >(
             r#"
             SELECT
                 al.id, al.account_id, al.cycle_id, al.threshold_pct, al.status,
@@ -689,14 +736,16 @@ impl PgMinuteBucketRepository {
     /// Mark an alert as successfully sent.
     #[instrument(skip(self))]
     pub async fn mark_alert_sent(&self, alert_id: i32) -> AppResult<()> {
-        sqlx::query("UPDATE minute_bucket_alerts SET status = 'sent', sent_at = NOW() WHERE id = $1")
-            .bind(alert_id)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("Database error marking alert {} sent: {}", alert_id, e);
-                AppError::Database(format!("Failed to mark alert sent: {}", e))
-            })?;
+        sqlx::query(
+            "UPDATE minute_bucket_alerts SET status = 'sent', sent_at = NOW() WHERE id = $1",
+        )
+        .bind(alert_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error marking alert {} sent: {}", alert_id, e);
+            AppError::Database(format!("Failed to mark alert sent: {}", e))
+        })?;
         Ok(())
     }
 
@@ -705,15 +754,17 @@ impl PgMinuteBucketRepository {
     #[instrument(skip(self))]
     pub async fn mark_alert_failed(&self, alert_id: i32, error: &str) -> AppResult<()> {
         warn!("Marking bucket alert {} as failed: {}", alert_id, error);
-        sqlx::query("UPDATE minute_bucket_alerts SET status = 'failed', error_message = $2 WHERE id = $1")
-            .bind(alert_id)
-            .bind(error)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("Database error marking alert {} failed: {}", alert_id, e);
-                AppError::Database(format!("Failed to mark alert failed: {}", e))
-            })?;
+        sqlx::query(
+            "UPDATE minute_bucket_alerts SET status = 'failed', error_message = $2 WHERE id = $1",
+        )
+        .bind(alert_id)
+        .bind(error)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error marking alert {} failed: {}", alert_id, e);
+            AppError::Database(format!("Failed to mark alert failed: {}", e))
+        })?;
         Ok(())
     }
 }

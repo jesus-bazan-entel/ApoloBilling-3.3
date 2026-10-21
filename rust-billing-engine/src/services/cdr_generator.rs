@@ -1,15 +1,13 @@
 // src/services/cdr_generator.rs
 use crate::database::DbPool;
-use crate::services::ReservationManager;
 use crate::services::minute_bucket_manager::{ConsumeOutcome, MinuteBucketManager};
-use crate::models::ConsumeReservationRequest;
 use crate::error::BillingError;
 use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 
 /// Billing increment (seconds) used to round minute-bucket calls. Bucket
 /// minute counting is independent of any matched `rate_cards` row (a bucket
@@ -19,7 +17,6 @@ const BUCKET_BILLING_INCREMENT: i32 = 6;
 
 pub struct CdrGenerator {
     db_pool: DbPool,
-    reservation_mgr: Arc<ReservationManager>,
     minute_bucket_mgr: Arc<MinuteBucketManager>,
 }
 
@@ -36,17 +33,13 @@ pub struct HangupEvent {
     pub hangup_cause: String,
     pub direction: String,
     pub server_id: String,
+    pub source_ip: Option<String>,
 }
 
 impl CdrGenerator {
-    pub fn new(
-        db_pool: DbPool,
-        reservation_mgr: Arc<ReservationManager>,
-        minute_bucket_mgr: Arc<MinuteBucketManager>,
-    ) -> Self {
+    pub fn new(db_pool: DbPool, minute_bucket_mgr: Arc<MinuteBucketManager>) -> Self {
         Self {
             db_pool,
-            reservation_mgr,
             minute_bucket_mgr,
         }
     }
@@ -60,10 +53,12 @@ impl CdrGenerator {
             if is_inbound { "INBOUND - No billing" } else { "OUTBOUND - Billable" }
         );
 
-        // Minute-bucket accounts never write a balance_reservations row, so
-        // check for a bucket hold FIRST. `consume()` returns NotApplicable
-        // for every non-bucket call, in which case we fall through to the
-        // existing balance/CDR logic completely unchanged.
+        // Every outbound call that was actually authorized left a bucket hold
+        // in Redis; `consume()` returns NotApplicable for inbound calls and
+        // for outbound calls that skipped authorization entirely (the
+        // `require_outbound_authorization=false` system setting) — those
+        // still get a best-effort LPM cost lookup below, but never touch a
+        // bucket cycle (there was nothing to reserve against).
         let bucket_outcome = if is_inbound {
             ConsumeOutcome::NotApplicable
         } else {
@@ -86,7 +81,7 @@ impl CdrGenerator {
                 BillingError::Internal(e.to_string())
             })?;
 
-        // Bucket-specific CDR columns (NULL for every non-bucket call)
+        // Bucket-specific CDR columns (NULL for calls that never touched a bucket)
         let (bucket_cycle_id, in_bucket_minutes, bucket_overage_minutes, bucket_overage_cost, overage_rate_applied):
             (Option<i32>, Option<Decimal>, Option<Decimal>, Option<Decimal>, Option<Decimal>) =
             if let ConsumeOutcome::Consumed(ref r) = bucket_outcome {
@@ -101,7 +96,6 @@ impl CdrGenerator {
                 (None, None, None, None, None)
             };
 
-        let has_reservation;
         let account_id: Option<i32>;
         let rate_per_minute: Option<Decimal>;
         let cost: Option<Decimal>;
@@ -109,7 +103,6 @@ impl CdrGenerator {
         if let ConsumeOutcome::Consumed(ref r) = bucket_outcome {
             // Bucket call: cost to the customer is only the overage portion
             // (in-bucket minutes are $0 — already paid for via the bundle).
-            has_reservation = false;
             account_id = Some(r.account_id);
             rate_per_minute = r.overage_rate_applied;
             cost = Some(r.overage_cost);
@@ -118,65 +111,17 @@ impl CdrGenerator {
                 "💰 Bucket call: {} min in-bucket, {} min overage (${} @ {:?}/min)",
                 r.in_bucket_minutes, r.overage_minutes, r.overage_cost, r.overage_rate_applied
             );
+        } else if is_inbound {
+            info!("📞 INBOUND call {} - No billing required", event.uuid);
+            account_id = None;
+            rate_per_minute = None;
+            cost = None;
         } else {
-            // Try to get reservation info (inbound calls won't have reservation)
-            let reservation_row = client
-                .query_opt(
-                    "SELECT br.account_id, br.rate_per_minute, rc.billing_increment
-                     FROM balance_reservations br
-                     LEFT JOIN rate_cards rc ON br.destination_prefix = rc.destination_prefix
-                     WHERE br.call_uuid = $1
-                     ORDER BY br.created_at ASC
-                     LIMIT 1",
-                    &[&event.uuid],
-                )
-                .await
-                .map_err(|e| {
-                    error!("❌ Error querying reservation: {}", e);
-                    BillingError::Database(e)
-                })?;
-
-            has_reservation = reservation_row.is_some();
-            let (acc_id, rate, c) = if let Some(row) = reservation_row {
-                let account_id: i32 = row.try_get(0).map_err(|e| {
-                    error!("❌ Error getting account_id: {}", e);
-                    BillingError::Internal(format!("Column 0 error: {}", e))
-                })?;
-
-                let rate: Decimal = row.try_get(1).map_err(|e| {
-                    error!("❌ Error getting rate_per_minute: {}", e);
-                    BillingError::Internal(format!("Column 1 error: {}", e))
-                })?;
-
-                let increment: i32 = row.try_get::<_, Option<i32>>(2)
-                    .unwrap_or(Some(6))
-                    .unwrap_or(6);
-
-                // Calculate cost with billing increment
-                let rounded_billsec = if increment > 0 && event.billsec > 0 {
-                    ((event.billsec + increment - 1) / increment) * increment
-                } else {
-                    event.billsec
-                };
-
-                let minutes = Decimal::from(rounded_billsec) / Decimal::from(60);
-                let cost = minutes * rate;
-
-                info!(
-                    "💰 Call cost calculation: {}s → {}s ({}s increment) = {} min × ${}/min = ${}",
-                    event.billsec, rounded_billsec, increment, minutes, rate, cost
-                );
-
-                (Some(account_id), Some(rate), Some(cost))
-            } else if is_inbound {
-                info!("📞 INBOUND call {} - No billing required", event.uuid);
-                (None, None, None)
-            } else {
-                // OUTBOUND call without reservation (authorization disabled)
-                // Still calculate cost via LPM rate lookup
-                info!("📊 No reservation for OUTBOUND call {}, performing LPM rate lookup for billing", event.uuid);
-                self.lookup_rate_and_calculate_cost(&event).await
-            };
+            // OUTBOUND call that never touched a bucket (authorization
+            // disabled system-wide). Still calculate cost via LPM rate
+            // lookup so the CDR isn't silently free.
+            info!("📊 No bucket hold for OUTBOUND call {}, performing LPM rate lookup for billing", event.uuid);
+            let (acc_id, rate, c) = self.lookup_rate_and_calculate_cost(&event).await;
             account_id = acc_id;
             rate_per_minute = rate;
             cost = c;
@@ -224,37 +169,6 @@ impl CdrGenerator {
 
         let cdr_id: i64 = row.get("id");
 
-        // Consume reservation if exists (only when there was an actual reservation;
-        // bucket calls already had their cycle updated inside minute_bucket_mgr.consume())
-        if let ConsumeOutcome::Consumed(_) = bucket_outcome {
-            info!("💰 Bucket call {} - cycle already consumed, no dollar reservation to release", event.uuid);
-        } else if has_reservation && account_id.is_some() && cost.is_some() {
-            let consume_req = ConsumeReservationRequest {
-                call_uuid: event.uuid.clone(),
-                actual_cost: cost.unwrap().to_f64().unwrap_or(0.0),
-                actual_billsec: event.billsec,
-            };
-
-            match self.reservation_mgr.consume_reservation(&consume_req).await {
-                Ok(result) => {
-                    info!(
-                        "✅ Reservation consumed: Reserved ${}, Consumed ${}, Released ${}",
-                        result.total_reserved, result.consumed, result.released
-                    );
-                }
-                Err(e) => {
-                    error!("❌ Failed to consume reservation for {}: {}", event.uuid, e);
-                }
-            }
-        } else if is_inbound {
-            info!("📞 INBOUND call {} - No reservation to consume", event.uuid);
-        } else if !has_reservation && cost.is_some() {
-            info!("💰 OUTBOUND call {} - Billing only (no reservation, auth disabled), Cost=${}",
-                event.uuid, cost.unwrap().to_f64().unwrap_or(0.0));
-        } else {
-            info!("ℹ️  No reservation to consume for call {}", event.uuid);
-        }
-
         info!(
             "✅ CDR generated: ID={}, UUID={}, Direction={}, Duration={}s, Billsec={}s, Cost=${:?}, Cause={}",
             cdr_id, event.uuid, event.direction, event.duration, event.billsec,
@@ -265,8 +179,9 @@ impl CdrGenerator {
         Ok(cdr_id)
     }
 
-    /// Lookup rate via LPM and calculate cost for outbound calls without reservation
-    /// (e.g., when authorization is disabled but billing is still required)
+    /// Lookup rate via LPM and calculate cost for outbound calls that never
+    /// touched a bucket (e.g. `require_outbound_authorization=false`).
+    /// Also finds account via sip_endpoints (username or IP) for proper CDR linking.
     async fn lookup_rate_and_calculate_cost(
         &self,
         event: &HangupEvent,
@@ -278,26 +193,77 @@ impl CdrGenerator {
                 return (None, None, None);
             }
         };
-        // 1. Find account by caller number
+
+        // 1. Find account by caller number, with sip_endpoints fallback (username and IP)
         let normalized_caller = event.caller.replace('+', "").replace(' ', "").replace('-', "");
-        let account_id: Option<i32> = match client.query_opt(
+        let source_ip = event.source_ip.as_deref();
+
+        // Try direct account_number match
+        let mut account_id: Option<i32> = match client.query_opt(
             "SELECT id FROM accounts WHERE (account_number = $1 OR account_number = $2) LIMIT 1",
             &[&event.caller, &normalized_caller],
         ).await {
             Ok(Some(row)) => {
                 let id: i32 = row.get(0);
-                info!("📊 Found account {} for caller {}", id, event.caller);
+                info!("📊 Found account {} for caller {} (direct match)", id, event.caller);
                 Some(id)
             }
-            Ok(None) => {
-                info!("ℹ️  No account found for caller {}", event.caller);
-                None
-            }
+            Ok(None) => None,
             Err(e) => {
                 error!("❌ Error looking up account for caller {}: {}", event.caller, e);
                 None
             }
         };
+
+        // Fallback: look up by sip_username (credentials auth)
+        if account_id.is_none() {
+            account_id = match client.query_opt(
+                "SELECT a.id FROM sip_endpoints se
+                 JOIN accounts a ON a.id = se.account_id
+                 WHERE se.sip_username = $1
+                 LIMIT 1",
+                &[&event.caller],
+            ).await {
+                Ok(Some(row)) => {
+                    let id: i32 = row.get(0);
+                    info!("📊 Found account {} for caller {} (via sip_username)", id, event.caller);
+                    Some(id)
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    error!("❌ Error looking up account via sip_username: {}", e);
+                    None
+                }
+            };
+        }
+
+        // For IP-authenticated trunks, look up by source_ip
+        if account_id.is_none() {
+            if let Some(ip) = source_ip {
+                account_id = match client.query_opt(
+                    "SELECT a.id FROM sip_endpoints se
+                     JOIN accounts a ON a.id = se.account_id
+                     WHERE se.host = $1
+                     LIMIT 1",
+                    &[&ip],
+                ).await {
+                    Ok(Some(row)) => {
+                        let id: i32 = row.get(0);
+                        info!("📊 Found account {} for caller {} (via source_ip {})", id, event.caller, ip);
+                        Some(id)
+                    }
+                    Ok(None) => None,
+                    Err(e) => {
+                        error!("❌ Error looking up account via source_ip: {}", e);
+                        None
+                    }
+                };
+            }
+        }
+
+        if account_id.is_none() {
+            info!("ℹ️  No account found for caller {} (normalized: {}) source_ip: {:?}", event.caller, normalized_caller, source_ip);
+        }
 
         // 2. LPM rate lookup for destination
         let normalized_dest = event.callee.replace('+', "");

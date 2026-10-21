@@ -702,7 +702,7 @@ function EndpointModal({
                 <input
                   type="number"
                   value={formData.kam_gwid || ''}
-                  onChange={(e) => setFormData({ ...formData, kam_gwid: parseInt(e.target.value) || undefined })}
+                  onChange={(e) => setFormData({ ...formData, kam_gwid: e.target.value === '' ? undefined : parseInt(e.target.value) })}
                   className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
                 />
               </div>

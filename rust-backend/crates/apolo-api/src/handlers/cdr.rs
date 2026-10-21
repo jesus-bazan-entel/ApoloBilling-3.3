@@ -337,7 +337,7 @@ async fn create_csv_stream(
             if offset == 0 {
                 if let Err(e) = writeln!(
                     &mut csv_data,
-                    "id,call_uuid,account_id,caller,callee,destination,start_time,answer_time,end_time,duration,billsec,rate,cost,hangup_cause,direction"
+                    "id,call_uuid,account_id,caller,callee,destination,start_time,answer_time,end_time,duration,billsec,rate,cost,hangup_cause,direction,bucket_cycle_id,in_bucket_minutes,overage_minutes,overage_cost,overage_rate_applied"
                 ) {
                     error!("Error writing CSV header: {}", e);
                     return None;
@@ -349,7 +349,7 @@ async fn create_csv_stream(
                 let row = CdrExportRow::from(cdr);
                 if let Err(e) = writeln!(
                     &mut csv_data,
-                    "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                    "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                     row.id,
                     row.call_uuid,
                     row.account_id,
@@ -364,7 +364,12 @@ async fn create_csv_stream(
                     row.rate,
                     row.cost,
                     row.hangup_cause,
-                    row.direction
+                    row.direction,
+                    row.bucket_cycle_id,
+                    row.in_bucket_minutes,
+                    row.overage_minutes,
+                    row.overage_cost,
+                    row.overage_rate_applied
                 ) {
                     error!("Error writing CSV row: {}", e);
                     return None;

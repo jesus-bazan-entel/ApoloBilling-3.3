@@ -1,14 +1,12 @@
 // src/models/plan.rs
 //! Plan model for account creation templates
 //!
-//! Plans define preset configurations for account creation,
-//! standardizing initial_balance, credit_limit, and other settings.
+//! Plans define preset minute-bucket configurations (Plan Control / Plan
+//! Abierto) for account creation.
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-
-use super::AccountType;
 
 /// Plan model representing account creation templates
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,20 +14,28 @@ pub struct Plan {
     /// Unique plan ID
     pub id: i32,
 
-    /// Human-readable plan name (e.g., "Prepago Básico")
+    /// Human-readable plan name (e.g., "Plan 1000 Minutos")
     pub plan_name: String,
 
-    /// Unique plan code (e.g., "PRE-BAS", "POST-500")
+    /// Unique plan code (e.g., "P1000M")
     pub plan_code: String,
 
-    /// Account type this plan is for
-    pub account_type: AccountType,
+    /// "control" (blocks new calls once the bucket is exhausted) or
+    /// "abierto" (never blocks; overage is tariffed and reported)
+    pub bucket_type: String,
 
-    /// Initial balance to assign when creating account
-    pub initial_balance: Decimal,
+    /// Minutes included in the monthly base bucket
+    pub included_minutes: i32,
 
-    /// Credit limit for postpaid accounts (0 for prepaid)
-    pub credit_limit: Decimal,
+    /// "full" | "prorated" — how the first cycle is sized when an account
+    /// is created mid-month
+    pub proration_mode: String,
+
+    /// Flat overage rate per minute (takes priority over overage_tariff_group)
+    pub overage_flat_rate_per_minute: Option<Decimal>,
+
+    /// `rate_cards.card_group` to use for LPM overage tariffing
+    pub overage_tariff_group: Option<String>,
 
     /// Maximum concurrent calls allowed
     pub max_concurrent_calls: i32,
@@ -56,44 +62,29 @@ impl Plan {
         self.enabled
     }
 
-    /// Check if this is a prepaid plan
-    pub fn is_prepaid(&self) -> bool {
-        matches!(self.account_type, AccountType::Prepaid)
-    }
-
-    /// Check if this is a postpaid plan
-    pub fn is_postpaid(&self) -> bool {
-        matches!(self.account_type, AccountType::Postpaid)
+    /// Check if this is a Plan Control (blocks on bucket exhaustion)
+    pub fn is_control(&self) -> bool {
+        self.bucket_type == "control"
     }
 
     /// Validate plan configuration
     pub fn validate(&self) -> Result<(), String> {
-        // Plan name must not be empty
         if self.plan_name.trim().is_empty() {
             return Err("Plan name cannot be empty".to_string());
         }
 
-        // Plan code must not be empty
         if self.plan_code.trim().is_empty() {
             return Err("Plan code cannot be empty".to_string());
         }
 
-        // Initial balance must be non-negative
-        if self.initial_balance < Decimal::ZERO {
-            return Err("Initial balance cannot be negative".to_string());
+        if self.bucket_type != "control" && self.bucket_type != "abierto" {
+            return Err("bucket_type must be 'control' or 'abierto'".to_string());
         }
 
-        // Credit limit must be non-negative
-        if self.credit_limit < Decimal::ZERO {
-            return Err("Credit limit cannot be negative".to_string());
+        if self.included_minutes < 0 {
+            return Err("Included minutes cannot be negative".to_string());
         }
 
-        // Prepaid plans should have zero credit limit
-        if self.is_prepaid() && self.credit_limit > Decimal::ZERO {
-            return Err("Prepaid plans cannot have credit limit".to_string());
-        }
-
-        // Max concurrent calls must be positive
         if self.max_concurrent_calls <= 0 {
             return Err("Max concurrent calls must be greater than zero".to_string());
         }
@@ -105,16 +96,17 @@ impl Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
 
-    fn create_test_plan(account_type: AccountType, credit_limit: Decimal) -> Plan {
+    fn create_test_plan(bucket_type: &str) -> Plan {
         Plan {
             id: 1,
             plan_name: "Test Plan".to_string(),
             plan_code: "TEST-01".to_string(),
-            account_type,
-            initial_balance: dec!(0.00),
-            credit_limit,
+            bucket_type: bucket_type.to_string(),
+            included_minutes: 1000,
+            proration_mode: "full".to_string(),
+            overage_flat_rate_per_minute: None,
+            overage_tariff_group: None,
             max_concurrent_calls: 5,
             description: Some("Test description".to_string()),
             enabled: true,
@@ -125,37 +117,29 @@ mod tests {
     }
 
     #[test]
-    fn test_prepaid_plan_validation() {
-        let plan = create_test_plan(AccountType::Prepaid, dec!(0.00));
+    fn test_control_plan_validation() {
+        let plan = create_test_plan("control");
         assert!(plan.validate().is_ok());
-        assert!(plan.is_prepaid());
-        assert!(!plan.is_postpaid());
+        assert!(plan.is_control());
     }
 
     #[test]
-    fn test_prepaid_plan_cannot_have_credit_limit() {
-        let plan = create_test_plan(AccountType::Prepaid, dec!(100.00));
-        assert!(plan.validate().is_err());
-    }
-
-    #[test]
-    fn test_postpaid_plan_validation() {
-        let plan = create_test_plan(AccountType::Postpaid, dec!(500.00));
+    fn test_abierto_plan_validation() {
+        let plan = create_test_plan("abierto");
         assert!(plan.validate().is_ok());
-        assert!(plan.is_postpaid());
-        assert!(!plan.is_prepaid());
+        assert!(!plan.is_control());
     }
 
     #[test]
-    fn test_negative_balance_rejected() {
-        let mut plan = create_test_plan(AccountType::Prepaid, dec!(0.00));
-        plan.initial_balance = dec!(-10.00);
+    fn test_invalid_bucket_type_rejected() {
+        let mut plan = create_test_plan("control");
+        plan.bucket_type = "postpaid".to_string();
         assert!(plan.validate().is_err());
     }
 
     #[test]
     fn test_zero_concurrent_calls_rejected() {
-        let mut plan = create_test_plan(AccountType::Prepaid, dec!(0.00));
+        let mut plan = create_test_plan("control");
         plan.max_concurrent_calls = 0;
         assert!(plan.validate().is_err());
     }

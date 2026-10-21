@@ -1,26 +1,26 @@
-//! SIP Device Service
+//! SIP Endpoint Service
 //!
 //! Provides password encryption/decryption and A1 hash generation
-//! for SIP device authentication via FreeSWITCH mod_xml_curl.
+//! for credential-authenticated SIP endpoints via FreeSWITCH mod_xml_curl.
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use apolo_core::{models::SipDevice, AppError, AppResult};
+use apolo_core::{models::SipEndpoint, AppError, AppResult};
 use md5::{Digest, Md5};
 use rand::Rng;
 use std::sync::Arc;
 use tracing::{debug, error, instrument};
 
-/// SIP Device Service for password management
-pub struct SipDeviceService {
+/// SIP Endpoint Service for password management
+pub struct SipEndpointService {
     /// AES-256-GCM cipher for password encryption
     cipher: Arc<Aes256Gcm>,
 }
 
-impl SipDeviceService {
-    /// Create a new SipDeviceService
+impl SipEndpointService {
+    /// Create a new SipEndpointService
     ///
     /// # Arguments
     /// * `encryption_key` - 32-byte key for AES-256-GCM (64 hex characters)
@@ -127,35 +127,53 @@ impl SipDeviceService {
         hex::encode(result)
     }
 
-    /// Prepare a SIP device with encrypted password
+    /// Prepare a credential-authenticated endpoint with an encrypted password
     ///
-    /// Sets password_encrypted, password_nonce, and a1_hash on the device.
-    #[instrument(skip(self, device, password))]
+    /// Sets password_encrypted, password_nonce, and a1_hash. Requires
+    /// `endpoint.sip_username`/`sip_domain` to already be set.
+    #[instrument(skip(self, endpoint, password))]
     pub fn prepare_device_with_password(
         &self,
-        device: &mut SipDevice,
+        endpoint: &mut SipEndpoint,
         password: &str,
     ) -> AppResult<()> {
-        let (encrypted, nonce) = self.encrypt_password(password)?;
-        let a1_hash = Self::generate_a1_hash(&device.sip_username, &device.sip_domain, password);
+        let username = endpoint.sip_username.clone().ok_or_else(|| {
+            AppError::Validation("sip_username is required for credential auth".to_string())
+        })?;
+        let domain = endpoint
+            .sip_domain
+            .clone()
+            .unwrap_or_else(|| "apolo.local".to_string());
 
-        device.password_encrypted = encrypted;
-        device.password_nonce = nonce;
-        device.a1_hash = a1_hash;
+        let (encrypted, nonce) = self.encrypt_password(password)?;
+        let a1_hash = Self::generate_a1_hash(&username, &domain, password);
+
+        endpoint.password_encrypted = Some(encrypted);
+        endpoint.password_nonce = Some(nonce);
+        endpoint.a1_hash = Some(a1_hash);
+        endpoint.sip_domain = Some(domain);
 
         debug!(
-            username = %device.sip_username,
-            domain = %device.sip_domain,
-            "Device prepared with encrypted password"
+            username = %username,
+            "Endpoint prepared with encrypted password"
         );
 
         Ok(())
     }
 
-    /// Get the plaintext password for a device
-    #[instrument(skip(self, device))]
-    pub fn get_device_password(&self, device: &SipDevice) -> AppResult<String> {
-        self.decrypt_password(&device.password_encrypted, &device.password_nonce)
+    /// Get the plaintext password for a credential-authenticated endpoint
+    #[instrument(skip(self, endpoint))]
+    pub fn get_device_password(&self, endpoint: &SipEndpoint) -> AppResult<String> {
+        let encrypted = endpoint
+            .password_encrypted
+            .as_deref()
+            .ok_or_else(|| AppError::Validation("Endpoint has no password set".to_string()))?;
+        let nonce = endpoint
+            .password_nonce
+            .as_deref()
+            .ok_or_else(|| AppError::Validation("Endpoint has no password set".to_string()))?;
+
+        self.decrypt_password(encrypted, nonce)
     }
 }
 
@@ -163,15 +181,15 @@ impl SipDeviceService {
 mod tests {
     use super::*;
 
-    fn test_service() -> SipDeviceService {
+    fn test_service() -> SipEndpointService {
         // Test key: 32 bytes = 64 hex chars
         let key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        SipDeviceService::new(key).unwrap()
+        SipEndpointService::new(key).unwrap()
     }
 
     #[test]
     fn test_generate_password() {
-        let password = SipDeviceService::generate_password();
+        let password = SipEndpointService::generate_password();
         assert_eq!(password.len(), 16);
         assert!(password.chars().all(|c| c.is_alphanumeric()));
     }
@@ -191,7 +209,7 @@ mod tests {
     fn test_a1_hash() {
         // Test vector from RFC 2617
         // Note: This is a simplified test - actual RFC uses different values
-        let hash = SipDeviceService::generate_a1_hash("1001", "apolo.local", "secret");
+        let hash = SipEndpointService::generate_a1_hash("1001", "apolo.local", "secret");
 
         // Verify it's a valid 32-char hex string (MD5 output)
         assert_eq!(hash.len(), 32);
@@ -201,34 +219,34 @@ mod tests {
     #[test]
     fn test_prepare_device() {
         let service = test_service();
-        let mut device = SipDevice {
-            sip_username: "1001".to_string(),
-            sip_domain: "apolo.local".to_string(),
+        let mut endpoint = SipEndpoint {
+            sip_username: Some("1001".to_string()),
+            sip_domain: Some("apolo.local".to_string()),
             ..Default::default()
         };
 
         service
-            .prepare_device_with_password(&mut device, "test123")
+            .prepare_device_with_password(&mut endpoint, "test123")
             .unwrap();
 
-        assert!(!device.password_encrypted.is_empty());
-        assert!(!device.password_nonce.is_empty());
-        assert_eq!(device.a1_hash.len(), 32);
+        assert!(!endpoint.password_encrypted.as_ref().unwrap().is_empty());
+        assert!(!endpoint.password_nonce.as_ref().unwrap().is_empty());
+        assert_eq!(endpoint.a1_hash.as_ref().unwrap().len(), 32);
 
         // Verify we can decrypt
-        let decrypted = service.get_device_password(&device).unwrap();
+        let decrypted = service.get_device_password(&endpoint).unwrap();
         assert_eq!(decrypted, "test123");
     }
 
     #[test]
     fn test_invalid_key_length() {
-        let result = SipDeviceService::new("short");
+        let result = SipEndpointService::new("short");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_invalid_key_format() {
-        let result = SipDeviceService::new("not-hex-at-all-!!!!");
+        let result = SipEndpointService::new("not-hex-at-all-!!!!");
         assert!(result.is_err());
     }
 }

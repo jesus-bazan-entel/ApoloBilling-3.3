@@ -400,7 +400,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                 required
                 value={formData.priority}
                 onChange={(e) =>
-                  setFormData({ ...formData, priority: parseInt(e.target.value) || 100 })
+                  setFormData({ ...formData, priority: e.target.value === '' ? 0 : parseInt(e.target.value) })
                 }
                 placeholder="100"
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -450,7 +450,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                 required
                 value={formData.destination_port}
                 onChange={(e) =>
-                  setFormData({ ...formData, destination_port: parseInt(e.target.value) || 5060 })
+                  setFormData({ ...formData, destination_port: e.target.value === '' ? 0 : parseInt(e.target.value) })
                 }
                 placeholder="5060"
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -490,7 +490,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                       type="number"
                       required
                       value={fo.port}
-                      onChange={(e) => updateFailover(idx, 'port', parseInt(e.target.value) || 5060)}
+                      onChange={(e) => updateFailover(idx, 'port', e.target.value === '' ? 0 : parseInt(e.target.value))}
                       placeholder="5060"
                       className="w-24 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                     />

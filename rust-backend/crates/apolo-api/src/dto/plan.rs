@@ -1,12 +1,18 @@
 //! Plan DTOs
 //!
-//! Request and response types for plan management endpoints.
+//! Request and response types for plan management endpoints. Every plan is
+//! a minute-bucket template (Plan Control / Plan Abierto) — there is no
+//! other billing model.
 
-use apolo_core::models::{AccountType, Plan};
+use apolo_core::models::Plan;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
+
+fn default_proration_mode() -> String {
+    "full".to_string()
+}
 
 /// Plan creation request
 #[derive(Debug, Clone, Deserialize, Validate)]
@@ -19,17 +25,24 @@ pub struct PlanCreateRequest {
     #[validate(length(min = 1, max = 50, message = "Plan code is required"))]
     pub plan_code: String,
 
-    /// Account type this plan is for
-    #[validate(length(min = 1, message = "Account type is required"))]
-    pub account_type: String,
+    /// "control" (blocks new calls once the bucket is exhausted) or
+    /// "abierto" (never blocks; overage is tariffed and reported)
+    pub bucket_type: String,
 
-    /// Initial balance to assign
-    #[serde(default)]
-    pub initial_balance: Decimal,
+    /// Minutes included in the monthly base bucket
+    #[validate(range(min = 0, max = 1_000_000, message = "included_minutes out of range"))]
+    pub included_minutes: i32,
 
-    /// Credit limit for postpaid
-    #[serde(default)]
-    pub credit_limit: Decimal,
+    /// "full" | "prorated" — how the first cycle is sized when an account
+    /// is created mid-month
+    #[serde(default = "default_proration_mode")]
+    pub proration_mode: String,
+
+    /// Flat overage rate per minute (takes priority over overage_tariff_group)
+    pub overage_flat_rate_per_minute: Option<Decimal>,
+
+    /// `rate_cards.card_group` to use for LPM overage tariffing
+    pub overage_tariff_group: Option<String>,
 
     /// Max concurrent calls
     #[serde(default = "default_max_concurrent_calls")]
@@ -42,14 +55,6 @@ pub struct PlanCreateRequest {
     /// Whether plan is enabled
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-
-    /// Optional hint: "minute_bucket" skips the initial_balance/credit_limit
-    /// > 0 requirement below, since a bucket plan (Plan Control / Plan
-    /// Abierto) doesn't use the balance rails at all — the actual
-    /// billing_model is set right after creation via
-    /// `PUT /plans/{id}/bucket-config`, this field only affects validation.
-    #[serde(default)]
-    pub billing_model: Option<String>,
 }
 
 fn default_max_concurrent_calls() -> i32 {
@@ -63,56 +68,26 @@ fn default_enabled() -> bool {
 impl PlanCreateRequest {
     /// Validate plan business rules
     pub fn validate_business_rules(&self) -> Result<(), String> {
-        let account_type = AccountType::from_str(&self.account_type)
-            .ok_or_else(|| "Invalid account type".to_string())?;
-
-        // Bucket plans (Plan Control / Plan Abierto) don't use the balance
-        // rails, so the "no unlimited plans" invariant below doesn't apply.
-        if self.billing_model.as_deref() == Some("minute_bucket") {
-            return Ok(());
+        if self.bucket_type != "control" && self.bucket_type != "abierto" {
+            return Err("bucket_type must be 'control' or 'abierto'".to_string());
         }
 
-        match account_type {
-            AccountType::Prepaid => {
-                // PREPAID: initial_balance MUST be > 0 (no unlimited plans)
-                if self.initial_balance <= Decimal::ZERO {
-                    return Err("Prepaid plans must have initial_balance > 0".to_string());
-                }
-
-                // Prepaid plans cannot have credit limit
-                if self.credit_limit > Decimal::ZERO {
-                    return Err("Prepaid plans cannot have credit limit".to_string());
-                }
-            }
-            AccountType::Postpaid => {
-                // POSTPAID: credit_limit MUST be > 0 (no unlimited plans)
-                if self.credit_limit <= Decimal::ZERO {
-                    return Err("Postpaid plans must have credit_limit > 0".to_string());
-                }
-
-                // Postpaid plans typically start with balance = 0
-                if self.initial_balance < Decimal::ZERO {
-                    return Err("Initial balance cannot be negative".to_string());
-                }
-            }
+        if self.proration_mode != "full" && self.proration_mode != "prorated" {
+            return Err("proration_mode must be 'full' or 'prorated'".to_string());
         }
 
         Ok(())
     }
 }
 
-/// Plan update request
+/// Plan update request — general template fields only; bucket_type,
+/// included_minutes, proration_mode and overage settings are updated via
+/// `PUT /plans/{id}/bucket-config`.
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct PlanUpdateRequest {
     /// Plan name
     #[validate(length(min = 1, max = 100))]
     pub plan_name: Option<String>,
-
-    /// Initial balance
-    pub initial_balance: Option<Decimal>,
-
-    /// Credit limit
-    pub credit_limit: Option<Decimal>,
 
     /// Max concurrent calls
     #[validate(range(min = 1, max = 100))]
@@ -131,9 +106,11 @@ pub struct PlanResponse {
     pub id: i32,
     pub plan_name: String,
     pub plan_code: String,
-    pub account_type: String,
-    pub initial_balance: Decimal,
-    pub credit_limit: Decimal,
+    pub bucket_type: String,
+    pub included_minutes: i32,
+    pub proration_mode: String,
+    pub overage_flat_rate_per_minute: Option<Decimal>,
+    pub overage_tariff_group: Option<String>,
     pub max_concurrent_calls: i32,
     pub description: Option<String>,
     pub enabled: bool,
@@ -148,9 +125,11 @@ impl From<Plan> for PlanResponse {
             id: plan.id,
             plan_name: plan.plan_name,
             plan_code: plan.plan_code,
-            account_type: plan.account_type.to_string(),
-            initial_balance: plan.initial_balance,
-            credit_limit: plan.credit_limit,
+            bucket_type: plan.bucket_type,
+            included_minutes: plan.included_minutes,
+            proration_mode: plan.proration_mode,
+            overage_flat_rate_per_minute: plan.overage_flat_rate_per_minute,
+            overage_tariff_group: plan.overage_tariff_group,
             max_concurrent_calls: plan.max_concurrent_calls,
             description: plan.description,
             enabled: plan.enabled,
@@ -164,73 +143,45 @@ impl From<Plan> for PlanResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
 
-    #[test]
-    fn test_prepaid_plan_validation() {
-        let req = PlanCreateRequest {
-            plan_name: "Test Prepaid".to_string(),
-            plan_code: "TEST-PRE".to_string(),
-            account_type: "PREPAID".to_string(),
-            initial_balance: dec!(50.00),
-            credit_limit: dec!(0.00),
+    fn base_req() -> PlanCreateRequest {
+        PlanCreateRequest {
+            plan_name: "Test Plan".to_string(),
+            plan_code: "TEST-01".to_string(),
+            bucket_type: "control".to_string(),
+            included_minutes: 1000,
+            proration_mode: "full".to_string(),
+            overage_flat_rate_per_minute: None,
+            overage_tariff_group: None,
             max_concurrent_calls: 5,
             description: Some("Test".to_string()),
             enabled: true,
-            billing_model: None,
-        };
+        }
+    }
 
+    #[test]
+    fn test_control_plan_validation() {
+        assert!(base_req().validate_business_rules().is_ok());
+    }
+
+    #[test]
+    fn test_abierto_plan_validation() {
+        let mut req = base_req();
+        req.bucket_type = "abierto".to_string();
         assert!(req.validate_business_rules().is_ok());
     }
 
     #[test]
-    fn test_prepaid_cannot_have_credit_limit() {
-        let req = PlanCreateRequest {
-            plan_name: "Test Prepaid".to_string(),
-            plan_code: "TEST-PRE".to_string(),
-            account_type: "PREPAID".to_string(),
-            initial_balance: dec!(0.00),
-            credit_limit: dec!(100.00), // Invalid
-            max_concurrent_calls: 5,
-            description: None,
-            enabled: true,
-            billing_model: None,
-        };
-
+    fn test_invalid_bucket_type_rejected() {
+        let mut req = base_req();
+        req.bucket_type = "postpaid".to_string();
         assert!(req.validate_business_rules().is_err());
     }
 
     #[test]
-    fn test_postpaid_plan_validation() {
-        let req = PlanCreateRequest {
-            plan_name: "Test Postpaid".to_string(),
-            plan_code: "TEST-POST".to_string(),
-            account_type: "POSTPAID".to_string(),
-            initial_balance: dec!(0.00),
-            credit_limit: dec!(500.00),
-            max_concurrent_calls: 10,
-            description: Some("Test".to_string()),
-            enabled: true,
-            billing_model: None,
-        };
-
-        assert!(req.validate_business_rules().is_ok());
-    }
-
-    #[test]
-    fn test_negative_balance_rejected() {
-        let req = PlanCreateRequest {
-            plan_name: "Test".to_string(),
-            plan_code: "TEST".to_string(),
-            account_type: "PREPAID".to_string(),
-            initial_balance: dec!(-10.00), // Invalid
-            credit_limit: dec!(0.00),
-            max_concurrent_calls: 5,
-            description: None,
-            enabled: true,
-            billing_model: None,
-        };
-
+    fn test_invalid_proration_mode_rejected() {
+        let mut req = base_req();
+        req.proration_mode = "yearly".to_string();
         assert!(req.validate_business_rules().is_err());
     }
 }

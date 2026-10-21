@@ -3,11 +3,8 @@
 //! Defines abstractions for database access and business logic.
 
 use crate::error::AppError;
-use crate::models::{
-    Account, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User,
-};
+use crate::models::{Account, Cdr, FreeswitchAllowedIp, RateCard, SipEndpoint, User};
 use async_trait::async_trait;
-use rust_decimal::Decimal;
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
@@ -42,14 +39,10 @@ pub trait AccountRepository: Repository<Account, i32> {
     /// Find account by phone number (ANI)
     async fn find_by_phone(&self, phone: &str) -> Result<Option<Account>, AppError>;
 
-    /// Update account balance
-    async fn update_balance(&self, id: i32, amount: Decimal) -> Result<Decimal, AppError>;
-
     /// List accounts with filtering
     async fn list_filtered(
         &self,
         status: Option<&str>,
-        account_type: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<Account>, i64), AppError>;
@@ -106,117 +99,28 @@ pub trait UserRepository: Repository<User, i32> {
     async fn update_last_login(&self, id: i32) -> Result<(), AppError>;
 }
 
-/// Reservation repository trait with specialized methods
+/// SIP Endpoint repository trait with specialized methods
 #[async_trait]
-pub trait ReservationRepository: Repository<BalanceReservation, Uuid> {
-    /// Find reservation by call UUID
-    async fn find_by_call_uuid(
-        &self,
-        call_uuid: &str,
-    ) -> Result<Option<BalanceReservation>, AppError>;
-
-    /// Find active reservations for account
-    async fn find_active_by_account(
-        &self,
-        account_id: i32,
-    ) -> Result<Vec<BalanceReservation>, AppError>;
-
-    /// Count active reservations for account
-    async fn count_active_by_account(&self, account_id: i32) -> Result<i64, AppError>;
-
-    /// Update reservation status
-    async fn update_status(
-        &self,
-        id: Uuid,
-        status: crate::models::ReservationStatus,
-        consumed: Option<Decimal>,
-        released: Option<Decimal>,
-    ) -> Result<BalanceReservation, AppError>;
-
-    /// Expire old reservations
-    async fn expire_old(&self) -> Result<i64, AppError>;
-}
-
-/// Rating service trait
-#[async_trait]
-pub trait RatingService: Send + Sync {
-    /// Find rate for a destination
-    async fn find_rate(&self, destination: &str) -> Result<Option<RateCard>, AppError>;
-
-    /// Calculate cost for a destination and duration
-    async fn calculate_cost(
-        &self,
-        destination: &str,
-        duration_seconds: i32,
-    ) -> Result<Decimal, AppError>;
-}
-
-/// Authorization response for billing
-#[derive(Debug, Clone)]
-pub struct AuthorizationResult {
-    pub authorized: bool,
-    pub reason: String,
-    pub account_id: Option<i32>,
-    pub reservation_id: Option<Uuid>,
-    pub reserved_amount: Option<Decimal>,
-    pub max_duration_seconds: Option<i32>,
-    pub rate_per_minute: Option<Decimal>,
-}
-
-/// Billing service trait
-#[async_trait]
-pub trait BillingService: Send + Sync {
-    /// Authorize a call
-    async fn authorize(
-        &self,
-        caller: &str,
-        callee: &str,
-        call_uuid: Option<&str>,
-    ) -> Result<AuthorizationResult, AppError>;
-
-    /// Consume a reservation (charge for call)
-    async fn consume(
-        &self,
-        call_uuid: &str,
-        actual_cost: Decimal,
-        actual_billsec: i32,
-    ) -> Result<ConsumeResult, AppError>;
-
-    /// Release unused reservation
-    async fn release(&self, call_uuid: &str) -> Result<Decimal, AppError>;
-}
-
-/// Consumption result
-#[derive(Debug, Clone)]
-pub struct ConsumeResult {
-    pub success: bool,
-    pub total_reserved: Decimal,
-    pub consumed: Decimal,
-    pub released: Decimal,
-    pub deficit: Option<Decimal>,
-}
-
-/// SIP Device repository trait with specialized methods
-#[async_trait]
-pub trait SipDeviceRepository: Repository<SipDevice, i32> {
-    /// Find SIP device by username and domain
+pub trait SipEndpointRepository: Repository<SipEndpoint, Uuid> {
+    /// Find a credential-authenticated endpoint by username and domain
+    /// (used by the FreeSWITCH mod_xml_curl directory lookup).
     async fn find_by_username_domain(
         &self,
         username: &str,
         domain: &str,
-    ) -> Result<Option<SipDevice>, AppError>;
+    ) -> Result<Option<SipEndpoint>, AppError>;
 
-    /// Find all devices for an account
-    async fn find_by_account(&self, account_id: i32) -> Result<Vec<SipDevice>, AppError>;
+    /// Find all endpoints for an account
+    async fn find_by_account(&self, account_id: i32) -> Result<Vec<SipEndpoint>, AppError>;
 
-    /// List devices with filtering
+    /// List endpoints with filtering
     async fn list_filtered(
         &self,
         account_id: Option<i32>,
         enabled: Option<bool>,
         limit: i64,
         offset: i64,
-    ) -> Result<(Vec<SipDevice>, i64), AppError>;
+    ) -> Result<(Vec<SipEndpoint>, i64), AppError>;
 
     /// Check if username exists in domain
     async fn username_exists(&self, username: &str, domain: &str) -> Result<bool, AppError>;
@@ -224,11 +128,23 @@ pub trait SipDeviceRepository: Repository<SipDevice, i32> {
     /// Update password (encrypted + a1_hash)
     async fn update_password(
         &self,
-        id: i32,
+        id: Uuid,
         password_encrypted: &[u8],
         password_nonce: &[u8],
         a1_hash: &str,
     ) -> Result<(), AppError>;
+
+    /// Record the result of a Kamailio sync attempt (auth_mode = Ip only)
+    async fn update_sync_status(
+        &self,
+        id: Uuid,
+        kamailio_gwid: Option<i32>,
+        sync_status: &str,
+        sync_error: Option<&str>,
+    ) -> Result<(), AppError>;
+
+    /// Clear any other default trunk before marking a new one as default
+    async fn clear_default_trunk(&self, except_id: Option<Uuid>) -> Result<(), AppError>;
 }
 
 /// FreeSWITCH allowed IP repository trait

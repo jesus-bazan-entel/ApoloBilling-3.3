@@ -55,7 +55,7 @@ export default function ActiveCalls() {
           </span>
           {call.account_id && (
             <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
-              (Cuenta: {call.account_id})
+              (Suscripción: {call.account_id})
             </span>
           )}
         </div>

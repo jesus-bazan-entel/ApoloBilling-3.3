@@ -235,6 +235,19 @@ pub struct CdrResponse {
 
     /// Was the call answered
     pub answered: bool,
+
+    /// Minute-bucket cycle this call was billed against, if any
+    /// (Plan Control / Plan Abierto model)
+    pub bucket_cycle_id: Option<i32>,
+
+    /// Minutes of this call covered by the account's balance
+    pub in_bucket_minutes: Option<Decimal>,
+
+    /// Minutes of this call billed as overage beyond the balance
+    pub overage_minutes: Option<Decimal>,
+
+    /// Cost of the overage minutes (0 if fully covered by the balance)
+    pub overage_cost: Option<Decimal>,
 }
 
 impl From<apolo_core::models::Cdr> for CdrResponse {
@@ -257,6 +270,10 @@ impl From<apolo_core::models::Cdr> for CdrResponse {
             hangup_cause: cdr.hangup_cause,
             direction: cdr.direction,
             answered,
+            bucket_cycle_id: cdr.bucket_cycle_id,
+            in_bucket_minutes: cdr.in_bucket_minutes,
+            overage_minutes: cdr.overage_minutes,
+            overage_cost: cdr.overage_cost,
         }
     }
 }
@@ -294,6 +311,16 @@ pub struct CdrExportRow {
     pub hangup_cause: String,
     /// Direction
     pub direction: String,
+    /// Minute-bucket cycle ID (Plan Control / Plan Abierto)
+    pub bucket_cycle_id: String,
+    /// In-bucket minutes
+    pub in_bucket_minutes: String,
+    /// Overage minutes
+    pub overage_minutes: String,
+    /// Overage cost
+    pub overage_cost: String,
+    /// Overage rate applied
+    pub overage_rate_applied: String,
 }
 
 impl From<apolo_core::models::Cdr> for CdrExportRow {
@@ -318,6 +345,19 @@ impl From<apolo_core::models::Cdr> for CdrExportRow {
             cost: cdr.cost.map_or_else(String::new, |c| c.to_string()),
             hangup_cause: cdr.hangup_cause,
             direction: cdr.direction,
+            bucket_cycle_id: cdr
+                .bucket_cycle_id
+                .map_or_else(String::new, |v| v.to_string()),
+            in_bucket_minutes: cdr
+                .in_bucket_minutes
+                .map_or_else(String::new, |v| v.to_string()),
+            overage_minutes: cdr
+                .overage_minutes
+                .map_or_else(String::new, |v| v.to_string()),
+            overage_cost: cdr.overage_cost.map_or_else(String::new, |v| v.to_string()),
+            overage_rate_applied: cdr
+                .overage_rate_applied
+                .map_or_else(String::new, |v| v.to_string()),
         }
     }
 }

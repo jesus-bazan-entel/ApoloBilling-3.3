@@ -3,13 +3,12 @@
 //! HTTP handlers for account management endpoints.
 
 use crate::dto::account::{
-    AccountCreateRequest, AccountFilterParams, AccountResponse, AccountUpdateRequest, TopupRequest,
-    TopupResponse,
+    AccountCreateRequest, AccountFilterParams, AccountResponse, AccountUpdateRequest,
 };
 use crate::dto::{ApiResponse, PaginationParams};
 use actix_web::{web, HttpResponse};
 use apolo_auth::AuthenticatedUser;
-use apolo_core::models::{AccountStatus, AccountType, AuditLogBuilder};
+use apolo_core::models::{Account, AccountStatus, AuditLogBuilder};
 use apolo_core::traits::{AccountRepository, Repository};
 use apolo_core::AppError;
 use apolo_db::{PgAccountRepository, PgPlanRepository};
@@ -44,14 +43,10 @@ pub async fn list_accounts(
     );
 
     let repo = PgAccountRepository::new(pool.get_ref().clone());
-
-    // Pass filter parameters as string references
     let status = filters.status.as_deref();
-    let account_type = filters.account_type.as_deref();
 
-    // Get accounts with filters
     let (accounts, total) = repo
-        .list_filtered(status, account_type, query.limit(), query.offset())
+        .list_filtered(status, query.limit(), query.offset())
         .await?;
 
     let response_data: Vec<AccountResponse> = accounts.into_iter().map(|a| a.into()).collect();
@@ -77,7 +72,6 @@ pub async fn create_account(
 
     let repo = PgAccountRepository::new(pool.get_ref().clone());
 
-    // Check if account number already exists
     if let Some(_existing) = repo.find_by_number(&req.account_number).await? {
         warn!(
             account_number = %req.account_number,
@@ -89,80 +83,71 @@ pub async fn create_account(
         )));
     }
 
-    // If plan_id is present, validate consistency with plan
-    if let Some(plan_id) = req.plan_id {
-        debug!(plan_id, "Validating account against plan");
+    // Resolve bucket configuration: from the plan template when plan_id is
+    // set (the plan is the source of truth — any bucket fields on the
+    // request are ignored in that case), otherwise directly from the request.
+    let (bucket_type, included_minutes, proration_mode, overage_rate, overage_group) =
+        if let Some(plan_id) = req.plan_id {
+            debug!(plan_id, "Deriving bucket config from plan");
 
-        let plan_repo = PgPlanRepository::new(pool.get_ref().clone());
-        let plan = plan_repo.find_by_id(plan_id).await?.ok_or_else(|| {
-            warn!(plan_id, "Plan not found");
-            AppError::NotFound(format!("Plan {} not found", plan_id))
-        })?;
+            let plan_repo = PgPlanRepository::new(pool.get_ref().clone());
+            let plan = plan_repo.find_by_id(plan_id).await?.ok_or_else(|| {
+                warn!(plan_id, "Plan not found");
+                AppError::NotFound(format!("Plan {} not found", plan_id))
+            })?;
 
-        // Validate account_type matches plan
-        let req_type = AccountType::from_str(&req.account_type)
-            .ok_or_else(|| AppError::Validation("Invalid account type".to_string()))?;
-
-        if req_type != plan.account_type {
-            warn!(
-                req_type = %req_type,
-                plan_type = %plan.account_type,
-                "Account type mismatch with plan"
-            );
-            return Err(AppError::Validation(format!(
-                "Account type '{}' does not match plan type '{}'",
-                req_type, plan.account_type
-            )));
-        }
-
-        // Validate values match plan based on account type
-        match req_type {
-            AccountType::Prepaid => {
-                if req.initial_balance != plan.initial_balance {
-                    warn!(
-                        req_balance = %req.initial_balance,
-                        plan_balance = %plan.initial_balance,
-                        "Initial balance mismatch with plan"
-                    );
-                    return Err(AppError::Validation(format!(
-                        "Initial balance must be {} (from plan {})",
-                        plan.initial_balance, plan.plan_code
-                    )));
-                }
+            if req.max_concurrent_calls != plan.max_concurrent_calls {
+                return Err(AppError::Validation(format!(
+                    "Max concurrent calls must be {} (from plan {})",
+                    plan.max_concurrent_calls, plan.plan_code
+                )));
             }
-            AccountType::Postpaid => {
-                if req.credit_limit != plan.credit_limit {
-                    warn!(
-                        req_limit = %req.credit_limit,
-                        plan_limit = %plan.credit_limit,
-                        "Credit limit mismatch with plan"
-                    );
-                    return Err(AppError::Validation(format!(
-                        "Credit limit must be {} (from plan {})",
-                        plan.credit_limit, plan.plan_code
-                    )));
-                }
+
+            (
+                plan.bucket_type,
+                plan.included_minutes,
+                plan.proration_mode,
+                plan.overage_flat_rate_per_minute,
+                plan.overage_tariff_group,
+            )
+        } else {
+            let bucket_type = req.bucket_type.clone().ok_or_else(|| {
+                AppError::Validation("bucket_type is required when plan_id is not set".to_string())
+            })?;
+            if bucket_type != "control" && bucket_type != "abierto" {
+                return Err(AppError::Validation(
+                    "bucket_type must be 'control' or 'abierto'".to_string(),
+                ));
             }
-        }
+            let included_minutes = req.included_minutes.ok_or_else(|| {
+                AppError::Validation(
+                    "included_minutes is required when plan_id is not set".to_string(),
+                )
+            })?;
 
-        // Validate max_concurrent_calls matches plan
-        if req.max_concurrent_calls != plan.max_concurrent_calls {
-            warn!(
-                req_calls = req.max_concurrent_calls,
-                plan_calls = plan.max_concurrent_calls,
-                "Max concurrent calls mismatch with plan"
-            );
-            return Err(AppError::Validation(format!(
-                "Max concurrent calls must be {} (from plan {})",
-                plan.max_concurrent_calls, plan.plan_code
-            )));
-        }
+            (
+                bucket_type,
+                included_minutes,
+                req.proration_mode.clone(),
+                req.overage_flat_rate_per_minute,
+                req.overage_tariff_group.clone(),
+            )
+        };
 
-        debug!(plan_id, "Account validated successfully against plan");
-    }
+    let account = Account {
+        account_number: req.account_number.clone(),
+        customer_phone: req.customer_phone.clone(),
+        max_concurrent_calls: req.max_concurrent_calls,
+        plan_id: req.plan_id,
+        bucket_type,
+        included_minutes,
+        proration_mode,
+        overage_flat_rate_per_minute: overage_rate,
+        overage_tariff_group: overage_group,
+        notification_email: req.notification_email.clone(),
+        ..Default::default()
+    };
 
-    // Create account
-    let account = req.to_account();
     let created = repo.create(&account).await?;
 
     info!(
@@ -171,12 +156,10 @@ pub async fn create_account(
         "Account created successfully"
     );
 
-    // Audit log
     let audit_details = serde_json::json!({
         "account_number": created.account_number,
-        "account_type": format!("{:?}", created.account_type),
-        "balance": created.balance,
-        "credit_limit": created.credit_limit,
+        "bucket_type": created.bucket_type,
+        "included_minutes": created.included_minutes,
         "plan_id": created.plan_id,
     });
 
@@ -244,16 +227,13 @@ pub async fn update_account(
 
     let repo = PgAccountRepository::new(pool.get_ref().clone());
 
-    // Get existing account
     let mut account = repo
         .find_by_id(account_id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Account {} not found", account_id)))?;
 
-    // Build details for audit log
     let mut changes = serde_json::json!({});
 
-    // Apply updates
     if let Some(phone) = &req.customer_phone {
         changes["customer_phone"] = serde_json::json!({
             "old": account.customer_phone,
@@ -277,14 +257,6 @@ pub async fn update_account(
         }
     }
 
-    if let Some(credit_limit) = req.credit_limit {
-        changes["credit_limit"] = serde_json::json!({
-            "old": account.credit_limit,
-            "new": credit_limit
-        });
-        account.credit_limit = credit_limit;
-    }
-
     if let Some(max_calls) = req.max_concurrent_calls {
         changes["max_concurrent_calls"] = serde_json::json!({
             "old": account.max_concurrent_calls,
@@ -293,9 +265,16 @@ pub async fn update_account(
         account.max_concurrent_calls = max_calls;
     }
 
+    if let Some(email) = &req.notification_email {
+        changes["notification_email"] = serde_json::json!({
+            "old": account.notification_email,
+            "new": email
+        });
+        account.notification_email = Some(email.clone());
+    }
+
     account.updated_at = Utc::now();
 
-    // Save updates
     let updated = repo.update(&account).await?;
 
     info!(
@@ -304,7 +283,6 @@ pub async fn update_account(
         "Account updated successfully"
     );
 
-    // Audit log with changes
     let audit_details = serde_json::json!({
         "account_number": updated.account_number,
         "changes": changes
@@ -328,69 +306,6 @@ pub async fn update_account(
     )))
 }
 
-/// Top up account balance
-///
-/// POST /api/v1/accounts/{id}/topup
-#[instrument(skip(pool, _user, req))]
-pub async fn topup_account(
-    pool: web::Data<PgPool>,
-    path: web::Path<i32>,
-    _user: apolo_auth::AdminUser,
-    req: web::Json<TopupRequest>,
-) -> Result<HttpResponse, AppError> {
-    req.validate().map_err(|e| {
-        warn!("Topup validation failed: {}", e);
-        AppError::Validation(e.to_string())
-    })?;
-
-    let account_id = path.into_inner();
-    debug!(id = account_id, amount = %req.amount, "Processing topup");
-
-    let repo = PgAccountRepository::new(pool.get_ref().clone());
-
-    // Get existing account
-    let account = repo
-        .find_by_id(account_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound(format!("Account {} not found", account_id)))?;
-
-    let previous_balance = account.balance;
-
-    // Update balance
-    let new_balance = repo.update_balance(account_id, req.amount).await?;
-
-    info!(
-        id = account_id,
-        amount = %req.amount,
-        previous_balance = %previous_balance,
-        new_balance = %new_balance,
-        "Topup successful"
-    );
-
-    // Audit log
-    let audit_details = serde_json::json!({
-        "account_number": account.account_number,
-        "amount": req.amount,
-        "previous_balance": previous_balance,
-        "new_balance": new_balance,
-        "reason": req.reason,
-    });
-
-    if let Ok(audit_data) = AuditLogBuilder::default()
-        .username(_user.username.clone())
-        .action("topup_account")
-        .entity_type("account")
-        .entity_id(account_id.to_string())
-        .details(audit_details)
-        .build()
-    {
-        audit_data.insert(pool.get_ref()).await;
-    }
-
-    let response = TopupResponse::new(previous_balance, req.amount, new_balance);
-    Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
-}
-
 /// Delete an account
 ///
 /// DELETE /api/v1/accounts/{id}
@@ -409,13 +324,11 @@ pub async fn delete_account(
 
     let repo = PgAccountRepository::new(pool.get_ref().clone());
 
-    // Verify account exists
     let account = repo
         .find_by_id(account_id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Account {} not found", account_id)))?;
 
-    // Delete account
     let deleted = repo.delete(account_id).await?;
 
     if deleted {
@@ -425,10 +338,8 @@ pub async fn delete_account(
             "Account deleted successfully"
         );
 
-        // Audit log
         let audit_details = serde_json::json!({
             "account_number": account.account_number,
-            "account_type": format!("{:?}", account.account_type),
         });
 
         if let Ok(audit_data) = AuditLogBuilder::default()
@@ -450,6 +361,11 @@ pub async fn delete_account(
 
 /// Configure account routes
 pub fn configure(cfg: &mut web::ServiceConfig) {
+    use super::minute_bucket::{
+        get_account_bucket_config, get_minute_bucket_status, minute_bucket_history,
+        topup_minute_bucket, update_account_bucket_config, update_minute_bucket_cycle,
+    };
+
     cfg.service(
         web::scope("/accounts")
             .route("", web::get().to(list_accounts))
@@ -457,24 +373,34 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/{id}", web::get().to(get_account))
             .route("/{id}", web::put().to(update_account))
             .route("/{id}", web::delete().to(delete_account))
-            .route("/{id}/topup", web::post().to(topup_account)),
+            // Minute-bucket billing (Plan Control / Plan Abierto) — registered
+            // here rather than in minute_bucket::configure() because actix-web
+            // commits routing to the first Scope whose prefix matches; a
+            // second, separate `web::scope("/accounts")` would 404 on every
+            // path below it once this scope claims the "/accounts" prefix.
+            .route(
+                "/{id}/bucket-config",
+                web::get().to(get_account_bucket_config),
+            )
+            .route(
+                "/{id}/bucket-config",
+                web::put().to(update_account_bucket_config),
+            )
+            .route(
+                "/{id}/minute-bucket",
+                web::get().to(get_minute_bucket_status),
+            )
+            .route(
+                "/{id}/minute-bucket",
+                web::put().to(update_minute_bucket_cycle),
+            )
+            .route(
+                "/{id}/minute-bucket/topup",
+                web::post().to(topup_minute_bucket),
+            )
+            .route(
+                "/{id}/minute-bucket/history",
+                web::get().to(minute_bucket_history),
+            ),
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rust_decimal_macros::dec;
-
-    #[test]
-    fn test_topup_request_validation() {
-        let valid_req = TopupRequest {
-            amount: dec!(50.00),
-            reason: Some("Monthly recharge".to_string()),
-        };
-        assert!(valid_req.validate().is_ok());
-
-        // Note: validator's range doesn't work well with Decimal,
-        // so we rely on business logic validation
-    }
 }

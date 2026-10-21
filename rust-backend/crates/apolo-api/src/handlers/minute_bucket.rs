@@ -20,10 +20,7 @@ use sqlx::PgPool;
 use tracing::{debug, info, instrument};
 use validator::Validate;
 
-fn overage_rate_source(billing_model: &str, flat: Option<rust_decimal::Decimal>, group: &Option<String>) -> String {
-    if billing_model != "minute_bucket" {
-        return "none".to_string();
-    }
+fn overage_rate_source(flat: Option<rust_decimal::Decimal>, group: &Option<String>) -> String {
     if flat.is_some() {
         return "flat".to_string();
     }
@@ -46,19 +43,17 @@ fn cycle_to_status(
     cycle: MinuteBucketCycle,
     account_id: i32,
     acc_number: String,
-    billing_model: String,
-    bucket_type: Option<String>,
+    bucket_type: String,
     overage_rate_source_str: String,
 ) -> MinuteBucketStatusResponse {
     let total = rust_decimal::Decimal::from(cycle.included_minutes + cycle.additional_minutes);
     let available = total - cycle.consumed_minutes - cycle.reserved_minutes;
     let utilization = cycle.utilization_percent();
-    let is_blocked = bucket_type.as_deref() == Some("control") && available <= rust_decimal::Decimal::ZERO;
+    let is_blocked = bucket_type == "control" && available <= rust_decimal::Decimal::ZERO;
 
     MinuteBucketStatusResponse {
         account_id,
         account_number: acc_number,
-        billing_model,
         bucket_type,
         cycle_start: cycle.cycle_start,
         cycle_end: cycle.cycle_end,
@@ -109,7 +104,8 @@ pub async fn update_plan_bucket_config(
     admin: apolo_auth::AdminUser,
     req: web::Json<BucketConfigRequest>,
 ) -> Result<HttpResponse, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
     req.validate_business().map_err(AppError::Validation)?;
 
     let plan_id = path.into_inner();
@@ -125,7 +121,7 @@ pub async fn update_plan_bucket_config(
         .action("update_plan_bucket_config")
         .entity_type("plan")
         .entity_id(plan_id.to_string())
-        .details(json!({ "billing_model": req.billing_model, "bucket_type": req.bucket_type }))
+        .details(json!({ "bucket_type": req.bucket_type }))
         .build()
     {
         audit_data.insert(pool.get_ref()).await;
@@ -173,7 +169,9 @@ pub async fn update_account_bucket_config(
     req.config
         .validate()
         .map_err(|e| AppError::Validation(e.to_string()))?;
-    req.config.validate_business().map_err(AppError::Validation)?;
+    req.config
+        .validate_business()
+        .map_err(AppError::Validation)?;
 
     let account_id = path.into_inner();
     let repo = PgMinuteBucketRepository::new(pool.get_ref().clone());
@@ -193,7 +191,6 @@ pub async fn update_account_bucket_config(
         .entity_type("account")
         .entity_id(account_id.to_string())
         .details(json!({
-            "billing_model": req.config.billing_model,
             "bucket_type": req.config.bucket_type,
         }))
         .build()
@@ -230,16 +227,9 @@ pub async fn get_minute_bucket_status(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Account {} not found", account_id)))?;
 
-    if !matches!(cfg.config.billing_model, apolo_core::models::BillingModel::MinuteBucket) {
-        return Err(AppError::Validation(
-            "Account is not on the minute_bucket billing model".to_string(),
-        ));
-    }
-
     let cycle = repo.ensure_open_cycle(account_id).await?;
     let acc_number = account_number(pool.get_ref(), account_id).await?;
     let source = overage_rate_source(
-        "minute_bucket",
         cfg.config.overage_flat_rate_per_minute,
         &cfg.config.overage_tariff_group,
     );
@@ -248,8 +238,7 @@ pub async fn get_minute_bucket_status(
         cycle,
         account_id,
         acc_number,
-        "minute_bucket".to_string(),
-        cfg.config.bucket_type.map(|b| b.to_string()),
+        cfg.config.bucket_type.to_string(),
         source,
     );
 
@@ -265,7 +254,8 @@ pub async fn update_minute_bucket_cycle(
     admin: apolo_auth::AdminUser,
     req: web::Json<MinuteBucketCycleEditRequest>,
 ) -> Result<HttpResponse, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let account_id = path.into_inner();
     let repo = PgMinuteBucketRepository::new(pool.get_ref().clone());
@@ -301,7 +291,6 @@ pub async fn update_minute_bucket_cycle(
 
     let acc_number = account_number(pool.get_ref(), account_id).await?;
     let source = overage_rate_source(
-        &cfg.config.billing_model.to_string(),
         cfg.config.overage_flat_rate_per_minute,
         &cfg.config.overage_tariff_group,
     );
@@ -309,15 +298,11 @@ pub async fn update_minute_bucket_cycle(
         cycle,
         account_id,
         acc_number,
-        cfg.config.billing_model.to_string(),
-        cfg.config.bucket_type.map(|b| b.to_string()),
+        cfg.config.bucket_type.to_string(),
         source,
     );
 
-    Ok(HttpResponse::Ok().json(ApiResponse::with_message(
-        status,
-        "Bucket cycle updated",
-    )))
+    Ok(HttpResponse::Ok().json(ApiResponse::with_message(status, "Bucket cycle updated")))
 }
 
 /// POST /api/v1/accounts/{id}/minute-bucket/topup
@@ -328,7 +313,8 @@ pub async fn topup_minute_bucket(
     admin: apolo_auth::AdminUser,
     req: web::Json<MinuteBucketTopupRequest>,
 ) -> Result<HttpResponse, AppError> {
-    req.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+    req.validate()
+        .map_err(|e| AppError::Validation(e.to_string()))?;
 
     let account_id = path.into_inner();
     let repo = PgMinuteBucketRepository::new(pool.get_ref().clone());
@@ -465,7 +451,7 @@ pub async fn minute_bucket_report_export(
             "{},{},{},{},{},{},{},{},{},{},{:.2},{},{}\n",
             r.account_number,
             r.account_name.clone().unwrap_or_default().replace(',', " "),
-            r.bucket_type.clone().unwrap_or_default(),
+            r.bucket_type,
             r.included_minutes,
             r.is_prorated,
             r.additional_minutes,
@@ -479,11 +465,7 @@ pub async fn minute_bucket_report_export(
         ));
     }
 
-    let filename = format!(
-        "bolsas_minutos_{}{:02}.csv",
-        month.year(),
-        month.month()
-    );
+    let filename = format!("bolsas_minutos_{}{:02}.csv", month.year(), month.month());
 
     Ok(HttpResponse::Ok()
         .content_type("text/csv")
@@ -495,44 +477,16 @@ pub async fn minute_bucket_report_export(
 }
 
 /// Configure minute bucket routes.
+///
+/// Only the `/reports/*` routes are registered here — the `/accounts/*` and
+/// `/plans/*` bucket-config/status/topup/history routes are registered
+/// directly in account::configure()/plan::configure() instead. actix-web
+/// commits routing to the first `web::scope` whose prefix matches; a second,
+/// separate scope with the same literal prefix ("/accounts", "/plans") never
+/// gets a chance to match anything below it and would silently 404.
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/plans")
-            .route("/{id}/bucket-config", web::get().to(get_plan_bucket_config))
-            .route("/{id}/bucket-config", web::put().to(update_plan_bucket_config)),
-    )
-    .service(
-        web::scope("/accounts")
-            .route(
-                "/{id}/bucket-config",
-                web::get().to(get_account_bucket_config),
-            )
-            .route(
-                "/{id}/bucket-config",
-                web::put().to(update_account_bucket_config),
-            )
-            .route(
-                "/{id}/minute-bucket",
-                web::get().to(get_minute_bucket_status),
-            )
-            .route(
-                "/{id}/minute-bucket",
-                web::put().to(update_minute_bucket_cycle),
-            )
-            .route(
-                "/{id}/minute-bucket/topup",
-                web::post().to(topup_minute_bucket),
-            )
-            .route(
-                "/{id}/minute-bucket/history",
-                web::get().to(minute_bucket_history),
-            ),
-    )
-    .service(
-        web::scope("/reports").route(
-            "/minute-bucket",
-            web::get().to(minute_bucket_report),
-        ),
+        web::scope("/reports").route("/minute-bucket", web::get().to(minute_bucket_report)),
     )
     .route(
         "/reports/minute-bucket/export",

@@ -633,7 +633,9 @@ async fn sync_carrier_to_kamailio(
             .bind(gwid)
             .execute(&kamailio_pool)
             .await
-            .map_err(|e| AppError::Database(format!("Failed to set Kamailio gateway attrs: {}", e)))?;
+            .map_err(|e| {
+                AppError::Database(format!("Failed to set Kamailio gateway attrs: {}", e))
+            })?;
 
         // Update PostgreSQL with the new gwid
         sqlx::query!(

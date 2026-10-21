@@ -20,8 +20,10 @@ pub struct InboundRouteResponse {
     pub is_wildcard: bool,
     pub source_ip: Option<String>,
     pub destination_type: String,
-    pub gateway_id: Option<Uuid>,
+    pub sip_endpoint_id: Option<Uuid>,
     pub gateway_name: Option<String>,
+    pub gateway_host: Option<String>,
+    pub gateway_port: Option<i32>,
     pub destination_host: String,
     pub strip_digits: i32,
     pub prefix_to_add: String,
@@ -46,8 +48,10 @@ pub struct CreateInboundRouteRequest {
     pub source_ip: Option<String>,
     #[serde(default = "default_destination_type")]
     pub destination_type: String,
+    /// Destination trunk (PBX) as a SIP device: `sip_endpoints.id`
+    /// where `endpoint_type = 'trunk'`.
     #[serde(default)]
-    pub gateway_id: Option<Uuid>,
+    pub sip_endpoint_id: Option<Uuid>,
     #[serde(default = "default_destination_host")]
     pub destination_host: String,
     #[serde(default = "default_strip_digits")]
@@ -84,6 +88,20 @@ fn default_true() -> bool {
     true
 }
 
+/// Deserialize a field that must distinguish "absent" from "null".
+///
+/// * key missing -> `None` (leave the stored value unchanged)
+/// * `null`      -> `Some(None)` (clear the stored value)
+/// * `"uuid"`    -> `Some(Some(id))` (store the given value)
+#[allow(clippy::option_option)]
+fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
 /// Update inbound route request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateInboundRouteRequest {
@@ -97,8 +115,13 @@ pub struct UpdateInboundRouteRequest {
     pub source_ip: Option<String>,
     #[serde(default)]
     pub destination_type: Option<String>,
-    #[serde(default)]
-    pub gateway_id: Option<Uuid>,
+    /// Destination trunk (PBX) as a SIP device: `sip_endpoints.id`
+    /// where `endpoint_type = 'trunk'`.
+    ///
+    /// Double option so the client can distinguish "leave unchanged" (field
+    /// omitted) from "clear" (`null`), which plain `Option` cannot do.
+    #[serde(default, deserialize_with = "double_option")]
+    pub sip_endpoint_id: Option<Option<Uuid>>,
     #[serde(default)]
     pub destination_host: Option<String>,
     #[serde(default)]
@@ -120,6 +143,20 @@ pub struct UpdateInboundRouteRequest {
 pub struct InboundRouteListResponse {
     pub data: Vec<InboundRouteResponse>,
     pub total: i64,
+}
+
+/// Destination option for the inbound route "Troncal (PBX)" dropdown.
+///
+/// Source: `sip_endpoints WHERE endpoint_type = 'trunk'` (SIP devices that are
+/// trunks/PBX, e.g. "PBX GC GROUP").
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboundGatewayOption {
+    pub id: Uuid,
+    pub name: String,
+    pub host: String,
+    pub port: i32,
+    pub transport: String,
+    pub fs_profile: String,
 }
 
 // ============================================================================

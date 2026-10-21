@@ -6,7 +6,6 @@ import Dashboard from './pages/Dashboard'
 import ActiveCalls from './pages/ActiveCalls'
 import CDR from './pages/CDR'
 import Accounts from './pages/Accounts'
-import Balance from './pages/Balance'
 import Zones from './pages/Zones'
 import Rates from './pages/Rates'
 import Plans from './pages/Plans'
@@ -15,15 +14,16 @@ import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
 import UnifiedRouting from './pages/UnifiedRouting'
 import InternalRouting from './pages/InternalRouting'
-import SipDevices from './pages/SipDevices'
+import SipEndpoints from './pages/SipEndpoints'
 import InboundRoutingPage from './pages/InboundRouting'
 import EndpointMonitor from './pages/EndpointMonitor'
 // New simplified routing pages
 import Carriers from './pages/Carriers'
-import Endpoints from './pages/Endpoints'
 import OutboundRouting from './pages/OutboundRouting'
 import CarrierGroups from './pages/CarrierGroups'
+import PBXGroups from './pages/PBXGroups'
 import Login from './pages/Login'
+import Settings from './pages/Settings'
 import { getCurrentUser } from './api/client'
 import { MODULES, hasModule, type ModuleKey } from './constants/modules'
 
@@ -138,14 +138,6 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/balance"
-                  element={
-                    <ProtectedRoute requiredModule={MODULES.BALANCE}>
-                      <Balance />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
                   path="/minute-buckets"
                   element={
                     <ProtectedRoute requiredModule={MODULES.MINUTE_BUCKETS}>
@@ -170,6 +162,14 @@ function AppRoutes() {
                   }
                 />
                 {/* Sistema - Admin+ only, never assignable to a Usuario */}
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.SYSTEM_SETTINGS}>
+                      <Settings />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="/users"
                   element={
@@ -208,7 +208,7 @@ function AppRoutes() {
                   path="/sip-devices"
                   element={
                     <ProtectedRoute requiredModule={MODULES.SIP_DEVICES}>
-                      <SipDevices />
+                      <SipEndpoints />
                     </ProtectedRoute>
                   }
                 />
@@ -238,14 +238,6 @@ function AppRoutes() {
                   }
                 />
                 <Route
-                  path="/endpoints"
-                  element={
-                    <ProtectedRoute requiredModule={MODULES.ENDPOINTS}>
-                      <Endpoints />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
                   path="/outbound-routing"
                   element={
                     <ProtectedRoute requiredModule={MODULES.OUTBOUND_ROUTING}>
@@ -258,6 +250,14 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute requiredModule={MODULES.CARRIER_GROUPS}>
                       <CarrierGroups />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/pbx-groups"
+                  element={
+                    <ProtectedRoute requiredModule={MODULES.SIP_DEVICES}>
+                      <PBXGroups />
                     </ProtectedRoute>
                   }
                 />

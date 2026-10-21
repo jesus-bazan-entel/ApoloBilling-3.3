@@ -1,22 +1,20 @@
 // src/services/authorization.rs
 
-use crate::models::{AuthRequest, AuthResponse, Account, AccountStatus, AccountType};
+use crate::models::{AuthRequest, AuthResponse, Account, AccountStatus};
 use crate::database::DbPool;
 use crate::cache::RedisClient;
-use crate::services::ReservationManager;
 use crate::services::MinuteBucketManager;
 use crate::error::BillingError;
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use tracing::{info, warn, error};
 use chrono::{DateTime, Utc};
 
 pub struct AuthorizationService {
     db_pool: DbPool,
     redis: RedisClient,
-    reservation_mgr: Arc<ReservationManager>,
     minute_bucket_mgr: Arc<MinuteBucketManager>,
 }
 
@@ -24,13 +22,11 @@ impl AuthorizationService {
     pub fn new(
         db_pool: DbPool,
         redis: RedisClient,
-        reservation_mgr: Arc<ReservationManager>,
         minute_bucket_mgr: Arc<MinuteBucketManager>,
     ) -> Self {
         Self {
             db_pool,
             redis,
-            reservation_mgr,
             minute_bucket_mgr,
         }
     }
@@ -38,11 +34,42 @@ impl AuthorizationService {
     pub async fn authorize(&self, req: &AuthRequest) -> Result<AuthResponse, BillingError> {
         let call_uuid = req.uuid.clone().unwrap_or_else(|| Uuid::new_v4().to_string());
         let direction = req.direction.as_deref().unwrap_or("outbound");
+        let source_ip = req.source_ip.as_deref();
 
         info!(
-            "🔍 Authorizing call [v2] {}: {} → {} [{}]",
-            call_uuid, req.caller, req.callee, direction
+            "🔍 Authorizing call [v2] {}: {} → {} [{}] source_ip={:?}",
+            call_uuid, req.caller, req.callee, direction, source_ip
         );
+
+        // 🔒 Límite de llamadas simultáneas por endpoint con auth_mode=credentials
+        // (extensiones y troncales que se registran por usuario/contraseña).
+        // Bypassean el routing de Kamailio (RELAY_LANEXT), así que
+        // CHECK_CALL_LIMIT nunca las ve: su límite
+        // (sip_endpoints.max_concurrent_calls) se enforcea aquí contando
+        // active_calls. Las troncales IP (auth_mode=ip) se enforcean en
+        // Kamailio (ver sync_trunk_call_settings), no acá. Corre antes que el
+        // billing porque es control de capacidad, no de saldo. Fail-open ante
+        // errores de DB.
+        if let Some(reason) = self
+            .check_endpoint_concurrent_limit(&req.caller, &req.callee)
+            .await
+        {
+            warn!(
+                "🚫 Endpoint concurrent limit exceeded: {} → {} [{}]",
+                req.caller, req.callee, reason
+            );
+            return Ok(AuthResponse {
+                authorized: false,
+                reason,
+                uuid: call_uuid,
+                account_id: None,
+                account_number: None,
+                reservation_id: None,
+                reserved_amount: None,
+                max_duration_seconds: None,
+                rate_per_minute: None,
+            });
+        }
 
         // Check if outbound authorization is required (system setting)
         if direction == "outbound" {
@@ -66,56 +93,6 @@ impl AuthorizationService {
             }
         }
 
-        // 🔒 Try to acquire authorization lock to prevent duplicate reservations
-        let lock_key = format!("auth_lock:{}", call_uuid);
-        let lock_acquired = self.redis.setnx_ex(&lock_key, "1", 30).await.unwrap_or(false);
-
-        if !lock_acquired {
-            // Another process is authorizing this call, wait for reservation to appear
-            info!("⏳ Authorization lock exists for {}, waiting for existing reservation...", call_uuid);
-
-            // Wait up to 500ms for the reservation to appear
-            for _ in 0..5 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-                let client = self.db_pool.get().await
-                    .map_err(|e| BillingError::Internal(e.to_string()))?;
-
-                let existing = client.query_opt(
-                    "SELECT id, reserved_amount, rate_per_minute, account_id
-                     FROM balance_reservations WHERE call_uuid = $1 AND status = 'active' LIMIT 1",
-                    &[&call_uuid]
-                ).await.map_err(|e| BillingError::Database(e))?;
-
-                if let Some(row) = existing {
-                    let reservation_id: Uuid = row.get(0);
-                    let reserved_amount: Decimal = row.get(1);
-                    let rate_per_minute: Decimal = row.get(2);
-                    let account_id: i32 = row.get(3);
-
-                    info!(
-                        "✅ Found existing reservation {} for call {} (waited for lock)",
-                        reservation_id, call_uuid
-                    );
-
-                    return Ok(AuthResponse {
-                        authorized: true,
-                        reason: "authorized_existing".to_string(),
-                        uuid: call_uuid,
-                        account_id: Some(account_id.into()),
-                        account_number: None,
-                        reservation_id: Some(reservation_id),
-                        reserved_amount: Some(reserved_amount.to_f64().unwrap_or(0.0)),
-                        max_duration_seconds: Some(324),
-                        rate_per_minute: Some(rate_per_minute.to_f64().unwrap_or(0.0)),
-                    });
-                }
-            }
-
-            // If still no reservation after waiting, it might be denied
-            warn!("⚠️ Lock exists but no reservation found for {} after waiting", call_uuid);
-        }
-
         // 🔍 Check if callee is a toll-free number (0800, 0801, 1800)
         // For toll-free, the account is looked up by CALLEE (the 0800 owner pays)
         let is_toll_free = req.callee.starts_with("0800")
@@ -123,17 +100,54 @@ impl AuthorizationService {
             || req.callee.starts_with("1800");
 
         // 1. Find account by ANI (caller) or by DNIS (callee) for toll-free
+        // Also pass source_ip for IP-authenticated trunk lookup
         let (account, lookup_number) = if is_toll_free {
             info!("📞 Toll-free call detected: {} → {} - looking up account by callee", req.caller, req.callee);
-            (self.find_account_by_ani(&req.callee).await?, req.callee.clone())
+            (self.find_account_by_ani_and_ip(&req.callee, source_ip).await?, req.callee.clone())
         } else {
-            (self.find_account_by_ani(&req.caller).await?, req.caller.clone())
+            (self.find_account_by_ani_and_ip(&req.caller, source_ip).await?, req.caller.clone())
         };
 
         let account = match account {
             Some(acc) => acc,
             None => {
-                // No account found: authorize without billing
+                // No account found: check if we should reject the call
+                if direction == "outbound" && self.require_account_for_outbound().await {
+                    warn!(
+                        "🚫 No account found for {} ({}), REJECTING call (require_account_for_outbound=true)",
+                        lookup_number, if is_toll_free { "callee (toll-free)" } else { "caller" }
+                    );
+                    return Ok(AuthResponse {
+                        authorized: false,
+                        reason: "no_account_associated".to_string(),
+                        uuid: call_uuid,
+                        account_id: None,
+                        account_number: None,
+                        reservation_id: None,
+                        reserved_amount: None,
+                        max_duration_seconds: None,
+                        rate_per_minute: None,
+                    });
+                }
+                if direction == "inbound" && self.require_account_for_inbound().await {
+                    warn!(
+                        "🚫 No account found for {} ({}), REJECTING call (require_account_for_inbound=true)",
+                        lookup_number, if is_toll_free { "callee (toll-free)" } else { "caller" }
+                    );
+                    return Ok(AuthResponse {
+                        authorized: false,
+                        reason: "no_account_associated".to_string(),
+                        uuid: call_uuid,
+                        account_id: None,
+                        account_number: None,
+                        reservation_id: None,
+                        reserved_amount: None,
+                        max_duration_seconds: None,
+                        rate_per_minute: None,
+                    });
+                }
+
+                // No account found: authorize without billing (legacy behavior)
                 info!(
                     "✅ No account found for {} ({}), authorizing WITHOUT billing",
                     lookup_number, if is_toll_free { "callee (toll-free)" } else { "caller" }
@@ -196,121 +210,17 @@ impl AuthorizationService {
             );
         }
 
-        // 3. Bolsa de minutos vs saldo: la bolsa no necesita tarifa para autorizar
-        //    (el bloqueo de Control es por conteo de minutos, no por dinero).
-        if account.billing_model == "minute_bucket" {
-            return self.authorize_minute_bucket(account, &req.callee, call_uuid).await;
-        }
-
-        // 3. Get rate for destination
-        let rate = match self.get_rate(&req.callee).await? {
-            Some(r) => r,
-            None => {
-                // No rate found: authorize without billing
-                info!(
-                    "✅ No rate found for destination {}, authorizing WITHOUT billing for account {}",
-                    req.callee, account.account_number
-                );
-                return Ok(AuthResponse {
-                    authorized: true,
-                    reason: "authorized_no_rate".to_string(),
-                    uuid: call_uuid,
-                    account_id: Some(account.id.into()),
-                    account_number: Some(account.account_number),
-                    reservation_id: None,
-                    reserved_amount: None,
-                    max_duration_seconds: None,
-                    rate_per_minute: None,
-                });
-            }
-        };
-
-        info!(
-            "📊 Rate found: {} - ${}/min",
-            rate.destination_name, rate.rate_per_minute
-        );
-
-        // 4. Check if reservation already exists for this call (prevent duplicates)
-        let client = self.db_pool.get().await
-            .map_err(|e| BillingError::Internal(e.to_string()))?;
-
-        let existing = client.query_opt(
-            "SELECT id, reserved_amount FROM balance_reservations WHERE call_uuid = $1 AND status = 'active' LIMIT 1",
-            &[&call_uuid]
-        ).await.map_err(|e| BillingError::Database(e))?;
-
-        if let Some(row) = existing {
-            let reservation_id: Uuid = row.get(0);
-            let reserved_amount: Decimal = row.get(1);
-            info!(
-                "⏭️  Reservation already exists for call {}: {} (${:.2})",
-                call_uuid, reservation_id, reserved_amount
-            );
-
-            return Ok(AuthResponse {
-                authorized: true,
-                reason: "authorized_existing".to_string(),
-                uuid: call_uuid,
-                account_id: Some(account.id.into()),
-                account_number: Some(account.account_number.clone()),
-                reservation_id: Some(reservation_id),
-                reserved_amount: Some(reserved_amount.to_f64().unwrap_or(0.0)),
-                max_duration_seconds: Some(300), // Default 5 minutes
-                rate_per_minute: Some(rate.rate_per_minute.to_f64().unwrap_or(0.0)),
-            });
-        }
-
-        // 5. Create new reservation (pass account's concurrent call limit)
-        let reservation_result = self.reservation_mgr
-            .create_reservation(
-                account.id.into(),
-                &call_uuid,
-                &req.callee,
-                rate.rate_per_minute,
-                account.max_concurrent_calls,
-            )
-            .await?;
-
-        if !reservation_result.success {
-            warn!("❌ Reservation failed: {}", reservation_result.reason);
-            return Ok(AuthResponse {
-                authorized: false,
-                reason: reservation_result.reason,
-                uuid: call_uuid,
-                account_id: Some(account.id.into()),
-                account_number: Some(account.account_number),
-                reservation_id: None,
-                reserved_amount: None,
-                max_duration_seconds: None,
-                rate_per_minute: None,
-            });
-        }
-
-        // 6. AUTHORIZED ✅
-        info!(
-            "✅ Call AUTHORIZED: {} for account {}",
-            call_uuid, account.account_number
-        );
-
-        Ok(AuthResponse {
-            authorized: true,
-            reason: "authorized".to_string(),
-            uuid: call_uuid,
-            account_id: Some(account.id.into()),
-            account_number: Some(account.account_number.clone()),
-            reservation_id: Some(reservation_result.reservation_id),
-            reserved_amount: Some(reservation_result.reserved_amount),
-            max_duration_seconds: Some(reservation_result.max_duration_seconds),
-            rate_per_minute: Some(rate.rate_per_minute.to_f64().unwrap_or(0.0)),
-        })
+        // 3. Every account bills via the minute-bucket model (Plan Control /
+        // Plan Abierto) — authorization is a minute count, not a dollar check.
+        self.authorize_minute_bucket(account, &req.callee, call_uuid).await
     }
 
-    /// Authorization branch for accounts on the minute-bucket billing model
-    /// (Plan Control / Plan Abierto). Control denies brand-new calls once the
-    /// bucket is exhausted; Abierto never denies. Neither branch computes a
-    /// dollar reservation or a hard max-duration cap — a call already in
-    /// progress when the bucket empties is never cut, its tail bills as
-    /// overage when the CDR is generated (see CdrGenerator).
+    /// Authorization for the minute-bucket model (Plan Control / Plan
+    /// Abierto). Control denies brand-new calls once the bucket is
+    /// exhausted; Abierto never denies. Neither branch computes a dollar
+    /// reservation or a hard max-duration cap — a call already in progress
+    /// when the bucket empties is never cut, its tail bills as overage when
+    /// the CDR is generated (see CdrGenerator).
     async fn authorize_minute_bucket(
         &self,
         account: Account,
@@ -355,18 +265,90 @@ impl AuthorizationService {
         }
     }
 
+    /// Concurrent-call limit for `auth_mode = 'credentials'` endpoints
+    /// (extensions and credential-auth trunks), FreeSWITCH side.
+    ///
+    /// These endpoints bypass Kamailio routing (RELAY_LANEXT), so Kamailio's
+    /// `CHECK_CALL_LIMIT` never sees them. This counts the endpoint's live
+    /// rows in `active_calls` — both directions, as caller and as callee —
+    /// and rejects the new call once `max_concurrent_calls` is reached.
+    /// Only `auth_mode = 'credentials'` rows are considered: IP trunks are
+    /// enforced in Kamailio (see `sync_trunk_call_settings`) and their caller
+    /// IDs are external numbers that never match a sip_username anyway.
+    /// Returns `Some(reason)` when the call must be rejected, `None` when it
+    /// may proceed. Fail-open: DB errors log and allow the call (never drop
+    /// traffic because of infra issues).
+    /// NOTE: count-then-insert is not atomic; under exactly-simultaneous
+    /// setup two calls can both see N-1 and both proceed (overshoot by one).
+    /// Same best-effort trade-off as the rest of this service.
+    pub async fn check_endpoint_concurrent_limit(
+        &self,
+        caller: &str,
+        callee: &str,
+    ) -> Option<String> {
+        if caller.is_empty() && callee.is_empty() {
+            return None;
+        }
+        let client = match self.db_pool.get().await {
+            Ok(c) => c,
+            Err(e) => {
+                error!(
+                    "❌ Endpoint limit check: DB unavailable, allowing call: {:?}",
+                    e
+                );
+                return None;
+            }
+        };
+        let rows = match client
+            .query(
+                "SELECT se.sip_username, se.max_concurrent_calls,
+                        (SELECT COUNT(*) FROM active_calls ac
+                         WHERE ac.calling_number = se.sip_username
+                            OR ac.called_number = se.sip_username)
+                 FROM sip_endpoints se
+                 WHERE se.auth_mode = 'credentials'
+                   AND se.sip_username IS NOT NULL
+                   AND se.sip_username IN ($1, $2)",
+                &[&caller, &callee],
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!("❌ Endpoint limit check failed, allowing call: {:?}", e);
+                return None;
+            }
+        };
+        let mut seen = HashSet::new();
+        for r in rows {
+            let username: String = r.get(0);
+            if !seen.insert(username.clone()) {
+                continue;
+            }
+            let max: i32 = r.get(1);
+            let active: i64 = r.get(2);
+            if active >= max as i64 {
+                info!(
+                    "🚫 Endpoint {} at concurrent limit ({}/{} active), rejecting new call",
+                    username, active, max
+                );
+                return Some("endpoint_concurrent_limit_exceeded".to_string());
+            }
+        }
+        None
+    }
+
     async fn find_account_by_ani(&self, ani: &str) -> Result<Option<Account>, BillingError> {
         let normalized = ani.replace('+', "").replace(' ', "").replace('-', "");
 
         let client = self.db_pool.get().await
             .map_err(|e| BillingError::Internal(e.to_string()))?;
-        
+
         let row = client
             .query_opt(
-                "SELECT id, account_number, account_type::text, balance,
-                        max_concurrent_calls, status::text,
+                "SELECT id, account_number, max_concurrent_calls, status::text,
                         created_at, updated_at,
-                        billing_model, bucket_type, overage_flat_rate_per_minute, overage_tariff_group
+                        bucket_type, overage_flat_rate_per_minute, overage_tariff_group
                 FROM accounts
                 WHERE (account_number = $1 OR account_number = $2)
                 LIMIT 1",
@@ -378,40 +360,57 @@ impl AuthorizationService {
                 BillingError::Database(e)
             })?;
 
+        // The ANI rarely equals the account_number directly once calls come
+        // from the unified Dispositivos SIP module: an extension/trunk's
+        // sip_username is an arbitrary identifier linked to its billing
+        // account via sip_endpoints.account_id, not via account_number. Fall
+        // back to that link before giving up on the lookup.
+        let row = match row {
+            Some(r) => Some(r),
+            None => client
+                .query_opt(
+                    "SELECT a.id, a.account_number, a.max_concurrent_calls, a.status::text,
+                            a.created_at, a.updated_at,
+                            a.bucket_type, a.overage_flat_rate_per_minute, a.overage_tariff_group
+                    FROM sip_endpoints se
+                    JOIN accounts a ON a.id = se.account_id
+                    WHERE se.sip_username = $1
+                    LIMIT 1",
+                    &[&ani],
+                )
+                .await
+                .map_err(|e| {
+                    error!("❌ Database error finding account via sip_endpoints: {:?}", e);
+                    BillingError::Database(e)
+                })?,
+        };
+
         match row {
             Some(r) => {
                 let id: i32 = r.get(0);
                 let account_number: String = r.get(1);
-                let account_type_str: String = r.get(2);
-                let balance: Decimal = r.get(3);
-                let max_concurrent_calls: i32 = r.get(4);
-                let status_str: String = r.get(5);
+                let max_concurrent_calls: i32 = r.get(2);
+                let status_str: String = r.get(3);
 
                 // ✅ TIMESTAMP WITH TIME ZONE se deserializa directamente como DateTime<Utc>
-                let created_at: DateTime<Utc> = r.get(6);
-                let updated_at: DateTime<Utc> = r.get(7);
-                let billing_model: String = r.get(8);
-                let bucket_type: Option<String> = r.get(9);
-                let overage_flat_rate_per_minute: Option<Decimal> = r.get(10);
-                let overage_tariff_group: Option<String> = r.get(11);
+                let created_at: DateTime<Utc> = r.get(4);
+                let updated_at: DateTime<Utc> = r.get(5);
+                let bucket_type: Option<String> = r.get(6);
+                let overage_flat_rate_per_minute: Option<Decimal> = r.get(7);
+                let overage_tariff_group: Option<String> = r.get(8);
 
                 info!(
-                    "✅ Found account: {} (ID: {}, Type: {}, Balance: ${}, Status: {}, BillingModel: {})",
-                    account_number, id, account_type_str, balance, status_str, billing_model
+                    "✅ Found account: {} (ID: {}, Status: {}, BucketType: {:?})",
+                    account_number, id, status_str, bucket_type
                 );
 
                 Ok(Some(Account {
                     id,
                     account_number,
-                    account_type: AccountType::from_str(&account_type_str),
-                    balance,
-                    credit_limit: Decimal::ZERO,
-                    currency: "USD".to_string(),
                     status: AccountStatus::from_str(&status_str),
                     max_concurrent_calls: Some(max_concurrent_calls),
                     created_at,
                     updated_at,
-                    billing_model,
                     bucket_type,
                     overage_flat_rate_per_minute,
                     overage_tariff_group,
@@ -465,75 +464,198 @@ impl AuthorizationService {
         result
     }
 
-    async fn get_rate(&self, destination: &str) -> Result<Option<crate::models::RateCard>, BillingError> {
-        let normalized = destination.replace('+', "");
+    /// Check if outbound calls require an associated account.
+    /// When enabled, calls from endpoints without account_id are rejected.
+    /// Caches the result in Redis for 30 seconds.
+    async fn require_account_for_outbound(&self) -> bool {
+        let cache_key = "setting:require_account_for_outbound";
 
-        let cache_key = format!("rate:{}", &normalized[..std::cmp::min(10, normalized.len())]);
-        if let Ok(Some(cached)) = self.redis.get(&cache_key).await {
-            if let Ok(rate) = serde_json::from_str(&cached) {
-                return Ok(Some(rate));
-            }
+        // Check Redis cache first
+        if let Ok(Some(cached)) = self.redis.get(cache_key).await {
+            return cached == "true";
         }
+
+        // Query database
+        let result = match self.db_pool.get().await {
+            Ok(client) => {
+                match client.query_opt(
+                    "SELECT value FROM system_settings WHERE key = 'require_account_for_outbound'",
+                    &[],
+                ).await {
+                    Ok(Some(row)) => {
+                        let value: String = row.get(0);
+                        value == "true"
+                    }
+                    Ok(None) => false, // Default: not required
+                    Err(e) => {
+                        error!("❌ Error checking require_account_for_outbound setting: {:?}", e);
+                        false // Default to not required on error
+                    }
+                }
+            }
+            Err(e) => {
+                error!("❌ Error getting DB connection for require_account_for_outbound: {:?}", e);
+                false // Default to not required on error
+            }
+        };
+
+        // Cache the result for 30 seconds
+        let cache_value = if result { "true" } else { "false" };
+        let _ = self.redis.set(cache_key, cache_value, 30).await;
+
+        result
+    }
+
+    /// Check if inbound calls require an associated account.
+    /// When enabled, calls from endpoints without account_id are rejected.
+    /// Caches the result in Redis for 30 seconds.
+    async fn require_account_for_inbound(&self) -> bool {
+        let cache_key = "setting:require_account_for_inbound";
+
+        // Check Redis cache first
+        if let Ok(Some(cached)) = self.redis.get(cache_key).await {
+            return cached == "true";
+        }
+
+        // Query database
+        let result = match self.db_pool.get().await {
+            Ok(client) => {
+                match client.query_opt(
+                    "SELECT value FROM system_settings WHERE key = 'require_account_for_inbound'",
+                    &[],
+                ).await {
+                    Ok(Some(row)) => {
+                        let value: String = row.get(0);
+                        value == "true"
+                    }
+                    Ok(None) => false, // Default: not required
+                    Err(e) => {
+                        error!("❌ Error checking require_account_for_inbound setting: {:?}", e);
+                        false // Default to not required on error
+                    }
+                }
+            }
+            Err(e) => {
+                error!("❌ Error getting DB connection for require_account_for_inbound: {:?}", e);
+                false // Default to not required on error
+            }
+        };
+
+        // Cache the result for 30 seconds
+        let cache_value = if result { "true" } else { "false" };
+        let _ = self.redis.set(cache_key, cache_value, 30).await;
+
+        result
+    }
+
+    /// Find account by ANI (caller) or by SIP endpoint (username or IP).
+    /// For IP-authenticated trunks, also looks up by source_ip.
+    async fn find_account_by_ani_and_ip(&self, ani: &str, source_ip: Option<&str>) -> Result<Option<Account>, BillingError> {
+        let normalized = ani.replace('+', "").replace(' ', "").replace('-', "");
 
         let client = self.db_pool.get().await
             .map_err(|e| BillingError::Internal(e.to_string()))?;
-        
-        let mut prefixes: Vec<String> = Vec::new();
-        for i in (1..=normalized.len()).rev() {
-            prefixes.push(normalized[..i].to_string());
-        }
-        info!("🔎 Generated prefixes for {}: {:?}", normalized, prefixes);
 
+        // 1. Try direct account_number match
         let row = client
             .query_opt(
-                "SELECT id, destination_prefix, destination_name, rate_per_minute,
-                        billing_increment, connection_fee, 
-                        effective_start, effective_end, priority
-                FROM rate_cards
-                WHERE destination_prefix = ANY($1)
-                AND card_group = 'standard'
-                AND effective_start <= NOW()
-                AND (effective_end IS NULL OR effective_end >= NOW())
-                ORDER BY LENGTH(destination_prefix) DESC, priority DESC
+                "SELECT id, account_number, max_concurrent_calls, status::text,
+                        created_at, updated_at,
+                        bucket_type, overage_flat_rate_per_minute, overage_tariff_group
+                FROM accounts
+                WHERE (account_number = $1 OR account_number = $2)
                 LIMIT 1",
-                &[&prefixes],
+                &[&ani, &normalized],
             )
             .await
             .map_err(|e| {
-                error!("❌ Database error getting rate: {:?}", e);
+                error!("❌ Database error finding account: {:?}", e);
                 BillingError::Database(e)
             })?;
 
+        // 2. Fallback: look up by sip_username (credentials auth)
+        let row = match row {
+            Some(r) => Some(r),
+            None => client
+                .query_opt(
+                    "SELECT a.id, a.account_number, a.max_concurrent_calls, a.status::text,
+                            a.created_at, a.updated_at,
+                            a.bucket_type, a.overage_flat_rate_per_minute, a.overage_tariff_group
+                    FROM sip_endpoints se
+                    JOIN accounts a ON a.id = se.account_id
+                    WHERE se.sip_username = $1
+                    LIMIT 1",
+                    &[&ani],
+                )
+                .await
+                .map_err(|e| {
+                    error!("❌ Database error finding account via sip_endpoints: {:?}", e);
+                    BillingError::Database(e)
+                })?,
+        };
+
+        // 3. For IP-authenticated trunks, look up by source_ip
+        let row = match row {
+            Some(r) => Some(r),
+            None => {
+                if let Some(ip) = source_ip {
+                    client
+                        .query_opt(
+                            "SELECT a.id, a.account_number, a.max_concurrent_calls, a.status::text,
+                                    a.created_at, a.updated_at,
+                                    a.bucket_type, a.overage_flat_rate_per_minute, a.overage_tariff_group
+                            FROM sip_endpoints se
+                            JOIN accounts a ON a.id = se.account_id
+                            WHERE se.host = $1
+                            LIMIT 1",
+                            &[&ip],
+                        )
+                        .await
+                        .map_err(|e| {
+                            error!("❌ Database error finding account via sip_endpoints by IP: {:?}", e);
+                            BillingError::Database(e)
+                        })?
+                } else {
+                    None
+                }
+            }
+        };
+
         match row {
             Some(r) => {
-                // TIMESTAMP WITH TIME ZONE se deserializa directamente como DateTime<Utc>
-                let effective_start: DateTime<Utc> = r.get(6);
-                let effective_end: Option<DateTime<Utc>> = r.try_get(7).ok();
+                let id: i32 = r.get(0);
+                let account_number: String = r.get(1);
+                let max_concurrent_calls: i32 = r.get(2);
+                let status_str: String = r.get(3);
 
-                let rate = crate::models::RateCard {
-                    id: r.get(0),
-                    destination_prefix: r.get(1),
-                    destination_name: r.get(2),
-                    rate_per_minute: r.get(3),
-                    billing_increment: r.get(4),
-                    connection_fee: r.get(5),
-                    effective_start,
-                    effective_end,
-                    priority: r.get(8),
-                };
+                // ✅ TIMESTAMP WITH TIME ZONE se deserializa directamente como DateTime<Utc>
+                let created_at: DateTime<Utc> = r.get(4);
+                let updated_at: DateTime<Utc> = r.get(5);
+                let bucket_type: Option<String> = r.get(6);
+                let overage_flat_rate_per_minute: Option<Decimal> = r.get(7);
+                let overage_tariff_group: Option<String> = r.get(8);
 
                 info!(
-                    "✅ Rate card loaded: {} (${}/min, {} sec increment, priority {})",
-                    rate.destination_name, rate.rate_per_minute, rate.billing_increment, rate.priority
+                    "✅ Found account: {} (ID: {}, Status: {}, BucketType: {:?})",
+                    account_number, id, status_str, bucket_type
                 );
 
-                if let Ok(json) = serde_json::to_string(&rate) {
-                    let _ = self.redis.set(&cache_key, &json, 300).await;
-                }
-
-                Ok(Some(rate))
+                Ok(Some(Account {
+                    id,
+                    account_number,
+                    status: AccountStatus::from_str(&status_str),
+                    max_concurrent_calls: Some(max_concurrent_calls),
+                    created_at,
+                    updated_at,
+                    bucket_type,
+                    overage_flat_rate_per_minute,
+                    overage_tariff_group,
+                }))
             }
-            None => Ok(None),
+            None => {
+                info!("ℹ️  No account found for ANI: {} (normalized: {}) source_ip: {:?}", ani, normalized, source_ip);
+                Ok(None)
+            }
         }
     }
 }

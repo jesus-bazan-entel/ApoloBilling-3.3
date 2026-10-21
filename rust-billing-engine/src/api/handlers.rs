@@ -1,7 +1,7 @@
 // src/api/handlers.rs
 use actix_web::{web, HttpResponse};
-use crate::services::{AuthorizationService, ReservationManager, CallSimulator, SimulateCallRequest, SimulationScenario};
-use crate::models::{AuthRequest, ConsumeReservationRequest, HealthResponse};
+use crate::services::{AuthorizationService, CallSimulator, SimulateCallRequest, SimulationScenario};
+use crate::models::{AuthRequest, HealthResponse};
 use std::sync::Arc;
 
 /// Query parameters for FreeSWITCH authorization (GET request)
@@ -13,6 +13,8 @@ pub struct FreeSwitchAuthQuery {
     pub uuid: Option<String>,
     #[serde(default)]
     pub direction: Option<String>,
+    #[serde(default)]
+    pub source_ip: Option<String>,
 }
 
 pub async fn health_check() -> HttpResponse {
@@ -52,6 +54,7 @@ pub async fn freeswitch_authorize(
         callee: query.callee.clone(),
         uuid: query.uuid.clone(),
         direction: query.direction.clone(),
+        source_ip: query.source_ip.clone(),
     };
 
     match auth_service.authorize(&auth_req).await {
@@ -81,22 +84,6 @@ pub async fn freeswitch_authorize(
             HttpResponse::Ok()
                 .content_type("text/plain")
                 .body(format!("DENIED|internal_error:{}", e))
-        }
-    }
-}
-
-pub async fn consume_reservation(
-    req: web::Json<ConsumeReservationRequest>,
-    reservation_mgr: web::Data<Arc<ReservationManager>>,
-) -> HttpResponse {
-    match reservation_mgr.consume_reservation(&req).await {
-        Ok(response) => HttpResponse::Ok().json(response),
-        Err(e) => {
-            tracing::error!("Consume reservation error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "consume_failed",
-                "message": e.to_string()
-            }))
         }
     }
 }

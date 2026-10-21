@@ -8,16 +8,15 @@ use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
     configure_carriers, configure_dashboard, configure_dialplan, configure_endpoint_monitor,
-    configure_endpoints, configure_freeswitch_directory, configure_inbound_routing,
-    configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
-    configure_management, configure_minute_buckets, configure_modules, configure_outbound_routing,
-    configure_plans, configure_rate_cards, configure_rates, configure_reservations, configure_settings,
-    configure_sip_devices, configure_stats, configure_unified_routing, configure_users, create_cdr,
-    ws_handler,
+    configure_freeswitch_directory, configure_inbound_routing, configure_internal_routes,
+    configure_kamailio_dialplan, configure_management, configure_minute_buckets, configure_modules,
+    configure_outbound_routing, configure_pbx_groups, configure_plans, configure_rate_cards,
+    configure_rates, configure_settings, configure_sip_endpoints, configure_stats,
+    configure_unified_routing, configure_users, create_cdr, ws_handler,
 };
 use apolo_auth::{JwtService, PasswordService};
 use apolo_db::create_pool;
-use apolo_services::SipDeviceService;
+use apolo_services::SipEndpointService;
 use sqlx::mysql::MySqlPoolOptions;
 use std::env;
 use std::sync::Arc;
@@ -63,8 +62,6 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_minute_buckets)
             // Active calls endpoints
             .configure(configure_active_calls)
-            // Reservations endpoints
-            .configure(configure_reservations)
             // Zone/Prefix/Tariff management endpoints
             .configure(configure_management)
             // Dialplan FreeSWITCH management (superadmin only)
@@ -73,22 +70,20 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_kamailio_dialplan)
             // System settings (read: authenticated; write: superadmin only)
             .configure(configure_settings)
-            // SIP Device management
-            .configure(configure_sip_devices)
+            // Unified SIP Endpoint management (extensions + trunks)
+            .configure(configure_sip_endpoints)
+            // PBX Groups (same-owner failover sets for IP trunks)
+            .configure(configure_pbx_groups)
             // Unified Routing management (superadmin only) - legacy
             .configure(configure_unified_routing)
             // NEW: Simplified carrier management (dr_gateways type=8)
             .configure(configure_carriers)
-            // NEW: Simplified endpoint management (dr_gateways type=9)
-            .configure(configure_endpoints)
             // NEW: Simplified outbound routing (carrier groups + routes)
             .configure(configure_outbound_routing)
             // Inbound Routing (Carrier → DID Override model)
             .configure(configure_inbound_routing)
             // Internal routing (FreeSWITCH <-> Kamailio)
             .service(configure_internal_routes())
-            // Kamailio Endpoints (PBX) - direct DB access
-            .configure(configure_kamailio_endpoints)
             // FreeSWITCH mod_xml_curl directory (IP whitelist protected, no JWT)
             .configure(configure_freeswitch_directory)
             // Endpoint Monitor (SIP connectivity monitoring)
@@ -181,21 +176,21 @@ async fn main() -> std::io::Result<()> {
     let cors_origins = env::var("CORS_ORIGINS")
         .unwrap_or_else(|_| "http://localhost:3000,http://127.0.0.1:3000".to_string());
 
-    // SIP Device encryption service (optional - if key not set, SIP device features will error)
+    // SIP Endpoint encryption service (optional - if key not set, SIP endpoint features will error)
     let sip_service = match env::var("SIP_ENCRYPTION_KEY") {
-        Ok(key) => match SipDeviceService::new(&key) {
+        Ok(key) => match SipEndpointService::new(&key) {
             Ok(service) => {
-                info!("SIP Device service initialized with encryption");
+                info!("SIP Endpoint service initialized with encryption");
                 Some(Arc::new(service))
             }
             Err(e) => {
-                warn!("Failed to initialize SIP Device service: {}. SIP device features will be unavailable.", e);
+                warn!("Failed to initialize SIP Endpoint service: {}. SIP endpoint features will be unavailable.", e);
                 None
             }
         },
         Err(_) => {
             info!("SIP_ENCRYPTION_KEY not set. Generate with: openssl rand -hex 32");
-            info!("SIP device management features will be unavailable until configured.");
+            info!("SIP endpoint management features will be unavailable until configured.");
             None
         }
     };
@@ -285,7 +280,7 @@ async fn main() -> std::io::Result<()> {
             app = app.app_data(web::Data::new(mysql_pool.clone()));
         }
 
-        // Add SIP Device service if available
+        // Add SIP Endpoint service if available
         if let Some(ref sip_svc) = sip_service_clone {
             app = app.app_data(web::Data::new(sip_svc.clone()));
         }

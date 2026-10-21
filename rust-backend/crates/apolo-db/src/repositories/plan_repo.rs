@@ -1,15 +1,17 @@
 //! Plan repository implementation
 //!
-//! Provides PostgreSQL-backed storage for plan entities.
+//! Provides PostgreSQL-backed storage for plan entities (minute-bucket
+//! templates: Plan Control / Plan Abierto).
 
-use apolo_core::{
-    models::{AccountType, Plan},
-    AppError, AppResult,
-};
+use apolo_core::{models::Plan, AppError, AppResult};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::{FromRow, PgPool};
 use tracing::{debug, error, instrument};
+
+const PLAN_COLS: &str = "id, plan_name, plan_code, bucket_type, included_minutes, \
+    proration_mode, overage_flat_rate_per_minute, overage_tariff_group, max_concurrent_calls, \
+    description, enabled, created_at, updated_at, created_by";
 
 /// Database row representation of a plan
 #[derive(Debug, FromRow)]
@@ -17,9 +19,11 @@ struct PlanRow {
     id: i32,
     plan_name: String,
     plan_code: String,
-    account_type: String,
-    initial_balance: Decimal,
-    credit_limit: Decimal,
+    bucket_type: String,
+    included_minutes: i32,
+    proration_mode: String,
+    overage_flat_rate_per_minute: Option<Decimal>,
+    overage_tariff_group: Option<String>,
     max_concurrent_calls: i32,
     description: Option<String>,
     enabled: bool,
@@ -34,9 +38,11 @@ impl From<PlanRow> for Plan {
             id: row.id,
             plan_name: row.plan_name,
             plan_code: row.plan_code,
-            account_type: AccountType::from_str(&row.account_type).unwrap_or(AccountType::Prepaid),
-            initial_balance: row.initial_balance,
-            credit_limit: row.credit_limit,
+            bucket_type: row.bucket_type,
+            included_minutes: row.included_minutes,
+            proration_mode: row.proration_mode,
+            overage_flat_rate_per_minute: row.overage_flat_rate_per_minute,
+            overage_tariff_group: row.overage_tariff_group,
             max_concurrent_calls: row.max_concurrent_calls,
             description: row.description,
             enabled: row.enabled,
@@ -63,16 +69,9 @@ impl PgPlanRepository {
     pub async fn find_by_id(&self, id: i32) -> AppResult<Option<Plan>> {
         debug!("Finding plan by id: {}", id);
 
-        let result = sqlx::query_as::<sqlx::Postgres, PlanRow>(
-            r#"
-            SELECT
-                id, plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
-                description, enabled, created_at, updated_at, created_by
-            FROM plans
-            WHERE id = $1
-            "#,
-        )
+        let result = sqlx::query_as::<sqlx::Postgres, PlanRow>(&format!(
+            "SELECT {PLAN_COLS} FROM plans WHERE id = $1"
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -89,16 +88,9 @@ impl PgPlanRepository {
     pub async fn find_by_code(&self, plan_code: &str) -> AppResult<Option<Plan>> {
         debug!("Finding plan by code: {}", plan_code);
 
-        let result = sqlx::query_as::<sqlx::Postgres, PlanRow>(
-            r#"
-            SELECT
-                id, plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
-                description, enabled, created_at, updated_at, created_by
-            FROM plans
-            WHERE plan_code = $1
-            "#,
-        )
+        let result = sqlx::query_as::<sqlx::Postgres, PlanRow>(&format!(
+            "SELECT {PLAN_COLS} FROM plans WHERE plan_code = $1"
+        ))
         .bind(plan_code)
         .fetch_optional(&self.pool)
         .await
@@ -115,16 +107,9 @@ impl PgPlanRepository {
     pub async fn list_all(&self) -> AppResult<Vec<Plan>> {
         debug!("Listing all plans");
 
-        let rows = sqlx::query_as::<sqlx::Postgres, PlanRow>(
-            r#"
-            SELECT
-                id, plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
-                description, enabled, created_at, updated_at, created_by
-            FROM plans
-            ORDER BY account_type, plan_name
-            "#,
-        )
+        let rows = sqlx::query_as::<sqlx::Postgres, PlanRow>(&format!(
+            "SELECT {PLAN_COLS} FROM plans ORDER BY bucket_type, plan_name"
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -140,17 +125,9 @@ impl PgPlanRepository {
     pub async fn list_active(&self) -> AppResult<Vec<Plan>> {
         debug!("Listing active plans");
 
-        let rows = sqlx::query_as::<sqlx::Postgres, PlanRow>(
-            r#"
-            SELECT
-                id, plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
-                description, enabled, created_at, updated_at, created_by
-            FROM plans
-            WHERE enabled = true
-            ORDER BY account_type, plan_name
-            "#,
-        )
+        let rows = sqlx::query_as::<sqlx::Postgres, PlanRow>(&format!(
+            "SELECT {PLAN_COLS} FROM plans WHERE enabled = true ORDER BY bucket_type, plan_name"
+        ))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| {
@@ -163,13 +140,16 @@ impl PgPlanRepository {
 
     /// Create a new plan
     #[instrument(skip(self))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         plan_name: &str,
         plan_code: &str,
-        account_type: &AccountType,
-        initial_balance: Decimal,
-        credit_limit: Decimal,
+        bucket_type: &str,
+        included_minutes: i32,
+        proration_mode: &str,
+        overage_flat_rate_per_minute: Option<Decimal>,
+        overage_tariff_group: Option<&str>,
         max_concurrent_calls: i32,
         description: Option<&str>,
         enabled: bool,
@@ -177,25 +157,24 @@ impl PgPlanRepository {
     ) -> AppResult<Plan> {
         debug!("Creating plan: {}", plan_code);
 
-        let row = sqlx::query_as::<sqlx::Postgres, PlanRow>(
+        let row = sqlx::query_as::<sqlx::Postgres, PlanRow>(&format!(
             r#"
             INSERT INTO plans (
-                plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
+                plan_name, plan_code, bucket_type, included_minutes, proration_mode,
+                overage_flat_rate_per_minute, overage_tariff_group, max_concurrent_calls,
                 description, enabled, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING
-                id, plan_name, plan_code, account_type,
-                initial_balance, credit_limit, max_concurrent_calls,
-                description, enabled, created_at, updated_at, created_by
-            "#,
-        )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING {PLAN_COLS}
+            "#
+        ))
         .bind(plan_name)
         .bind(plan_code)
-        .bind(account_type.to_string())
-        .bind(initial_balance)
-        .bind(credit_limit)
+        .bind(bucket_type)
+        .bind(included_minutes)
+        .bind(proration_mode)
+        .bind(overage_flat_rate_per_minute)
+        .bind(overage_tariff_group)
         .bind(max_concurrent_calls)
         .bind(description)
         .bind(enabled)
@@ -214,34 +193,25 @@ impl PgPlanRepository {
         Ok(row.into())
     }
 
-    /// Update an existing plan
+    /// Update an existing plan's general template fields. Bucket
+    /// configuration (bucket_type, included_minutes, proration_mode,
+    /// overage settings) is updated via `PgMinuteBucketRepository` instead.
     #[instrument(skip(self))]
     pub async fn update(
         &self,
         id: i32,
         plan_name: Option<&str>,
-        initial_balance: Option<Decimal>,
-        credit_limit: Option<Decimal>,
         max_concurrent_calls: Option<i32>,
         description: Option<&str>,
         enabled: Option<bool>,
     ) -> AppResult<Plan> {
         debug!("Updating plan: {}", id);
 
-        // Build dynamic update query
         let mut query = String::from("UPDATE plans SET updated_at = NOW()");
         let mut bind_count = 1;
 
         if plan_name.is_some() {
             query.push_str(&format!(", plan_name = ${}", bind_count));
-            bind_count += 1;
-        }
-        if initial_balance.is_some() {
-            query.push_str(&format!(", initial_balance = ${}", bind_count));
-            bind_count += 1;
-        }
-        if credit_limit.is_some() {
-            query.push_str(&format!(", credit_limit = ${}", bind_count));
             bind_count += 1;
         }
         if max_concurrent_calls.is_some() {
@@ -257,23 +227,12 @@ impl PgPlanRepository {
             bind_count += 1;
         }
 
-        query.push_str(&format!(
-            " WHERE id = ${} RETURNING id, plan_name, plan_code, account_type, \
-             initial_balance, credit_limit, max_concurrent_calls, \
-             description, enabled, created_at, updated_at, created_by",
-            bind_count
-        ));
+        query.push_str(&format!(" WHERE id = ${bind_count} RETURNING {PLAN_COLS}"));
 
         let mut q = sqlx::query_as::<sqlx::Postgres, PlanRow>(&query);
 
         if let Some(name) = plan_name {
             q = q.bind(name);
-        }
-        if let Some(balance) = initial_balance {
-            q = q.bind(balance);
-        }
-        if let Some(limit) = credit_limit {
-            q = q.bind(limit);
         }
         if let Some(calls) = max_concurrent_calls {
             q = q.bind(calls);

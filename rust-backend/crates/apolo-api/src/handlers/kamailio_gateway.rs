@@ -52,12 +52,20 @@ mod tests {
             "103,9,,proxy,proxy"
         );
         // SET_CALLDST_INFO reads signalling at index 3 and media at index 4
-        assert_eq!(gateway_attrs(1, GW_TYPE_CARRIER, "sip_tcp").split(',').count(), 5);
+        assert_eq!(
+            gateway_attrs(1, GW_TYPE_CARRIER, "sip_tcp")
+                .split(',')
+                .count(),
+            5
+        );
     }
 
     #[test]
     fn address_omits_the_scheme_drouting_adds() {
-        assert_eq!(gateway_address("10.35.13.100", Some(5060)), "10.35.13.100:5060");
+        assert_eq!(
+            gateway_address("10.35.13.100", Some(5060)),
+            "10.35.13.100:5060"
+        );
         assert_eq!(gateway_address("pbx.local", None), "pbx.local:5060");
     }
 

@@ -25,7 +25,7 @@ import {
   Plus,
   Edit,
   X,
-  DollarSign,
+  Timer,
   Trash2,
   Power,
   AlertTriangle,
@@ -34,8 +34,7 @@ import {
   PhoneOff,
   PlusCircle,
 } from 'lucide-react'
-import type { Account, AccountType, AccountStatus, Plan, BucketConfig } from '../types'
-import { getAccountDisplayInfo } from '../lib/accountHelpers'
+import type { Account, AccountStatus, Plan, BucketConfig } from '../types'
 
 export default function AccountsPage() {
   const [showModal, setShowModal] = useState(false)
@@ -78,16 +77,9 @@ export default function AccountsPage() {
   }
 
   const createMutation = useMutation({
-    mutationFn: async ({ data, bucketConfig }: { data: Partial<Account>; bucketConfig?: BucketConfig }) => {
-      const newAccount = await createAccount(data)
-      if (bucketConfig && bucketConfig.billing_model === 'minute_bucket') {
-        await updateAccountBucketConfig(newAccount.id, bucketConfig)
-      }
-      return newAccount
-    },
+    mutationFn: (data: Partial<Account>) => createAccount(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['account-bucket-config'] })
       setShowModal(false)
       setEditingAccount(null)
     },
@@ -114,7 +106,7 @@ export default function AccountsPage() {
   const toggleStatusMutation = useMutation({
     mutationFn: ({ id, currentStatus }: { id: number; currentStatus: string }) => {
       const newStatus = currentStatus?.toLowerCase() === 'active' ? 'suspended' : 'active'
-      return updateAccount(id, { status: newStatus })
+      return updateAccount(id, { status: newStatus as AccountStatus })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
@@ -134,7 +126,7 @@ export default function AccountsPage() {
   const columns = [
     {
       key: 'account_number',
-      header: 'Número de Cuenta',
+      header: 'Número de Suscripción',
       render: (acc: Account) => (
         <span className="font-mono font-medium text-[var(--color-text-primary)]">
           {acc.account_number}
@@ -142,26 +134,22 @@ export default function AccountsPage() {
       ),
     },
     {
-      key: 'account_type',
-      header: 'Tipo',
-      render: (acc: Account) => {
-        const isPrepaid = acc.account_type?.toLowerCase() === 'prepaid'
-        return (
-          <Badge variant={isPrepaid ? 'info' : 'warning'}>
-            {isPrepaid ? 'Prepago' : 'Postpago'}
-          </Badge>
-        )
-      },
-    },
-    {
       key: 'plan',
-      header: 'Plan',
+      header: 'Plan Tarifario',
       render: (acc: Account) => {
         const planName = getPlanName(acc.plan_id)
         return (
-          <span className={`text-sm ${planName === '-' ? 'text-[var(--color-text-muted)] italic' : 'text-[var(--color-text-secondary)]'}`}>
-            {planName}
-          </span>
+          <div className="space-y-1">
+            <span className={`text-sm block ${planName === '-' ? 'text-[var(--color-text-muted)] italic' : 'text-[var(--color-text-secondary)]'}`}>
+              {planName}
+            </span>
+            <Badge variant={acc.bucket_type === 'control' ? 'warning' : 'info'}>
+              {acc.bucket_type === 'control' ? 'Control' : 'Abierto'}
+            </Badge>
+            <div className="text-xs text-[var(--color-text-tertiary)]">
+              Define: {acc.included_minutes.toLocaleString()} min/mes
+            </div>
+          </div>
         )
       },
     },
@@ -190,10 +178,12 @@ export default function AccountsPage() {
       },
     },
     {
-      key: 'balance',
-      header: 'Estado Financiero',
-      render: (acc: Account) => <AccountFinancialCell account={acc} />,
-      className: 'text-right min-w-[200px]',
+      key: 'bucket_status',
+      header: 'Balance (este mes)',
+      render: (acc: Account) => (
+        <BucketMeterCell accountId={acc.id} planIncludedMinutes={acc.included_minutes} />
+      ),
+      className: 'text-right min-w-[220px]',
     },
     {
       key: 'created_at',
@@ -213,7 +203,7 @@ export default function AccountsPage() {
             <button
               onClick={() => handleEdit(acc)}
               className="p-1.5 text-[var(--color-text-tertiary)] hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-              title="Editar cuenta"
+              title="Editar suscripción"
             >
               <Edit className="w-4 h-4" />
             </button>
@@ -227,7 +217,7 @@ export default function AccountsPage() {
                   ? 'text-[var(--color-text-tertiary)] hover:text-amber-600 hover:bg-amber-50'
                   : 'text-amber-600 hover:text-green-600 hover:bg-green-50'
               }`}
-              title={isActive ? 'Suspender cuenta' : 'Activar cuenta'}
+              title={isActive ? 'Suspender suscripción' : 'Activar suscripción'}
             >
               <Power className="w-4 h-4" />
             </button>
@@ -236,7 +226,7 @@ export default function AccountsPage() {
             <button
               onClick={() => setDeleteConfirm(acc)}
               className="p-1.5 text-[var(--color-text-tertiary)] hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-              title="Eliminar cuenta"
+              title="Eliminar suscripción"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -247,20 +237,20 @@ export default function AccountsPage() {
   ]
 
   // Summary stats
-  const totalBalance = accounts.reduce((sum, acc) => sum + (Number(acc.balance) || 0), 0)
+  const totalMinutes = accounts.reduce((sum, acc) => sum + (Number(acc.included_minutes) || 0), 0)
   const activeAccounts = accounts.filter((acc) => acc.status?.toLowerCase() === 'active').length
-  const prepaidAccounts = accounts.filter((acc) => acc.account_type?.toLowerCase() === 'prepaid').length
-  const postpaidAccounts = accounts.filter((acc) => acc.account_type?.toLowerCase() === 'postpaid').length
+  const controlAccounts = accounts.filter((acc) => acc.bucket_type === 'control').length
+  const abiertoAccounts = accounts.filter((acc) => acc.bucket_type === 'abierto').length
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold gradient-text tracking-tight">
-            Gestión de Cuentas
+            Gestión de Suscripciones
           </h1>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
-            Administra cuentas prepago y postpago
+            Administra suscripciones con balance (Plan Control / Plan Abierto)
           </p>
         </div>
         <button
@@ -268,7 +258,7 @@ export default function AccountsPage() {
           className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Nueva Cuenta
+          Nueva Suscripción
         </button>
       </div>
 
@@ -292,8 +282,8 @@ export default function AccountsPage() {
             </p>
             <p className={`text-xs ${authRequired ? 'text-blue-700' : 'text-amber-700'}`}>
               {authRequired
-                ? 'Las llamadas salientes requieren cuenta activa con saldo para ser autorizadas'
-                : 'Todas las llamadas salientes se permiten sin verificación de cuenta ni saldo'}
+                ? 'Las llamadas salientes requieren suscripción activa con balance disponible para ser autorizadas'
+                : 'Todas las llamadas salientes se permiten sin verificación de suscripción ni balance'}
             </p>
           </div>
         </div>
@@ -322,7 +312,7 @@ export default function AccountsPage() {
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Total Suscripciones</p>
               <p className="text-2xl font-bold text-[var(--color-text-primary)]">{accounts.length}</p>
             </div>
             <Users className="w-8 h-8 text-blue-500" />
@@ -340,23 +330,23 @@ export default function AccountsPage() {
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Prepago / Postpago</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Control / Abierto</p>
               <p className="text-2xl font-bold text-[var(--color-text-primary)]">
-                {prepaidAccounts} / {postpaidAccounts}
+                {controlAccounts} / {abiertoAccounts}
               </p>
             </div>
-            <DollarSign className="w-8 h-8 text-purple-500" />
+            <Timer className="w-8 h-8 text-purple-500" />
           </div>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Total</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Minutos en Balance (Total)</p>
               <p className="text-2xl font-bold text-green-600">
-                S/{totalBalance.toFixed(2)}
+                {totalMinutes.toLocaleString()}
               </p>
             </div>
-            <DollarSign className="w-8 h-8 text-green-500" />
+            <Timer className="w-8 h-8 text-green-500" />
           </div>
         </div>
       </div>
@@ -366,9 +356,9 @@ export default function AccountsPage() {
         columns={columns}
         data={accounts}
         loading={isLoading}
-        emptyMessage="No hay cuentas registradas"
+        emptyMessage="No hay suscripciones registradas"
         searchable={true}
-        searchPlaceholder="Buscar por número de cuenta..."
+        searchPlaceholder="Buscar por número de suscripción..."
       />
 
       {/* Create/Edit Modal */}
@@ -379,11 +369,11 @@ export default function AccountsPage() {
             setShowModal(false)
             setEditingAccount(null)
           }}
-          onSubmit={(data, bucketConfig) => {
+          onSubmit={(data) => {
             if (editingAccount) {
               updateMutation.mutate({ id: editingAccount.id, data })
             } else {
-              createMutation.mutate({ data, bucketConfig })
+              createMutation.mutate(data)
             }
           }}
           isLoading={createMutation.isPending || updateMutation.isPending}
@@ -400,25 +390,19 @@ export default function AccountsPage() {
                   <AlertTriangle className="w-6 h-6 text-red-600" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[var(--color-text-primary)]">Eliminar Cuenta</h3>
+                  <h3 className="text-lg font-bold text-[var(--color-text-primary)]">Eliminar Suscripción</h3>
                   <p className="text-sm text-[var(--color-text-tertiary)]">Esta acción no se puede deshacer</p>
                 </div>
               </div>
 
               <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 mb-4">
                 <p className="text-sm text-[var(--color-text-secondary)]">
-                  ¿Estás seguro de eliminar la cuenta{' '}
+                  ¿Estás seguro de eliminar la suscripción{' '}
                   <span className="font-mono font-bold text-[var(--color-text-primary)]">
                     {deleteConfirm.account_number}
                   </span>
                   ?
                 </p>
-                {Number(deleteConfirm.balance) > 0 && (
-                  <p className="text-sm text-amber-600 mt-2">
-                    <strong>Advertencia:</strong> Esta cuenta tiene un saldo de $
-                    {Number(deleteConfirm.balance).toFixed(2)}
-                  </p>
-                )}
               </div>
 
               <div className="flex justify-end gap-3">
@@ -454,7 +438,7 @@ export default function AccountsPage() {
 interface AccountModalProps {
   account: Account | null
   onClose: () => void
-  onSubmit: (data: Partial<Account>, bucketConfig?: BucketConfig) => void
+  onSubmit: (data: Partial<Account>) => void
   isLoading: boolean
 }
 
@@ -463,14 +447,6 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [formData, setFormData] = useState({
     account_number: account?.account_number || '',
-    // No hay cuentas prepago/postpago en el modelo de Fibertel — este campo
-    // sigue existiendo en el esquema pero es inerte para cuentas de bolsa
-    // (AuthorizationService nunca lo lee en el camino minute_bucket). Una
-    // cuenta nueva siempre nace Control/Abierto, así que 'postpaid'/0/0 es
-    // un default fijo, no una elección del usuario.
-    account_type: account?.account_type?.toLowerCase() || 'postpaid',
-    initial_balance: 0, // Solo para crear - backend usa initial_balance
-    credit_limit: Number(account?.credit_limit) || 0,
     status: account?.status?.toLowerCase() || 'active',
     max_concurrent_calls: account?.max_concurrent_calls || 5,
     plan_id: account?.plan_id,
@@ -492,11 +468,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
     enabled: !isEditing,
   })
 
-  // Handler para cambio de plan (auto-poblar campos, incluida la bolsa si el plan es minute_bucket).
-  // El fetch de la bolsa del plan se resuelve ANTES de tocar el estado, para
-  // que selectedPlan/formData/newBucketConfig se actualicen juntos en un
-  // solo render (BucketConfigForm se remonta por `key={selectedPlan.id}` y
-  // debe encontrar ya el valor heredado correcto, no el default previo).
+  // Handler para cambio de plan (auto-poblar campos, incluida la bolsa heredada del plan).
   const handlePlanChange = async (planId: string) => {
     if (!planId) {
       setSelectedPlan(null)
@@ -510,30 +482,21 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
     let bucketConfig = DEFAULT_NEW_BUCKET_CONFIG
     try {
       const planBucket = await getPlanBucketConfig(plan.id)
-      if (planBucket.billing_model === 'minute_bucket') {
-        bucketConfig = {
-          billing_model: planBucket.billing_model,
-          bucket_type: planBucket.bucket_type,
-          included_minutes: planBucket.included_minutes,
-          proration_mode: planBucket.proration_mode,
-          overage_flat_rate_per_minute: planBucket.overage_flat_rate_per_minute,
-          overage_tariff_group: planBucket.overage_tariff_group,
-        }
+      bucketConfig = {
+        bucket_type: planBucket.bucket_type,
+        included_minutes: planBucket.included_minutes,
+        proration_mode: planBucket.proration_mode,
+        overage_flat_rate_per_minute: planBucket.overage_flat_rate_per_minute,
+        overage_tariff_group: planBucket.overage_tariff_group,
       }
     } catch {
-      // Sin config de bolsa para este plan: se mantiene el default (saldo)
+      // Sin config de bolsa para este plan: se mantiene el default
     }
 
     setSelectedPlan(plan)
-
-    // Auto-poblar valores del plan
-    const isPrepaid = plan.account_type.toLowerCase() === 'prepaid'
     setFormData({
       ...formData,
       plan_id: plan.id,
-      account_type: plan.account_type.toLowerCase(),
-      initial_balance: isPrepaid ? Number(plan.initial_balance) : 0,
-      credit_limit: !isPrepaid ? Number(plan.credit_limit) : 0,
       max_concurrent_calls: plan.max_concurrent_calls,
     })
     setNewBucketConfig(bucketConfig)
@@ -545,25 +508,22 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
       // Solo enviar campos que se pueden editar
       onSubmit({
         status: formData.status as AccountStatus,
-        credit_limit: formData.credit_limit,
         max_concurrent_calls: formData.max_concurrent_calls,
       })
     } else {
-      // Crear con initial_balance y plan_id (si aplica)
-      const payload: Partial<Account> & { initial_balance?: number } = {
+      const payload: Partial<Account> = {
         account_number: formData.account_number,
-        account_type: formData.account_type as AccountType,
-        initial_balance: formData.initial_balance,
-        credit_limit: formData.credit_limit,
         max_concurrent_calls: formData.max_concurrent_calls,
+        ...newBucketConfig,
       }
 
-      // Solo incluir plan_id si hay un plan seleccionado
+      // Solo incluir plan_id si hay un plan seleccionado (el backend deriva
+      // la bolsa del plan e ignora los campos de bolsa de arriba en ese caso)
       if (formData.plan_id) {
         payload.plan_id = formData.plan_id
       }
 
-      onSubmit(payload as Partial<Account>, newBucketConfig)
+      onSubmit(payload)
     }
   }
 
@@ -572,7 +532,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
       <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
           <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
-            {account ? 'Editar Cuenta' : 'Nueva Cuenta'}
+            {account ? 'Editar Suscripción' : 'Nueva Suscripción'}
           </h2>
           <button
             onClick={onClose}
@@ -586,14 +546,14 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
           {!isEditing && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
               <label className="block text-sm font-medium text-blue-900 mb-2">
-                Seleccionar Plan (Opcional)
+                Seleccionar Plan Tarifario (Opcional)
               </label>
               <select
                 value={selectedPlan?.id || ''}
                 onChange={(e) => handlePlanChange(e.target.value)}
                 className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-[var(--color-bg-card)]"
               >
-                <option value="">Sin plan (configuración manual)</option>
+                <option value="">Sin plan tarifario (configuración manual)</option>
                 {plans
                   .filter(p => p.enabled)
                   .map((plan) => (
@@ -604,7 +564,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
               </select>
               {selectedPlan && (
                 <p className="text-xs text-blue-700 mt-2">
-                  ℹ️ Los valores del plan se han aplicado automáticamente y están bloqueados
+                  ℹ️ Los valores del plan tarifario se han aplicado automáticamente y están bloqueados
                 </p>
               )}
             </div>
@@ -613,7 +573,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Número de Cuenta *
+                Número de Suscripción *
               </label>
               <input
                 type="text"
@@ -626,64 +586,6 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
-
-            {isEditing && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                    Tipo de Cuenta *
-                  </label>
-                  <select
-                    value={formData.account_type?.toLowerCase()}
-                    disabled
-                    className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
-                  >
-                    <option value="prepaid">Prepago (legacy)</option>
-                    <option value="postpaid">Postpago (legacy)</option>
-                  </select>
-                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                    Campo legacy del modelo de saldo — las cuentas nuevas son Control/Abierto.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                    Saldo Actual
-                  </label>
-                  <div className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] font-mono">
-                    S/{Number(account?.balance || 0).toFixed(2)}
-                  </div>
-                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                    Para modificar el saldo, usa la opción "Recargar" en Gestión de Saldos
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                    {formData.account_type === 'postpaid' ? 'Límite de Crédito *' : 'Límite de Crédito'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min={formData.account_type === 'postpaid' ? '0.01' : '0'}
-                    required={formData.account_type === 'postpaid'}
-                    value={formData.credit_limit}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        credit_limit: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  {formData.account_type === 'postpaid' && (
-                    <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                      Postpago requiere límite de crédito {'>'} 0
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
 
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
@@ -718,14 +620,14 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    max_concurrent_calls: parseInt(e.target.value) || 5,
+                    max_concurrent_calls: e.target.value === '' ? 0 : parseInt(e.target.value),
                   })
                 }
                 disabled={!!selectedPlan && !isEditing}
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
               />
               {selectedPlan && !isEditing && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan tarifario</p>
               )}
             </div>
           </div>
@@ -736,17 +638,16 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
             <div>
               <BucketConfigForm
                 key={selectedPlan?.id ?? 'manual'}
-                title="Tipo de Plan"
+                title="Tipo de Balance"
                 initial={newBucketConfig}
                 cardGroups={cardGroups}
                 isSaving={false}
                 saved={false}
                 onChange={setNewBucketConfig}
-                lockToBucket
               />
               {selectedPlan && (
                 <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  ℹ️ Precargado desde el plan "{selectedPlan.plan_name}" — podés ajustarlo antes de crear.
+                  ℹ️ Precargado desde el plan tarifario "{selectedPlan.plan_name}" — podés ajustarlo antes de crear.
                 </p>
               )}
             </div>
@@ -774,62 +675,15 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
   )
 }
 
-/**
- * Financial status cell for the accounts table. Balance-model accounts show
- * the existing prepaid/postpaid widgets unchanged; minute-bucket accounts
- * show a bucket meter instead, fetched lazily per row.
- */
-function AccountFinancialCell({ account: acc }: { account: Account }) {
-  const { data: bucketConfig } = useQuery({
-    queryKey: ['account-bucket-config', acc.id],
-    queryFn: () => getAccountBucketConfig(acc.id),
-    staleTime: 30000,
-  })
-
-  if (bucketConfig?.billing_model === 'minute_bucket') {
-    return <BucketMeterCell accountId={acc.id} bucketType={bucketConfig.bucket_type} />
-  }
-
-  const info = getAccountDisplayInfo(acc)
-
-  if (info.isPrepaid) {
-    return (
-      <div className="text-right">
-        <div
-          className={`font-mono font-bold ${
-            info.balanceColor === 'success'
-              ? 'text-green-600'
-              : info.balanceColor === 'warning'
-              ? 'text-yellow-600'
-              : 'text-red-600'
-          }`}
-        >
-          S/{info.currentBalance?.toFixed(2)}
-        </div>
-        <div className="text-xs text-[var(--color-text-tertiary)]">Saldo Disponible</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="text-right space-y-1 min-w-[200px]">
-      <div className="text-sm font-medium text-[var(--color-text-secondary)]">
-        Consumido: S/{info.consumedCredit?.toFixed(2)}
-      </div>
-      <CreditUtilizationBar utilizationPercent={info.utilizationPercent || 0} showLabel={false} />
-      <div className="text-xs text-[var(--color-text-tertiary)]">
-        Disponible: S/{info.availableCredit?.toFixed(2)} de S/{info.creditLimit?.toFixed(2)}
-      </div>
-    </div>
-  )
-}
-
 function BucketMeterCell({
   accountId,
-  bucketType,
+  planIncludedMinutes,
 }: {
   accountId: number
-  bucketType: 'control' | 'abierto' | null
+  /** The subscription's current plan-tarifario value (accounts.included_minutes) -
+   * compared against the live cycle's own included_minutes to surface when the
+   * two have drifted apart (plan changed mid-cycle, see Balances → Ajustar). */
+  planIncludedMinutes: number
 }) {
   const [showTopup, setShowTopup] = useState(false)
   const queryClient = useQueryClient()
@@ -841,11 +695,13 @@ function BucketMeterCell({
   })
 
   if (isLoading || !status) {
-    return <span className="text-xs text-[var(--color-text-tertiary)]">Cargando bolsa...</span>
+    return <span className="text-xs text-[var(--color-text-tertiary)]">Cargando balance...</span>
   }
 
+  const planMismatch = planIncludedMinutes !== status.included_minutes
+
   return (
-    <div className="text-right space-y-1 min-w-[200px]">
+    <div className="text-right space-y-1 min-w-[220px]">
       <div className="flex items-center justify-end gap-2">
         {status.is_blocked ? (
           <Badge variant="error">
@@ -854,9 +710,6 @@ function BucketMeterCell({
         ) : (
           <Badge variant="success">Activo</Badge>
         )}
-        <Badge variant={bucketType === 'control' ? 'warning' : 'info'}>
-          {bucketType === 'control' ? 'Control' : 'Abierto'}
-        </Badge>
       </div>
       <div className="text-sm font-mono">
         {Number(status.consumed_minutes).toFixed(0)} / {status.included_minutes + status.additional_minutes} min
@@ -866,12 +719,21 @@ function BucketMeterCell({
         Disponible: {Number(status.available_minutes).toFixed(0)} min
         {Number(status.overage_minutes) > 0 && ` · Excedente: ${Number(status.overage_minutes).toFixed(1)} min`}
       </div>
+      <div className="text-xs text-[var(--color-text-tertiary)]">
+        Se renueva el {new Date(status.cycle_end + 'T00:00:00').toLocaleDateString('es-PE')}
+      </div>
+      {planMismatch && (
+        <div className="text-xs text-amber-600">
+          ⚠ El plan tarifario indica {planIncludedMinutes} min — se aplica el próximo ciclo
+          (ajustalo antes en Balances)
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setShowTopup(true)}
         className="text-xs text-blue-600 hover:underline flex items-center justify-end gap-1 ml-auto"
       >
-        <PlusCircle className="w-3 h-3" /> Agregar bolsa
+        <PlusCircle className="w-3 h-3" /> Agregar balance
       </button>
 
       {showTopup && (
@@ -915,7 +777,7 @@ function TopupBucketModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-bold">Agregar Bolsa Adicional</h3>
+          <h3 className="text-lg font-bold">Agregar Balance Adicional</h3>
           <button onClick={onClose} className="p-1 hover:bg-[var(--color-bg-secondary)] rounded">
             <X className="w-5 h-5" />
           </button>
@@ -946,7 +808,7 @@ function TopupBucketModal({
             />
           </div>
           {mutation.isError && (
-            <p className="text-sm text-red-600">No se pudo agregar la bolsa. Intenta de nuevo.</p>
+            <p className="text-sm text-red-600">No se pudo agregar el balance. Intenta de nuevo.</p>
           )}
           <div className="flex justify-end gap-3 pt-2">
             <button
@@ -1002,6 +864,7 @@ function AccountBucketConfigSection({ accountId }: { accountId: number }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['account-bucket-config', accountId] })
       queryClient.invalidateQueries({ queryKey: ['minute-bucket-status', accountId] })
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     },
@@ -1010,7 +873,7 @@ function AccountBucketConfigSection({ accountId }: { accountId: number }) {
   if (isLoading || !data) {
     return (
       <div className="border-t border-[var(--color-border-primary)] pt-4 mt-2">
-        <p className="text-sm text-[var(--color-text-tertiary)]">Cargando configuración de bolsa...</p>
+        <p className="text-sm text-[var(--color-text-tertiary)]">Cargando configuración de balance...</p>
       </div>
     )
   }
@@ -1019,27 +882,25 @@ function AccountBucketConfigSection({ accountId }: { accountId: number }) {
 
   return (
     <BucketConfigForm
-      title="Facturación: Bolsa de Minutos (override de cuenta)"
+      title="Facturación: Balance (override de suscripción)"
       initial={data}
       cardGroups={cardGroups}
       isSaving={mutation.isPending}
       saved={saved}
       onSave={(config) => mutation.mutate(config)}
       extra={
-        data.billing_model === 'minute_bucket' ? (
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Email de notificación (alertas 80% / 100%)
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setNotificationEmail(e.target.value)}
-              placeholder="facturacion@cliente.com"
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        ) : undefined
+        <div>
+          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+            Email de notificación (alertas 80% / 100%)
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setNotificationEmail(e.target.value)}
+            placeholder="facturacion@cliente.com"
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
       }
     />
   )

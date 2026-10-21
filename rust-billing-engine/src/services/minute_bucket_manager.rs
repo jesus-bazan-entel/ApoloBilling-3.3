@@ -1,15 +1,13 @@
 // src/services/minute_bucket_manager.rs
 //
-// Minute-bucket billing engine (Plan Control / Plan Abierto). Coexists with
-// ReservationManager (dollar/saldo model) — this file is only exercised for
-// accounts with `billing_model = 'minute_bucket'`; the balance model is
-// untouched by anything here.
+// Minute-bucket billing engine (Plan Control / Plan Abierto) — the only
+// billing model every account uses.
 //
 // Cycle = full calendar month, identical for every account, opened lazily on
 // first call attempt of the month (with optional proration on an account's
-// very first cycle ever). Concurrency safety mirrors reservation_manager.rs:
-// `SELECT ... FOR UPDATE` inside a transaction for the check-and-reserve and
-// consume paths, `ON CONFLICT DO NOTHING` for the lazy cycle-open race.
+// very first cycle ever). Concurrency safety: `SELECT ... FOR UPDATE` inside
+// a transaction for the check-and-reserve and consume paths, `ON CONFLICT DO
+// NOTHING` for the lazy cycle-open race.
 
 use crate::cache::RedisClient;
 use crate::database::DbPool;

@@ -95,6 +95,56 @@
     </extension>
 
     <!-- ============================================================ -->
+    <!-- L1 = OVERRIDES EXPLICITOS (arriba): solo excepciones.       -->
+    <!-- Generados desde routing_inbound_routes via API.             -->
+    <!-- L2/L3/L4 = AUTO-ROUTING CARRIER-CLASS (abajo): cero-config -->
+    <!-- por DID. Orden: extension registrada -> hunt PBXs -> 480.   -->
+    <!-- ============================================================ -->
+
+    <!-- L2 AUTO: extensiones locales registradas (cero-config por DID) -->
+    <!-- Solo entra si el destino esta REGISTRADO (sofia_contact).     -->
+    <!-- Equivale a HLR lookup en Vodafone/AT&T.                        -->
+    <extension name="auto-local-extensions">
+      <condition field="destination_number" expression="^(\d+)$" break="never">
+        <action application="set" data="dialed_extension=$1"/>
+      </condition>
+      <condition field="${sofia_contact(user/${dialed_extension}@10.10.22.4)}" expression="^sofia/">
+        <action application="log" data="INFO AUTO-L2: extension local registrada ${dialed_extension} (${caller_id_number} -> ${destination_number})"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=false"/>
+        <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
+        <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
+        <action application="bridge" data="user/${dialed_extension}@10.10.22.4"/>
+      </condition>
+    </extension>
+
+    <!-- L3 AUTO: hunt sobre PBXs conectadas (cero-config por DID) -->
+    <!-- El generador backend crea UN bridge en serie con todas las -->
+    <!-- PBXs (routing_trunks trunk_type=private):                   -->
+    <!--   bridge = sofia/gateway/gw1/$N|sofia/gateway/gw2/$N ...    -->
+    <!-- FreeSWITCH prueba en orden; la primera que responde gana.  -->
+    <!-- Para prioridad por prefijo (carrier-class), usar una Ruta   -->
+    <!-- Entrante explicita (L1) por prefijo de cada PBX.            -->
+    <extension name="auto-pbx-hunt">
+      <condition field="destination_number" expression="^(\d+)$">
+        <action application="log" data="INFO AUTO-L3: hunt PBXs: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+        <action application="set" data="call_timeout=55"/>
+        <action application="set" data="originate_timeout=55"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
+        <!-- Agregar mas patas con | para cada PBX conectada -->
+        <action application="bridge" data="sofia/gateway/pbx-fibertel/${destination_number}"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
     <!-- IMS FAILURE HANDLERS: Post-bridge handling with tones       -->
     <!-- Mapeo Q.850 → Tono + Respuesta SIP según causa               -->
     <!-- ============================================================ -->
@@ -224,8 +274,9 @@
     </extension>
     <extension name="fallback-reject">
       <condition field="destination_number" expression="^(.+)$">
-        <action application="log" data="WARNING Rejecting call from unknown source: ${network_addr}"/>
-        <action application="respond" data="403 Forbidden"/>
+        <action application="log" data="WARNING AUTO-L4: sin destino para ${destination_number} desde ${network_addr}"/>
+        <action application="set" data="sip_reason=Q.850;cause=20"/>
+        <action application="respond" data="480 Temporarily Unavailable"/>
       </condition>
     </extension>
   </context>

@@ -379,7 +379,7 @@ const CarrierGroups = () => {
                                         updateMemberMutation.mutate({
                                           groupId: group.id,
                                           memberId: member.id,
-                                          data: { priority: parseInt(e.target.value) || 1 },
+                                          data: { priority: e.target.value === '' ? 0 : parseInt(e.target.value) },
                                         })
                                       }
                                       className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-center"
@@ -395,7 +395,7 @@ const CarrierGroups = () => {
                                         updateMemberMutation.mutate({
                                           groupId: group.id,
                                           memberId: member.id,
-                                          data: { weight: parseInt(e.target.value) || 100 },
+                                          data: { weight: e.target.value === '' ? 0 : parseInt(e.target.value) },
                                         })
                                       }
                                       className="w-16 px-2 py-1 bg-slate-800 border border-slate-600 rounded text-white text-center"
@@ -449,7 +449,7 @@ const CarrierGroups = () => {
                           onChange={(e) =>
                             setMemberFormData({
                               ...memberFormData,
-                              priority: parseInt(e.target.value) || 1,
+                              priority: e.target.value === '' ? 0 : parseInt(e.target.value),
                             })
                           }
                           className="w-20 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"
@@ -463,7 +463,7 @@ const CarrierGroups = () => {
                           onChange={(e) =>
                             setMemberFormData({
                               ...memberFormData,
-                              weight: parseInt(e.target.value) || 100,
+                              weight: e.target.value === '' ? 0 : parseInt(e.target.value),
                             })
                           }
                           className="w-20 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white"

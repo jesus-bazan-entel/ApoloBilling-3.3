@@ -1,6 +1,6 @@
 // src/esl/client.rs
 use crate::config::FreeSwitchServer;
-use crate::services::{AuthorizationService, RealtimeBiller, CdrGenerator};
+use crate::services::{AuthorizationService, CdrGenerator};
 use crate::esl::{EslConnection, EventHandler};
 use crate::database::DbPool;  // ✅ Agregado
 use crate::cache::RedisClient;  // ✅ Agregado
@@ -11,7 +11,6 @@ use tracing::{info, warn, error};
 pub struct FreeSwitchCluster {
     servers: Vec<FreeSwitchServer>,
     auth_service: Arc<AuthorizationService>,
-    realtime_biller: Arc<RealtimeBiller>,
     cdr_generator: Arc<CdrGenerator>,
     db_pool: DbPool,  // ✅ Agregado
     redis: RedisClient,  // ✅ Agregado
@@ -21,7 +20,6 @@ impl FreeSwitchCluster {
     pub fn new(
         servers: Vec<FreeSwitchServer>,
         auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
         cdr_generator: Arc<CdrGenerator>,
         db_pool: DbPool,  // ✅ Agregado
         redis: RedisClient,  // ✅ Agregado
@@ -29,7 +27,6 @@ impl FreeSwitchCluster {
         Self {
             servers,
             auth_service,
-            realtime_biller,
             cdr_generator,
             db_pool,
             redis,
@@ -40,7 +37,6 @@ impl FreeSwitchCluster {
         for server in &self.servers {
             let server_clone = server.clone();
             let auth_service = self.auth_service.clone();
-            let realtime_biller = self.realtime_biller.clone();
             let cdr_generator = self.cdr_generator.clone();
             let db_pool = self.db_pool.clone();  // ✅ Agregado
             let redis = self.redis.clone();  // ✅ Agregado
@@ -49,7 +45,6 @@ impl FreeSwitchCluster {
                 FreeSwitchClient::run(
                     server_clone,
                     auth_service,
-                    realtime_biller,
                     cdr_generator,
                     db_pool,  // ✅ Agregado
                     redis,  // ✅ Agregado
@@ -68,13 +63,12 @@ impl FreeSwitchClient {
     async fn run(
         server: FreeSwitchServer,
         auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
         cdr_generator: Arc<CdrGenerator>,
         db_pool: DbPool,  // ✅ Agregado
         redis: RedisClient,  // ✅ Agregado
     ) {
         let server_id = format!("{}:{}", server.host, server.port);
-        
+
         loop {
             info!("Connecting to FreeSWITCH ESL: {}", server_id);
 
@@ -82,7 +76,6 @@ impl FreeSwitchClient {
                 &server,
                 &server_id,
                 auth_service.clone(),
-                realtime_biller.clone(),
                 cdr_generator.clone(),
                 db_pool.clone(),  // ✅ Agregado
                 redis.clone(),  // ✅ Agregado
@@ -106,7 +99,6 @@ impl FreeSwitchClient {
         server: &FreeSwitchServer,
         server_id: &str,
         auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
         cdr_generator: Arc<CdrGenerator>,
         db_pool: DbPool,  // ✅ Agregado
         redis: RedisClient,  // ✅ Agregado
@@ -124,7 +116,6 @@ impl FreeSwitchClient {
         let event_handler = EventHandler::new(
             server_id.to_string(),
             auth_service,
-            realtime_biller,
             cdr_generator,
             db_pool,  // ✅ Agregado
             redis,  // ✅ Agregado

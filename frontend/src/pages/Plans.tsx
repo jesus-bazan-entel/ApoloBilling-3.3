@@ -12,7 +12,7 @@ import {
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import { FileText, Plus, Edit, X, Trash2, AlertCircle, Timer, Check } from 'lucide-react'
-import type { Plan, AccountType, BucketConfig } from '../types'
+import type { Plan, BucketConfig } from '../types'
 import { DEFAULT_NEW_BUCKET_CONFIG } from '../lib/bucketDefaults'
 
 export default function PlansPage() {
@@ -28,16 +28,9 @@ export default function PlansPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: async ({ data, bucketConfig }: { data: Partial<Plan>; bucketConfig?: BucketConfig }) => {
-      const newPlan = await createPlan(data)
-      if (bucketConfig && bucketConfig.billing_model === 'minute_bucket') {
-        await updatePlanBucketConfig(newPlan.id, bucketConfig)
-      }
-      return newPlan
-    },
+    mutationFn: (data: Partial<Plan>) => createPlan(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plans'] })
-      queryClient.invalidateQueries({ queryKey: ['plan-bucket-config'] })
       setShowModal(false)
       setEditingPlan(null)
       setError('')
@@ -96,42 +89,25 @@ export default function PlansPage() {
       header: 'Nombre',
     },
     {
-      key: 'account_type',
+      key: 'bucket_type',
       header: 'Tipo',
-      render: (plan: Plan) => {
-        const isPrepaid = plan.account_type?.toLowerCase() === 'prepaid'
-        return (
-          <Badge variant={isPrepaid ? 'info' : 'warning'}>
-            {isPrepaid ? 'Prepago' : 'Postpago'}
-          </Badge>
-        )
-      },
+      render: (plan: Plan) => (
+        <Badge variant={plan.bucket_type === 'control' ? 'warning' : 'info'}>
+          {plan.bucket_type === 'control' ? 'Control' : 'Abierto'}
+        </Badge>
+      ),
     },
     {
-      key: 'amount',
-      header: 'Monto',
-      render: (plan: Plan) => {
-        const isPrepaid = plan.account_type?.toLowerCase() === 'prepaid'
-        const amount = isPrepaid ? plan.initial_balance : plan.credit_limit
-        return (
-          <span className="font-mono">
-            S/{Number(amount).toFixed(2)}
-            <span className="text-xs text-[var(--color-text-tertiary)] ml-1">
-              {isPrepaid ? 'inicial' : 'límite'}
-            </span>
-          </span>
-        )
-      },
+      key: 'included_minutes',
+      header: 'Minutos Incluidos',
+      render: (plan: Plan) => (
+        <span className="font-mono">{plan.included_minutes.toLocaleString()} min</span>
+      ),
     },
     {
       key: 'max_concurrent_calls',
       header: 'Llamadas',
       render: (plan: Plan) => <span>{plan.max_concurrent_calls}</span>,
-    },
-    {
-      key: 'billing_model',
-      header: 'Facturación',
-      render: (plan: Plan) => <PlanBillingModelBadge planId={plan.id} />,
     },
     {
       key: 'enabled',
@@ -172,10 +148,10 @@ export default function PlansPage() {
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)] flex items-center">
             <FileText className="w-8 h-8 mr-3 text-blue-600" />
-            Planes
+            Planes Tarifarios
           </h1>
           <p className="text-[var(--color-text-secondary)] mt-1">
-            Gestión de planes prepago y postpago
+            Plantillas de balance (Plan Control / Plan Abierto)
           </p>
         </div>
         <button
@@ -183,7 +159,7 @@ export default function PlansPage() {
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
         >
           <Plus className="w-4 h-4 mr-2" />
-          Nuevo Plan
+          Nuevo Plan Tarifario
         </button>
       </div>
 
@@ -191,7 +167,7 @@ export default function PlansPage() {
         data={plans}
         columns={columns}
         loading={isLoading}
-        emptyMessage="No hay planes configurados"
+        emptyMessage="No hay planes tarifarios configurados"
       />
 
       {showModal && (
@@ -203,11 +179,11 @@ export default function PlansPage() {
             setEditingPlan(null)
             setError('')
           }}
-          onSave={(data, bucketConfig) => {
+          onSave={(data) => {
             if (editingPlan) {
               updateMutation.mutate({ id: editingPlan.id, data })
             } else {
-              createMutation.mutate({ data, bucketConfig })
+              createMutation.mutate(data)
             }
           }}
         />
@@ -233,19 +209,11 @@ function PlanModal({
   plan: Plan | null
   error: string
   onClose: () => void
-  onSave: (data: Partial<Plan>, bucketConfig?: BucketConfig) => void
+  onSave: (data: Partial<Plan>) => void
 }) {
   const [formData, setFormData] = useState({
     plan_name: plan?.plan_name || '',
     plan_code: plan?.plan_code || '',
-    // No hay planes prepago/postpago en el modelo de Fibertel — account_type
-    // sigue existiendo en el esquema pero es inerte para planes de bolsa
-    // (ver AuthorizationService::authorize, nunca lo lee en el camino
-    // minute_bucket). Un plan nuevo siempre nace como Control/Abierto, así
-    // que estos valores son un default fijo, no una elección del usuario.
-    account_type: plan?.account_type || 'POSTPAID',
-    initial_balance: plan?.initial_balance || 0,
-    credit_limit: plan?.credit_limit || 0,
     max_concurrent_calls: plan?.max_concurrent_calls || 5,
     description: plan?.description || '',
     enabled: plan?.enabled ?? true,
@@ -259,17 +227,12 @@ function PlanModal({
     enabled: !plan,
   })
 
-  const isPrepaid = formData.account_type.toUpperCase() === 'PREPAID'
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (plan) {
       onSave(formData)
     } else {
-      // billing_model aquí es solo un hint para que el backend salte la
-      // validación de saldo/crédito > 0 (ver PlanCreateRequest::validate_business_rules);
-      // el billing_model real del plan se fija con el PUT bucket-config que sigue.
-      onSave({ ...formData, billing_model: 'minute_bucket' }, newBucketConfig)
+      onSave({ ...formData, ...newBucketConfig })
     }
   }
 
@@ -278,7 +241,7 @@ function PlanModal({
       <div className="bg-[var(--color-bg-card)] rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold">
-            {plan ? 'Editar Plan' : 'Nuevo Plan'}
+            {plan ? 'Editar Plan Tarifario' : 'Nuevo Plan Tarifario'}
           </h2>
           <button onClick={onClose} className="p-1 hover:bg-[var(--color-bg-secondary)] rounded">
             <X className="w-5 h-5" />
@@ -296,7 +259,7 @@ function PlanModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Nombre del Plan *
+                Nombre del Plan Tarifario *
               </label>
               <input
                 type="text"
@@ -326,88 +289,14 @@ function PlanModal({
             </div>
           </div>
 
-          {plan && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                  Tipo de Cuenta *
-                </label>
-                <select
-                  required
-                  disabled
-                  value={formData.account_type}
-                  onChange={(e) =>
-                    setFormData({ ...formData, account_type: e.target.value as AccountType })
-                  }
-                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
-                >
-                  <option value="PREPAID">Prepago (legacy)</option>
-                  <option value="POSTPAID">Postpago (legacy)</option>
-                </select>
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Campo legacy del modelo de saldo — los planes nuevos son Control/Abierto, sin prepago/postpago.
-                </p>
-              </div>
-
-          {isPrepaid ? (
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Saldo Inicial * (debe ser &gt; 0)
-              </label>
-              <input
-                type="number"
-                required
-                min="0.01"
-                step="0.01"
-                value={formData.initial_balance}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    initial_balance: Number(e.target.value),
-                  })
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                El saldo inicial no puede ser cero (sin planes ilimitados)
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Límite de Crédito * (debe ser &gt; 0)
-              </label>
-              <input
-                type="number"
-                required
-                min="0.01"
-                step="0.01"
-                value={formData.credit_limit}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    credit_limit: Number(e.target.value),
-                  })
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                El límite de crédito no puede ser cero (sin planes ilimitados)
-              </p>
-            </div>
-          )}
-            </>
-          )}
-
           {!plan && (
             <BucketConfigForm
-              title="Tipo de Plan"
+              title="Tipo de Balance"
               initial={newBucketConfig}
               cardGroups={cardGroups}
               isSaving={false}
               saved={false}
               onChange={setNewBucketConfig}
-              lockToBucket
             />
           )}
 
@@ -455,7 +344,7 @@ function PlanModal({
               className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
             />
             <label className="ml-2 text-sm font-medium text-[var(--color-text-secondary)]">
-              Plan activo
+              Plan tarifario activo
             </label>
           </div>
 
@@ -494,13 +383,13 @@ function DeleteModal({
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-[var(--color-bg-card)] rounded-lg p-6 max-w-md w-full mx-4">
-        <h3 className="text-lg font-bold mb-2">Eliminar Plan</h3>
+        <h3 className="text-lg font-bold mb-2">Eliminar Plan Tarifario</h3>
         <p className="text-[var(--color-text-secondary)] mb-4">
-          ¿Estás seguro de eliminar el plan <strong>{plan.plan_name}</strong>?
+          ¿Estás seguro de eliminar el plan tarifario <strong>{plan.plan_name}</strong>?
         </p>
         <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
-          Esta acción no se puede deshacer. Las cuentas existentes creadas con
-          este plan no se verán afectadas.
+          Esta acción no se puede deshacer. Las suscripciones existentes creadas con
+          este plan tarifario no se verán afectadas.
         </p>
         <div className="flex justify-end space-x-3">
           <button
@@ -518,27 +407,6 @@ function DeleteModal({
         </div>
       </div>
     </div>
-  )
-}
-
-/** Compact badge showing a plan's billing model, fetched lazily per row. */
-function PlanBillingModelBadge({ planId }: { planId: number }) {
-  const { data } = useQuery({
-    queryKey: ['plan-bucket-config', planId],
-    queryFn: () => getPlanBucketConfig(planId),
-    staleTime: 60000,
-  })
-
-  if (!data) return <span className="text-xs text-[var(--color-text-tertiary)]">…</span>
-
-  if (data.billing_model !== 'minute_bucket') {
-    return <Badge variant="default">Saldo</Badge>
-  }
-
-  return (
-    <Badge variant="info">
-      Bolsa ({data.bucket_type === 'control' ? 'Control' : 'Abierto'})
-    </Badge>
   )
 }
 
@@ -566,6 +434,7 @@ function BucketConfigSection({ planId }: { planId: number }) {
     mutationFn: (config: BucketConfig) => updatePlanBucketConfig(planId, config),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['plan-bucket-config', planId] })
+      queryClient.invalidateQueries({ queryKey: ['plans'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     },
@@ -574,14 +443,14 @@ function BucketConfigSection({ planId }: { planId: number }) {
   if (isLoading || !data) {
     return (
       <div className="border-t border-[var(--color-border-primary)] pt-4 mt-2">
-        <p className="text-sm text-[var(--color-text-tertiary)]">Cargando configuración de bolsa...</p>
+        <p className="text-sm text-[var(--color-text-tertiary)]">Cargando configuración de balance...</p>
       </div>
     )
   }
 
   return (
     <BucketConfigForm
-      title="Facturación: Bolsa de Minutos"
+      title="Facturación: Balance"
       initial={data}
       cardGroups={cardGroups}
       isSaving={mutation.isPending}
@@ -606,7 +475,6 @@ export function BucketConfigForm({
   onSave,
   onChange,
   extra,
-  lockToBucket,
 }: {
   title: string
   initial: BucketConfig
@@ -622,13 +490,6 @@ export function BucketConfigForm({
    */
   onChange?: (config: BucketConfig) => void
   extra?: React.ReactNode
-  /**
-   * There is no "Saldo" plan type anymore (Fibertel's model is Plan Control
-   * / Plan Abierto only) — hides the billing_model dropdown entirely and
-   * always renders the bucket fields, since `initial.billing_model` is
-   * already forced to 'minute_bucket' by the caller.
-   */
-  lockToBucket?: boolean
 }) {
   const [cfg, setCfg] = useState<BucketConfig>(initial)
   const updateCfg = (patch: Partial<BucketConfig>) => {
@@ -638,7 +499,6 @@ export function BucketConfigForm({
       return next
     })
   }
-  const isBucket = lockToBucket || cfg.billing_model === 'minute_bucket'
   const usesFlatRate = cfg.overage_flat_rate_per_minute !== null && cfg.overage_flat_rate_per_minute !== undefined
 
   return (
@@ -648,174 +508,145 @@ export function BucketConfigForm({
         {title}
       </h3>
 
-      {!lockToBucket && (
-        <div>
-          <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-            Modelo de Facturación
-          </label>
-          <select
-            value={cfg.billing_model}
-            onChange={(e) => {
-              const billing_model = e.target.value as BucketConfig['billing_model']
-              updateCfg({
-                billing_model,
-                // Default to "control" the first time so a bare model switch
-                // is already valid against the backend (bucket_type is
-                // required when billing_model = minute_bucket).
-                bucket_type: billing_model === 'minute_bucket' ? cfg.bucket_type ?? 'control' : cfg.bucket_type,
-              })
-            }}
-            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+      <div>
+        <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+          Tipo de Balance
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label
+            className={`border rounded-lg p-3 cursor-pointer text-sm ${
+              cfg.bucket_type === 'control' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
+            }`}
           >
-            <option value="balance">Saldo (modelo actual)</option>
-            <option value="minute_bucket">Bolsa de Minutos</option>
-          </select>
-        </div>
-      )}
-
-      {isBucket && (
-        <>
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              {lockToBucket ? 'Tipo de Plan' : 'Tipo de Bolsa'}
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label
-                className={`border rounded-lg p-3 cursor-pointer text-sm ${
-                  cfg.bucket_type === 'control' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="bucket_type"
-                  className="mr-2"
-                  checked={cfg.bucket_type === 'control'}
-                  onChange={() => updateCfg({ bucket_type: 'control' })}
-                />
-                <strong>Control</strong>
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Bloquea llamadas nuevas al agotar la bolsa.
-                </p>
-              </label>
-              <label
-                className={`border rounded-lg p-3 cursor-pointer text-sm ${
-                  cfg.bucket_type === 'abierto' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="bucket_type"
-                  className="mr-2"
-                  checked={cfg.bucket_type === 'abierto'}
-                  onChange={() => updateCfg({ bucket_type: 'abierto' })}
-                />
-                <strong>Abierto</strong>
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Nunca bloquea; el excedente se tarifica y reporta.
-                </p>
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Minutos Incluidos
-            </label>
             <input
-              type="number"
-              min="0"
-              value={cfg.included_minutes}
-              onChange={(e) => updateCfg({ included_minutes: Number(e.target.value) })}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              type="radio"
+              name="bucket_type"
+              className="mr-2"
+              checked={cfg.bucket_type === 'control'}
+              onChange={() => updateCfg({ bucket_type: 'control' })}
             />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Prorrateo del Primer Ciclo
-            </label>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="proration_mode"
-                  checked={cfg.proration_mode === 'full'}
-                  onChange={() => updateCfg({ proration_mode: 'full' })}
-                />
-                Bolsa completa desde el alta
-              </label>
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="proration_mode"
-                  checked={cfg.proration_mode === 'prorated'}
-                  onChange={() => updateCfg({ proration_mode: 'prorated' })}
-                />
-                Prorratear por días restantes
-              </label>
-            </div>
+            <strong>Control</strong>
             <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-              El valor prorrateado se calcula al abrir el primer ciclo y queda editable desde el detalle de la cuenta.
+              Bloquea llamadas nuevas al agotar la bolsa.
             </p>
-          </div>
+          </label>
+          <label
+            className={`border rounded-lg p-3 cursor-pointer text-sm ${
+              cfg.bucket_type === 'abierto' ? 'border-blue-500 bg-blue-50' : 'border-[var(--color-border-primary)]'
+            }`}
+          >
+            <input
+              type="radio"
+              name="bucket_type"
+              className="mr-2"
+              checked={cfg.bucket_type === 'abierto'}
+              onChange={() => updateCfg({ bucket_type: 'abierto' })}
+            />
+            <strong>Abierto</strong>
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+              Nunca bloquea; el excedente se tarifica y reporta.
+            </p>
+          </label>
+        </div>
+      </div>
 
-          <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Tarifa de Excedente
-            </label>
-            <div className="flex gap-4 text-sm mb-2">
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="overage_mode"
-                  checked={usesFlatRate}
-                  onChange={() =>
-                    updateCfg({ overage_flat_rate_per_minute: 0, overage_tariff_group: null })
-                  }
-                />
-                Tarifa fija por minuto
-              </label>
-              <label className="flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="overage_mode"
-                  checked={!usesFlatRate}
-                  onChange={() =>
-                    updateCfg({ overage_flat_rate_per_minute: null, overage_tariff_group: 'standard' })
-                  }
-                />
-                Tarifario por destino (grupo)
-              </label>
-            </div>
-            {usesFlatRate ? (
-              <input
-                type="number"
-                min="0"
-                step="0.0001"
-                value={cfg.overage_flat_rate_per_minute ?? 0}
-                onChange={(e) =>
-                  updateCfg({ overage_flat_rate_per_minute: Number(e.target.value) })
-                }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="Ej. 0.08"
-              />
-            ) : (
-              <input
-                type="text"
-                list="overage-group-options"
-                value={cfg.overage_tariff_group ?? 'standard'}
-                onChange={(e) => updateCfg({ overage_tariff_group: e.target.value || 'standard' })}
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              />
-            )}
-            <datalist id="overage-group-options">
-              {cardGroups.map((g) => (
-                <option key={g} value={g} />
-              ))}
-            </datalist>
-          </div>
-        </>
-      )}
+      <div>
+        <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+          Minutos Incluidos
+        </label>
+        <input
+          type="number"
+          min="0"
+          value={cfg.included_minutes}
+          onChange={(e) => updateCfg({ included_minutes: Number(e.target.value) })}
+          className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+          Prorrateo del Primer Ciclo
+        </label>
+        <div className="flex gap-4 text-sm">
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="proration_mode"
+              checked={cfg.proration_mode === 'full'}
+              onChange={() => updateCfg({ proration_mode: 'full' })}
+            />
+            Balance completo desde el alta
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="proration_mode"
+              checked={cfg.proration_mode === 'prorated'}
+              onChange={() => updateCfg({ proration_mode: 'prorated' })}
+            />
+            Prorratear por días restantes
+          </label>
+        </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+          El valor prorrateado se calcula al abrir el primer ciclo y queda editable desde el detalle de la suscripción.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+          Tarifa de Excedente
+        </label>
+        <div className="flex gap-4 text-sm mb-2">
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="overage_mode"
+              checked={usesFlatRate}
+              onChange={() =>
+                updateCfg({ overage_flat_rate_per_minute: 0, overage_tariff_group: null })
+              }
+            />
+            Tarifa fija por minuto
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="overage_mode"
+              checked={!usesFlatRate}
+              onChange={() =>
+                updateCfg({ overage_flat_rate_per_minute: null, overage_tariff_group: 'standard' })
+              }
+            />
+            Tarifario por destino (grupo)
+          </label>
+        </div>
+        {usesFlatRate ? (
+          <input
+            type="number"
+            min="0"
+            step="0.0001"
+            value={cfg.overage_flat_rate_per_minute ?? 0}
+            onChange={(e) =>
+              updateCfg({ overage_flat_rate_per_minute: Number(e.target.value) })
+            }
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+            placeholder="Ej. 0.08"
+          />
+        ) : (
+          <input
+            type="text"
+            list="overage-group-options"
+            value={cfg.overage_tariff_group ?? 'standard'}
+            onChange={(e) => updateCfg({ overage_tariff_group: e.target.value || 'standard' })}
+            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          />
+        )}
+        <datalist id="overage-group-options">
+          {cardGroups.map((g) => (
+            <option key={g} value={g} />
+          ))}
+        </datalist>
+      </div>
 
       {extra}
 
@@ -832,7 +663,7 @@ export function BucketConfigForm({
             onClick={() => onSave(cfg)}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
           >
-            {isSaving ? 'Guardando...' : 'Guardar Bolsa de Minutos'}
+            {isSaving ? 'Guardando...' : 'Guardar Balance'}
           </button>
         </div>
       )}

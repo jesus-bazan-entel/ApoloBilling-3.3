@@ -126,7 +126,10 @@ pub async fn run_alert_dispatcher(pool: PgPool) {
             continue;
         }
 
-        debug!("Dispatching {} pending minute bucket alert(s)", pending.len());
+        debug!(
+            "Dispatching {} pending minute bucket alert(s)",
+            pending.len()
+        );
 
         for (alert, account_number, notification_email) in pending {
             let Some(email) = notification_email else {
@@ -154,7 +157,10 @@ pub async fn run_alert_dispatcher(pool: PgPool) {
             let from = match from_mailbox.parse() {
                 Ok(addr) => addr,
                 Err(e) => {
-                    error!("Invalid SMTP_FROM_EMAIL/SMTP_FROM_NAME '{}': {}", from_mailbox, e);
+                    error!(
+                        "Invalid SMTP_FROM_EMAIL/SMTP_FROM_NAME '{}': {}",
+                        from_mailbox, e
+                    );
                     let _ = repo
                         .mark_alert_failed(alert.id, &format!("Invalid from address: {}", e))
                         .await;

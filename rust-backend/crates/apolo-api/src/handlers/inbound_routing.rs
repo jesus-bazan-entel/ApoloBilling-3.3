@@ -4,8 +4,8 @@
 //! Routes are matched by pattern with auto-priority based on pattern length.
 
 use crate::dto::inbound::{
-    CreateInboundRouteRequest, InboundRouteListResponse, InboundRouteResponse,
-    UpdateInboundRouteRequest,
+    CreateInboundRouteRequest, InboundGatewayOption, InboundRouteListResponse,
+    InboundRouteResponse, UpdateInboundRouteRequest,
 };
 use crate::dto::ApiResponse;
 use actix_web::{web, HttpResponse};
@@ -21,15 +21,24 @@ use uuid::Uuid;
 // FreeSWITCH dialplan file path
 const TO_KAMAILIO_XML: &str = "/etc/freeswitch/dialplan/to-kamailio.xml";
 
-/// Normalize gateway name for FreeSWITCH compatibility
-/// Converts spaces to hyphens and lowercases the name
-fn normalize_gateway_name(name: &str) -> String {
-    name.to_lowercase()
-        .replace(' ', "-")
-        .replace('_', "-")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '.')
-        .collect()
+/// Build the FreeSWITCH bridge string for an inbound route destination.
+///
+/// * `endpoint` = `(profile, host, port)` of the `sip_endpoints` trunk (PBX)
+///   destination -> bridged directly to `host:port`.
+/// * neither -> raw fallback to `sofia/internal/<number>@<destination_host>`.
+fn build_bridge(
+    dest_type: &str,
+    dial_var: &str,
+    dest_host: &str,
+    endpoint: Option<(&str, &str, i32)>,
+) -> String {
+    if dest_type != "gateway" {
+        return format!("user/{}@{}", dial_var, dest_host);
+    }
+    if let Some((profile, host, port)) = endpoint {
+        return format!("sofia/{}/{}@{}:{}", profile, dial_var, host, port);
+    }
+    format!("sofia/internal/{}@{}", dial_var, dest_host)
 }
 
 // ============================================================================
@@ -53,13 +62,16 @@ pub async fn list_inbound_routes(
     let routes = sqlx::query!(
         r#"
         SELECT r.id, r.name, r.description, r.pattern, r.source_ip,
-               r.destination_type, r.gateway_id, t.name as "gateway_name?",
+               r.destination_type, r.sip_endpoint_id,
+               se.name as "gateway_name?",
+               se.host as "gateway_host?",
+               se.port as "gateway_port?",
                r.destination_host, r.strip_digits, r.prefix_to_add,
                r.call_timeout, r.ims_mode, r.early_media,
                r.enabled, r.sync_status, r.sync_error,
                r.created_at, r.updated_at
         FROM inbound_routes r
-        LEFT JOIN routing_trunks t ON r.gateway_id = t.id
+        LEFT JOIN sip_endpoints se ON r.sip_endpoint_id = se.id
         ORDER BY LENGTH(r.pattern) DESC, r.pattern
         "#
     )
@@ -77,8 +89,10 @@ pub async fn list_inbound_routes(
             is_wildcard: r.pattern.ends_with('*'),
             source_ip: r.source_ip,
             destination_type: r.destination_type,
-            gateway_id: r.gateway_id,
+            sip_endpoint_id: r.sip_endpoint_id,
             gateway_name: r.gateway_name,
+            gateway_host: r.gateway_host,
+            gateway_port: r.gateway_port,
             destination_host: r
                 .destination_host
                 .unwrap_or_else(|| "10.10.22.4".to_string()),
@@ -124,13 +138,16 @@ pub async fn get_inbound_route(
     let route = sqlx::query!(
         r#"
         SELECT r.id, r.name, r.description, r.pattern, r.source_ip,
-               r.destination_type, r.gateway_id, t.name as "gateway_name?",
+               r.destination_type, r.sip_endpoint_id,
+               se.name as "gateway_name?",
+               se.host as "gateway_host?",
+               se.port as "gateway_port?",
                r.destination_host, r.strip_digits, r.prefix_to_add,
                r.call_timeout, r.ims_mode, r.early_media,
                r.enabled, r.sync_status, r.sync_error,
                r.created_at, r.updated_at
         FROM inbound_routes r
-        LEFT JOIN routing_trunks t ON r.gateway_id = t.id
+        LEFT JOIN sip_endpoints se ON r.sip_endpoint_id = se.id
         WHERE r.id = $1
         "#,
         route_id
@@ -148,8 +165,10 @@ pub async fn get_inbound_route(
         is_wildcard: route.pattern.ends_with('*'),
         source_ip: route.source_ip,
         destination_type: route.destination_type,
-        gateway_id: route.gateway_id,
+        sip_endpoint_id: route.sip_endpoint_id,
         gateway_name: route.gateway_name,
+        gateway_host: route.gateway_host,
+        gateway_port: route.gateway_port,
         destination_host: route
             .destination_host
             .unwrap_or_else(|| "10.10.22.4".to_string()),
@@ -166,6 +185,54 @@ pub async fn get_inbound_route(
     };
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
+}
+
+/// List destination trunks (PBX) for the inbound route destination dropdown
+///
+/// Source: SIP devices with `endpoint_type = 'trunk'` (e.g. "PBX GC GROUP").
+///
+/// GET /api/v1/inbound-routing/destinations
+///
+/// # Errors
+///
+/// Returns `AppError::Forbidden` when the user lacks the `inbound_routing`
+/// module, or a database error when the query fails.
+#[instrument(skip(pool, user))]
+pub async fn list_destinations(
+    pool: web::Data<PgPool>,
+    user: AuthenticatedUser,
+) -> Result<HttpResponse, AppError> {
+    if !user.has_module("inbound_routing") {
+        return Err(AppError::Forbidden);
+    }
+
+    debug!("Listing inbound route destinations (SIP trunks)");
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, name, host, port, transport, fs_profile
+        FROM sip_endpoints
+        WHERE endpoint_type = 'trunk' AND enabled = true AND host IS NOT NULL
+        ORDER BY name
+        "#
+    )
+    .fetch_all(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+
+    let data: Vec<InboundGatewayOption> = rows
+        .into_iter()
+        .map(|r| InboundGatewayOption {
+            id: r.id,
+            name: r.name,
+            host: r.host.unwrap_or_default(),
+            port: r.port.unwrap_or(5060),
+            transport: r.transport.unwrap_or_else(|| "udp".to_string()),
+            fs_profile: r.fs_profile,
+        })
+        .collect();
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(data)))
 }
 
 /// Create a new inbound route
@@ -204,10 +271,10 @@ pub async fn create_inbound_route(
         r#"
         INSERT INTO inbound_routes (
             id, name, description, pattern, source_ip,
-            destination_type, gateway_id, destination_host,
+            destination_type, destination_host,
             strip_digits, prefix_to_add,
             call_timeout, ims_mode, early_media,
-            enabled, sync_status
+            enabled, sip_endpoint_id, sync_status
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending')
         "#,
         route_id,
@@ -216,7 +283,6 @@ pub async fn create_inbound_route(
         req.pattern,
         req.source_ip,
         req.destination_type,
-        req.gateway_id,
         req.destination_host,
         req.strip_digits,
         req.prefix_to_add,
@@ -224,6 +290,7 @@ pub async fn create_inbound_route(
         req.ims_mode,
         req.early_media,
         req.enabled,
+        req.sip_endpoint_id,
     )
     .execute(pool.get_ref())
     .await
@@ -310,6 +377,9 @@ pub async fn update_inbound_route(
         }
     }
 
+    // Destination reference (double option: omitted = unchanged, null = clear)
+    let (update_endpoint, sip_endpoint_id) = resolve_destination_ref(&req);
+
     // Build dynamic update
     sqlx::query!(
         r#"
@@ -319,14 +389,14 @@ pub async fn update_inbound_route(
             pattern = COALESCE($4, pattern),
             source_ip = COALESCE($5, source_ip),
             destination_type = COALESCE($6, destination_type),
-            gateway_id = COALESCE($7, gateway_id),
-            destination_host = COALESCE($8, destination_host),
-            strip_digits = COALESCE($9, strip_digits),
-            prefix_to_add = COALESCE($10, prefix_to_add),
-            call_timeout = COALESCE($11, call_timeout),
-            ims_mode = COALESCE($12, ims_mode),
-            early_media = COALESCE($13, early_media),
-            enabled = COALESCE($14, enabled),
+            sip_endpoint_id = CASE WHEN $7 THEN $8 ELSE sip_endpoint_id END,
+            destination_host = COALESCE($9, destination_host),
+            strip_digits = COALESCE($10, strip_digits),
+            prefix_to_add = COALESCE($11, prefix_to_add),
+            call_timeout = COALESCE($12, call_timeout),
+            ims_mode = COALESCE($13, ims_mode),
+            early_media = COALESCE($14, early_media),
+            enabled = COALESCE($15, enabled),
             sync_status = 'pending',
             updated_at = NOW()
         WHERE id = $1
@@ -337,7 +407,8 @@ pub async fn update_inbound_route(
         req.pattern,
         req.source_ip,
         req.destination_type,
-        req.gateway_id,
+        update_endpoint,
+        sip_endpoint_id,
         req.destination_host,
         req.strip_digits,
         req.prefix_to_add,
@@ -382,6 +453,17 @@ pub async fn update_inbound_route(
     }
 
     get_inbound_route(pool, web::Path::from(route_id), admin.0).await
+}
+
+/// Resolve the destination trunk reference of an update request.
+///
+/// Returns `(update, sip_endpoint_id)`:
+/// * `(false, None)` - field omitted -> leave the stored value unchanged
+/// * `(true, None)` - explicit `null` -> clear the stored value
+/// * `(true, Some(id))` - store the given `sip_endpoints` trunk
+fn resolve_destination_ref(req: &UpdateInboundRouteRequest) -> (bool, Option<Uuid>) {
+    req.sip_endpoint_id
+        .map_or((false, None), |value| (true, value))
 }
 
 /// Delete an inbound route
@@ -491,8 +573,66 @@ fn validate_pattern(pattern: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Legs (host, port, nombre) para el dueno de un prefijo: los miembros
+/// habilitados de su grupo en orden de prioridad, o la duena sola si no
+/// esta agrupada. `owner_groups`: (endpoint, grupo). `mates`:
+/// (grupo, endpoint, nombre, host, port, prioridad) — ya viene ordenado.
+fn legs_for(
+    owner: &Uuid,
+    host: &str,
+    port: i32,
+    name: &str,
+    owner_groups: &[(Uuid, Uuid)],
+    mates: &[(Uuid, Uuid, String, String, i32, i32)],
+) -> Vec<(String, i32, String)> {
+    if let Some((_, group)) = owner_groups.iter().find(|(eid, _)| eid == owner) {
+        let mut legs: Vec<(String, i32, String, i32)> = mates
+            .iter()
+            .filter(|(g, _, _, _, _, _)| g == group)
+            .map(|(_, _, n, h, p, prio)| (h.clone(), *p, n.clone(), *prio))
+            .collect();
+        legs.sort_by_key(|l| l.3);
+        if !legs.is_empty() {
+            return legs.into_iter().map(|(h, p, n, _)| (h, p, n)).collect();
+        }
+    }
+    vec![(host.to_string(), port, name.to_string())]
+}
+
+/// Parse (prefijo, pbx, host, port) desde did_ranges de las PBXs,
+/// ordenado longest-match (prefijo mas largo primero, luego alfabetico).
+fn collect_range_prefixes(
+    pbxs: &[(String, String, i32, String)],
+) -> Vec<(String, String, String, i32)> {
+    let mut ranges: Vec<(String, String, String, i32)> = Vec::new();
+    for (name, host, port, did_ranges) in pbxs {
+        for p in did_ranges
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            if p.chars().all(|c| c.is_ascii_digit()) {
+                ranges.push((p.to_string(), name.clone(), host.clone(), *port));
+            }
+        }
+    }
+    ranges.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(&b.0)));
+    ranges
+}
+
+/// Read a system_settings key with default (missing table/key -> default).
+async fn get_setting(pool: &PgPool, key: &str, default: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT value FROM system_settings WHERE key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| default.to_string())
+}
+
 /// Generate and write FreeSWITCH dialplan from inbound_routes table
-async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError> {
+pub(crate) async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError> {
     info!("Generating FreeSWITCH dialplan from inbound routes");
 
     let mut xml = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
@@ -505,11 +645,15 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
     let routes = sqlx::query!(
         r#"
         SELECT r.id, r.name, r.pattern, r.source_ip,
-               r.destination_type, r.gateway_id, t.name as "gateway_name?",
+               r.destination_type, r.sip_endpoint_id,
+               se.name as "endpoint_name?",
+               se.host as "endpoint_host?",
+               se.port as "endpoint_port?",
+               se.fs_profile as "endpoint_fs_profile?",
                r.destination_host, r.strip_digits, r.prefix_to_add,
                r.call_timeout, r.ims_mode, r.early_media
         FROM inbound_routes r
-        LEFT JOIN routing_trunks t ON r.gateway_id = t.id
+        LEFT JOIN sip_endpoints se ON r.sip_endpoint_id = se.id
         WHERE r.enabled = true
         ORDER BY LENGTH(r.pattern) DESC, r.pattern
         "#
@@ -519,6 +663,18 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
     .map_err(|e| AppError::Database(e.to_string()))?;
 
     let mut has_ims = false;
+
+    // ETAPA 1/2 (two-stage): las wildcards RN* NO puentean: normalizan
+    // (strip/prefix), aplican clase de carrier y transfieren a national-routing.
+    // Solo las exactas puentean directo (overrides). OFF = legacy.
+    let two_stage = get_setting(pool, "inbound.two_stage", "true")
+        .await
+        .trim()
+        .eq_ignore_ascii_case("true");
+    let default_timeout: i32 = get_setting(pool, "inbound.default_timeout", "55")
+        .await
+        .parse()
+        .unwrap_or(55);
 
     for route in &routes {
         let is_wildcard = route.pattern.ends_with('*');
@@ -670,8 +826,8 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             xml.push_str(&format!("{}<action application=\"pre_answer\"/>\n", indent));
         }
 
-        // Continue on fail for IMS
-        if ims_mode {
+        // Continue on fail for IMS (solo cuando esta extension puentea)
+        if ims_mode && !(two_stage && is_wildcard) {
             xml.push_str(&format!(
                 "{}<action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
                 indent
@@ -682,31 +838,43 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             ));
         }
 
-        // Bridge
-        let dest_type = route.destination_type.as_str();
-        let dest_host = route.destination_host.as_deref().unwrap_or("10.10.22.4");
-        let bridge = if dest_type == "gateway" {
-            if let Some(ref gw_name) = route.gateway_name {
-                let normalized_gw = normalize_gateway_name(gw_name);
-                format!("sofia/gateway/{}/{}", normalized_gw, dial_var)
+        // Bridge (exactas) o clasificar+transferir (wildcards en two-stage)
+        if two_stage && is_wildcard {
+            // ETAPA 1: normaliza y pasa a ETAPA 2. NO puentea aqui.
+            let next = if strip > 0 || !add_prefix.is_empty() {
+                "${transformed_number}"
             } else {
-                format!("sofia/internal/{}@{}", dial_var, dest_host)
-            }
-        } else {
-            format!("user/{}@{}", dial_var, dest_host)
-        };
-
-        xml.push_str(&format!(
-            "{}<action application=\"bridge\" data=\"{}\"/>\n",
-            indent, bridge
-        ));
-
-        // IMS failure handler
-        if ims_mode {
+                "$1"
+            };
             xml.push_str(&format!(
-                "{}<action application=\"transfer\" data=\"_handle_bridge_failure_\"/>\n",
-                indent
+                "{}<action application=\"transfer\" data=\"{} XML national-routing\"/>\n",
+                indent, next
             ));
+        } else {
+            let dest_type = route.destination_type.as_str();
+            let dest_host = route.destination_host.as_deref().unwrap_or("10.10.22.4");
+            let endpoint = match (&route.endpoint_host, route.endpoint_port) {
+                (Some(host), Some(port)) => Some((
+                    route.endpoint_fs_profile.as_deref().unwrap_or("internal"),
+                    host.as_str(),
+                    port,
+                )),
+                _ => None,
+            };
+            let bridge = build_bridge(dest_type, dial_var, dest_host, endpoint);
+
+            xml.push_str(&format!(
+                "{}<action application=\"bridge\" data=\"{}\"/>\n",
+                indent, bridge
+            ));
+
+            // IMS failure handler
+            if ims_mode {
+                xml.push_str(&format!(
+                    "{}<action application=\"transfer\" data=\"_handle_bridge_failure_\"/>\n",
+                    indent
+                ));
+            }
         }
 
         if route.source_ip.is_some() {
@@ -718,21 +886,400 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
         xml.push_str("    </extension>\n\n");
     }
 
+    // ETAPA 1b (two-stage): passthrough — lo que ya viene en formato nacional
+    // entra directo a ETAPA 2. Va ULTIMO entre los clasificadores.
+    if two_stage {
+        xml.push_str("    <!-- ETAPA 1b: passthrough (formato ya nacional, sin RN) -->\n");
+        xml.push_str("    <extension name=\"classify-passthrough\">\n");
+        xml.push_str("      <condition field=\"destination_number\" expression=\"^(\\d+)$\">\n");
+        xml.push_str("        <action application=\"log\" data=\"INFO ETAPA1-passthrough: formato nacional ${destination_number} -> national-routing\"/>\n");
+        xml.push_str("        <action application=\"set\" data=\"original_destination=${destination_number}\"/>\n");
+        xml.push_str("        <action application=\"set\" data=\"transformed_number=$1\"/>\n");
+        xml.push_str(&format!(
+            "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+            default_timeout
+        ));
+        xml.push_str(&format!(
+            "        <action application=\"set\" data=\"originate_timeout={}\"/>\n",
+            default_timeout
+        ));
+        xml.push_str(
+            "        <action application=\"transfer\" data=\"$1 XML national-routing\"/>\n",
+        );
+        xml.push_str("      </condition>\n");
+        xml.push_str("    </extension>\n\n");
+    }
+
     // Add IMS failure handlers if any route uses IMS mode
     if has_ims {
         xml.push_str(&generate_ims_failure_handlers());
     }
 
-    // Fallback reject
-    xml.push_str("    <!-- Fallback: Reject unknown calls -->\n");
+    // ETAPA 1c: cierre de to-kamailio + apertura de national-routing.
+    // En legacy todo vive en to-kamailio (sin segundo contexto).
+    if two_stage {
+        xml.push_str(
+            "    <!-- ETAPA 1 seguridad: lo no clasificado -> 480 (no sale de to-kamailio) -->\n",
+        );
+        xml.push_str("    <extension name=\"fallback-reject\">\n");
+        xml.push_str("      <condition field=\"destination_number\" expression=\"^(.+)$\">\n");
+        xml.push_str("        <action application=\"log\" data=\"WARNING ETAPA1: sin clasificador para ${destination_number} desde ${network_addr}\"/>\n");
+        xml.push_str("        <action application=\"set\" data=\"sip_reason=Q.850;cause=20\"/>\n");
+        xml.push_str(
+            "        <action application=\"respond\" data=\"480 Temporarily Unavailable\"/>\n",
+        );
+        xml.push_str("      </condition>\n");
+        xml.push_str("    </extension>\n\n");
+        xml.push_str("  </context>\n\n");
+        xml.push_str("  <!-- ============================================================ -->\n");
+        xml.push_str("  <!-- ETAPA 2 (national-routing): decide sobre el numero NACIONAL -->\n");
+        xml.push_str("  <!-- L2 registrada -> L3 rango de su PBX -> L4 480.               -->\n");
+        xml.push_str("  <!-- ============================================================ -->\n");
+        xml.push_str("  <context name=\"national-routing\">\n\n");
+    }
+
+    // ============================================================
+    // CARRIER-CLASS AUTO-ROUTING (L2/L3/L4)
+    // L1 arriba = overrides explicitos (inbound_routes, por longitud
+    // de patron). L2 = extensiones registradas, L3 = hunt sobre PBXs
+    // conectadas (sip_endpoints trunk/ip), L4 = fallback configurable.
+    // Cero-config por DID. Switches en system_settings: inbound.*.
+    // ============================================================
+    let auto_local = get_setting(pool, "inbound.auto_local_extensions", "true").await;
+    let auto_pbx = get_setting(pool, "inbound.auto_pbx_hunt", "true").await;
+    let local_timeout: i32 = get_setting(pool, "inbound.local_timeout", "30")
+        .await
+        .parse()
+        .unwrap_or(30);
+    let pbx_timeout: i32 = get_setting(pool, "inbound.pbx_hunt_timeout", "55")
+        .await
+        .parse()
+        .unwrap_or(55);
+    let default_action = get_setting(pool, "inbound.default_action", "480").await;
+    let default_strip: i32 = get_setting(pool, "inbound.pbx_strip_digits", "0")
+        .await
+        .parse()
+        .unwrap_or(0);
+    let default_prefix = get_setting(pool, "inbound.pbx_prefix_to_add", "").await;
+
+    // En ETAPA 2 el post-bridge deriva a los handlers de to-kamailio
+    // (transfer cross-contexto); en legacy se cuelga directo.
+    let fail_transfer = if two_stage {
+        "_handle_bridge_failure_ XML to-kamailio"
+    } else {
+        "_handle_bridge_failure_"
+    };
+
+    // L2: extensiones locales registradas (lookup tipo HLR)
+    if auto_local.trim().eq_ignore_ascii_case("true") {
+        xml.push_str(
+            "    <!-- L2 AUTO: extensiones locales registradas (cero-config por DID) -->\n",
+        );
+        xml.push_str("    <extension name=\"auto-local-extensions\">\n");
+        xml.push_str("      <condition field=\"destination_number\" expression=\"^(\\d+)$\" break=\"never\">\n");
+        xml.push_str("        <action application=\"set\" data=\"dialed_extension=$1\"/>\n");
+        xml.push_str("      </condition>\n");
+        xml.push_str("      <condition field=\"${sofia_contact(user/${dialed_extension}@10.10.22.4)}\" expression=\"^sofia/\">\n");
+        xml.push_str("        <action application=\"log\" data=\"INFO AUTO-L2: extension local registrada ${dialed_extension} (${caller_id_number} -> ${destination_number})\"/>\n");
+        xml.push_str("        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n");
+        xml.push_str("        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n");
+        xml.push_str(&format!(
+            "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+            local_timeout
+        ));
+        if two_stage {
+            xml.push_str(
+                "        <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+            );
+            xml.push_str("        <action application=\"set\" data=\"continue_on_fail=true\"/>\n");
+        } else {
+            xml.push_str(
+                "        <action application=\"set\" data=\"hangup_after_bridge=true\"/>\n",
+            );
+            xml.push_str("        <action application=\"set\" data=\"continue_on_fail=false\"/>\n");
+        }
+        xml.push_str("        <action application=\"set\" data=\"effective_caller_id_number=${caller_id_number}\"/>\n");
+        xml.push_str("        <action application=\"set\" data=\"effective_caller_id_name=${caller_id_name}\"/>\n");
+        xml.push_str("        <action application=\"bridge\" data=\"user/${dialed_extension}@10.10.22.4\"/>\n");
+        if two_stage {
+            xml.push_str("        <action application=\"log\" data=\"INFO AUTO-L2: bridge termino -> handlers IMS\"/>\n");
+            xml.push_str(&format!(
+                "        <action application=\"transfer\" data=\"{}\"/>\n",
+                fail_transfer
+            ));
+        }
+        xml.push_str("      </condition>\n");
+        xml.push_str("    </extension>\n\n");
+    }
+
+    // L3 SELECTIVO estilo carrier (Vodafone/ATT): cada rango va SOLO a su PBX
+    // duena (sip_endpoints.did_ranges, longest-match). Jamas broadcast a terceros.
+    // Modo legacy hunt-all solo si inbound.pbx_hunt_mode='hunt-all' (single-tenant).
+    if auto_pbx.trim().eq_ignore_ascii_case("true") {
+        let hunt_mode = get_setting(pool, "inbound.pbx_hunt_mode", "ranges").await;
+        if hunt_mode.trim().eq_ignore_ascii_case("hunt-all") {
+            let pbx_ips: Vec<(String, String, i32)> = sqlx::query_as::<_, (String, String, i32)>(
+                r#"SELECT name, host, port FROM sip_endpoints
+                    WHERE enabled = true AND endpoint_type = 'trunk' AND auth_mode = 'ip'
+                      AND host IS NOT NULL AND host <> ''
+                    ORDER BY name"#,
+            )
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+            if pbx_ips.is_empty() {
+                xml.push_str(
+                    "    <!-- L3 AUTO: sin PBXs conectadas (sin sip_endpoints trunk/ip) -->\n\n",
+                );
+            } else {
+                xml.push_str(
+                    "    <!-- L3 AUTO: hunt sobre PBXs conectadas (cero-config por DID) -->\n",
+                );
+                let dial_expr = if default_strip > 0 && !default_prefix.is_empty() {
+                    format!(
+                        "{}${{destination_number:{}}}",
+                        escape_xml(&default_prefix),
+                        default_strip
+                    )
+                } else if default_strip > 0 {
+                    format!("${{destination_number:{}}}", default_strip)
+                } else if !default_prefix.is_empty() {
+                    format!("{}${{destination_number}}", escape_xml(&default_prefix))
+                } else {
+                    "${destination_number}".to_string()
+                };
+                let legs: Vec<String> = pbx_ips
+                    .iter()
+                    .map(|(_, host, port)| {
+                        format!("sofia/internal/{}@{}:{}", dial_expr, host, port)
+                    })
+                    .collect();
+                let names: Vec<&str> = pbx_ips.iter().map(|(n, _, _)| n.as_str()).collect();
+                xml.push_str("    <extension name=\"auto-pbx-hunt\">\n");
+                xml.push_str(
+                    "      <condition field=\"destination_number\" expression=\"^(\\d+)$\">\n",
+                );
+                xml.push_str(&format!("        <action application=\"log\" data=\"INFO AUTO-L3: hunt PBXs [{}]: ${{caller_id_number}} -> ${{destination_number}}\"/>\n", escape_xml(&names.join(","))));
+                xml.push_str(
+                    "        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n",
+                );
+                xml.push_str(&format!(
+                    "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+                    pbx_timeout
+                ));
+                xml.push_str(&format!(
+                    "        <action application=\"set\" data=\"originate_timeout={}\"/>\n",
+                    pbx_timeout
+                ));
+                xml.push_str("        <action application=\"set\" data=\"bypass_media=false\"/>\n");
+                xml.push_str("        <action application=\"set\" data=\"inherit_codec=true\"/>\n");
+                xml.push_str(
+                    "        <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"set\" data=\"continue_on_fail=true\"/>\n",
+                );
+                xml.push_str(&format!(
+                    "        <action application=\"bridge\" data=\"{}\"/>\n",
+                    legs.join("|")
+                ));
+                if two_stage {
+                    xml.push_str(&format!(
+                        "        <action application=\"transfer\" data=\"{}\"/>\n",
+                        fail_transfer
+                    ));
+                }
+                xml.push_str("      </condition>\n");
+                xml.push_str("    </extension>\n\n");
+            } // end hunt-all con PBXs
+        } else {
+            // L3 SELECTIVO (default): los rangos DID viven EN LA PBX
+            // (sip_endpoints.did_ranges, "174020,174021"). Una extension por
+            // prefijo, longest-match, puenteando SOLO a la PBX duena.
+            // Sin rango asignado = 480, nunca broadcast a terceros.
+            // Transformacion global: inbound.pbx_strip_digits/prefix_to_add.
+            let pbxs: Vec<(Uuid, String, String, i32, String, i32)> =
+                sqlx::query_as::<_, (Uuid, String, String, i32, String, i32)>(
+                    r#"SELECT id, name, host, port, COALESCE(did_ranges, ''), max_concurrent_calls
+                    FROM sip_endpoints
+                    WHERE enabled = true AND endpoint_type = 'trunk' AND auth_mode = 'ip'
+                      AND host IS NOT NULL AND host <> ''
+                    ORDER BY name"#,
+                )
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+            // Grupo del dueno (maximo uno por PBX) y sus miembros habilitados.
+            // (tabla ausente en instalaciones viejas -> solo la duena)
+            let owner_groups: Vec<(Uuid, Uuid)> =
+                sqlx::query_as(r#"SELECT sip_endpoint_id, group_id FROM pbx_group_members"#)
+                    .fetch_all(pool)
+                    .await
+                    .unwrap_or_default();
+            let mates: Vec<(Uuid, Uuid, String, String, i32, i32)> = sqlx::query_as(
+                r#"SELECT m.group_id, m.sip_endpoint_id, se.name, se.host, se.port, m.priority
+                   FROM pbx_group_members m JOIN sip_endpoints se ON se.id = m.sip_endpoint_id
+                   WHERE se.enabled = true ORDER BY m.priority"#,
+            )
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+            // (prefijo, legs[(host,port,nombre)], dueña, max_concurrent_calls) ordenado longest-match
+            let mut ranges: Vec<(String, Vec<(String, i32, String)>, Uuid, i32)> = Vec::new();
+            for (eid, name, host, port, did_ranges, max_calls) in &pbxs {
+                for p in did_ranges
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                {
+                    if p.chars().all(|c| c.is_ascii_digit()) {
+                        // legs: miembros del grupo (prioridad) o la duena sola
+                        let legs = legs_for(eid, host, *port, name, &owner_groups, &mates);
+                        ranges.push((p.to_string(), legs, *eid, *max_calls));
+                    }
+                }
+            }
+            ranges.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(&b.0)));
+            if ranges.is_empty() {
+                xml.push_str("    <!-- L3 SELECTIVO: ninguna PBX con did_ranges (todo lo no cubierto -> 480) -->\n\n");
+            } else {
+                xml.push_str(
+                    "    <!-- L3 SELECTIVO: cada prefijo SOLO a su PBX (longest-match) -->\n",
+                );
+                for (prefix, legs, owner_id, max_calls) in &ranges {
+                    let dial_expr = if default_strip > 0 && !default_prefix.is_empty() {
+                        format!(
+                            "{}${{destination_number:{}}}",
+                            escape_xml(&default_prefix),
+                            default_strip
+                        )
+                    } else if default_strip > 0 {
+                        format!("${{destination_number:{}}}", default_strip)
+                    } else if !default_prefix.is_empty() {
+                        format!("{}${{destination_number}}", escape_xml(&default_prefix))
+                    } else {
+                        "${destination_number}".to_string()
+                    };
+                    // Serie dentro del grupo (mismo dueno): la 1a que responde gana
+                    let hunt: Vec<String> = legs
+                        .iter()
+                        .map(|(h, p, _)| format!("sofia/internal/{}@{}:{}", dial_expr, h, p))
+                        .collect();
+                    let names: Vec<&str> = legs.iter().map(|(_, _, n)| n.as_str()).collect();
+                    xml.push_str(&format!(
+                        "    <extension name=\"pbx-range-{}\">\n",
+                        escape_xml(prefix)
+                    ));
+                    xml.push_str(&format!(
+                        "      <condition field=\"destination_number\" expression=\"^({}.+)$\">\n",
+                        escape_xml(prefix)
+                    ));
+                    xml.push_str(&format!("        <action application=\"log\" data=\"INFO AUTO-L3: rango {} -> [{}] (${{caller_id_number}} -> ${{destination_number}})\"/>\n", escape_xml(prefix), escape_xml(&names.join(","))));
+                    // Límite de canales concurrentes de la PBX dueña (nativo,
+                    // en memoria vía mod_hash): este bridge es directo
+                    // FreeSWITCH->PBX, nunca pasa por Kamailio, así que
+                    // CHECK_CALL_LIMIT (dr_gateways/dsip_call_settings) no
+                    // aplica aquí. Resource = id del sip_endpoint (estable,
+                    // independiente del host). Al exceder, transfiere a
+                    // pbx-limit-exceeded (congestión + 503) sin llegar a
+                    // intentar el bridge.
+                    xml.push_str(&format!(
+                        "        <action application=\"limit\" data=\"hash pbx_trunk {} {} _pbx_limit_exceeded_\"/>\n",
+                        owner_id, max_calls
+                    ));
+                    xml.push_str(
+                        "        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                    );
+                    xml.push_str("        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n");
+                    xml.push_str(&format!(
+                        "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+                        pbx_timeout
+                    ));
+                    xml.push_str(&format!(
+                        "        <action application=\"set\" data=\"originate_timeout={}\"/>\n",
+                        pbx_timeout
+                    ));
+                    xml.push_str(
+                        "        <action application=\"set\" data=\"bypass_media=false\"/>\n",
+                    );
+                    xml.push_str(
+                        "        <action application=\"set\" data=\"inherit_codec=true\"/>\n",
+                    );
+                    if two_stage {
+                        xml.push_str(
+                            "        <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+                        );
+                        xml.push_str(
+                            "        <action application=\"set\" data=\"continue_on_fail=true\"/>\n",
+                        );
+                    } else {
+                        xml.push_str(
+                            "        <action application=\"set\" data=\"hangup_after_bridge=true\"/>\n",
+                        );
+                        xml.push_str(
+                            "        <action application=\"set\" data=\"continue_on_fail=false\"/>\n",
+                        );
+                    }
+                    xml.push_str(&format!(
+                        "        <action application=\"bridge\" data=\"{}\"/>\n",
+                        hunt.join("|")
+                    ));
+                    if two_stage {
+                        xml.push_str(&format!(
+                            "        <action application=\"transfer\" data=\"{}\"/>\n",
+                            fail_transfer
+                        ));
+                    }
+                    xml.push_str("      </condition>\n");
+                    xml.push_str("    </extension>\n\n");
+                }
+
+                // Destino común de `limit` al exceder max_concurrent_calls de
+                // la PBX dueña (ver acción `limit` arriba): congestión, nunca
+                // llega a intentar el bridge.
+                xml.push_str("    <extension name=\"pbx-limit-exceeded\">\n");
+                xml.push_str("      <condition field=\"destination_number\" expression=\"^_pbx_limit_exceeded_$\">\n");
+                xml.push_str("        <action application=\"log\" data=\"WARNING AUTO-L3: límite de canales excedido, PBX ${limit_id} (max=${limit_max})\"/>\n");
+                xml.push_str("        <action application=\"playback\" data=\"tone_stream://%(500,500,480,620);loops=3\"/>\n");
+                xml.push_str("        <action application=\"set\" data=\"sip_reason=Q.850;cause=42\"/>\n");
+                xml.push_str("        <action application=\"respond\" data=\"503 Service Unavailable\"/>\n");
+                xml.push_str("      </condition>\n");
+                xml.push_str("    </extension>\n\n");
+            }
+        }
+    }
+
+    // L4: fallback configurable (carrier-class: 480/503, nunca 403 para DID desconocido)
+    let (sip_code, q850) = match default_action.trim() {
+        "404" => ("404 Not Found", "1"),
+        "503" => ("503 Service Unavailable", "42"),
+        _ => ("480 Temporarily Unavailable", "20"),
+    };
+    xml.push_str(
+        "    <!-- L4 FALLBACK carrier-class (system_settings inbound.default_action) -->\n",
+    );
     xml.push_str("    <extension name=\"fallback-reject\">\n");
     xml.push_str("      <condition field=\"destination_number\" expression=\"^(.+)$\">\n");
-    xml.push_str("        <action application=\"log\" data=\"WARNING Rejecting call to unknown destination: ${destination_number}\"/>\n");
-    xml.push_str("        <action application=\"respond\" data=\"404 Not Found\"/>\n");
+    xml.push_str(&format!("        <action application=\"log\" data=\"WARNING AUTO-L4: sin destino para ${{destination_number}} desde ${{network_addr}} -> {}\"/>\n", sip_code));
+    xml.push_str(&format!(
+        "        <action application=\"set\" data=\"sip_reason=Q.850;cause={}\"/>\n",
+        q850
+    ));
+    xml.push_str(&format!(
+        "        <action application=\"respond\" data=\"{}\"/>\n",
+        sip_code
+    ));
     xml.push_str("      </condition>\n");
     xml.push_str("    </extension>\n\n");
 
-    xml.push_str("  </context>\n");
+    if two_stage {
+        xml.push_str("  </context> <!-- national-routing -->\n");
+    } else {
+        xml.push_str("  </context>\n");
+    }
     xml.push_str("</include>\n");
 
     // Backup existing file
@@ -845,9 +1392,149 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/inbound-routing")
             .route("", web::get().to(list_inbound_routes))
             .route("", web::post().to(create_inbound_route))
+            .route("/destinations", web::get().to(list_destinations))
             .route("/sync", web::post().to(sync_inbound_routes))
             .route("/{id}", web::get().to(get_inbound_route))
             .route("/{id}", web::put().to(update_inbound_route))
             .route("/{id}", web::delete().to(delete_inbound_route)),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ENDPOINT_ID: &str = "67e81a07-67e8-46d1-b758-fe236461cf9b";
+
+    #[test]
+    fn bridge_to_sip_endpoint_trunk_is_direct_host_port() {
+        let bridge = build_bridge(
+            "gateway",
+            "${transformed_number}",
+            "10.40.41.124",
+            Some(("internal", "10.40.41.124", 5160)),
+        );
+        assert_eq!(
+            bridge,
+            "sofia/internal/${transformed_number}@10.40.41.124:5160"
+        );
+    }
+
+    #[test]
+    fn bridge_without_destination_falls_back_to_raw_host() {
+        let bridge = build_bridge("gateway", "$1", "10.40.41.124", None);
+        assert_eq!(bridge, "sofia/internal/$1@10.40.41.124");
+    }
+
+    #[test]
+    fn bridge_to_extension_uses_registered_user() {
+        let bridge = build_bridge(
+            "extension",
+            "$1",
+            "10.10.22.4",
+            Some(("internal", "10.40.41.124", 5160)),
+        );
+        assert_eq!(bridge, "user/$1@10.10.22.4");
+    }
+
+    #[test]
+    fn range_prefixes_are_longest_match_first() {
+        let pbxs = vec![
+            (
+                "PBX Fibertel".to_string(),
+                "10.30.0.26".to_string(),
+                5160,
+                "174020, 1740, abc, ".to_string(),
+            ),
+            (
+                "PBX GC GROUP".to_string(),
+                "10.40.41.124".to_string(),
+                5160,
+                "163751".to_string(),
+            ),
+        ];
+        let ranges = collect_range_prefixes(&pbxs);
+        // "abc" y vacios se descartan; orden: mas largo primero
+        let prefixes: Vec<&str> = ranges.iter().map(|(p, _, _, _)| p.as_str()).collect();
+        assert_eq!(prefixes, vec!["163751", "174020", "1740"]);
+        assert!(ranges.iter().all(|(_, _, _, port)| *port == 5160));
+    }
+
+    #[test]
+    fn destination_ref_omitted_field_leaves_value_unchanged() {
+        let req: UpdateInboundRouteRequest = serde_json::from_str("{}").unwrap();
+        assert_eq!(resolve_destination_ref(&req), (false, None));
+    }
+
+    #[test]
+    fn destination_ref_explicit_null_clears_reference() {
+        let req: UpdateInboundRouteRequest =
+            serde_json::from_str(r#"{"sip_endpoint_id":null}"#).unwrap();
+        assert_eq!(resolve_destination_ref(&req), (true, None));
+    }
+
+    #[test]
+    fn destination_ref_endpoint_id_is_stored() {
+        let req: UpdateInboundRouteRequest =
+            serde_json::from_str(&format!(r#"{{"sip_endpoint_id":"{}"}}"#, ENDPOINT_ID)).unwrap();
+        assert_eq!(
+            resolve_destination_ref(&req),
+            (true, Some(Uuid::parse_str(ENDPOINT_ID).unwrap()))
+        );
+    }
+
+    #[test]
+    fn destination_ref_legacy_gateway_id_field_is_ignored() {
+        let req: UpdateInboundRouteRequest = serde_json::from_str(
+            r#"{"gateway_id":"56fdc636-d632-465f-89c6-aea8b47cc9e8","sip_endpoint_id":null}"#,
+        )
+        .unwrap();
+        assert_eq!(resolve_destination_ref(&req), (true, None));
+    }
+}
+
+#[cfg(test)]
+mod legs_tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn legs_use_group_members_in_priority_order() {
+        let owner = Uuid::new_v4();
+        let backup = Uuid::new_v4();
+        let g = Uuid::new_v4();
+        let owner_groups = vec![(owner, g), (backup, g)];
+        let mates = vec![
+            (
+                g,
+                backup,
+                "Sec".to_string(),
+                "10.0.0.2".to_string(),
+                5060,
+                200,
+            ),
+            (
+                g,
+                owner,
+                "Pri".to_string(),
+                "10.0.0.1".to_string(),
+                5060,
+                100,
+            ),
+        ];
+        let legs = legs_for(&owner, "10.0.0.1", 5060, "Pri", &owner_groups, &mates);
+        assert_eq!(legs.len(), 2);
+        assert_eq!(legs[0].0, "10.0.0.1");
+        assert_eq!(legs[1].0, "10.0.0.2");
+    }
+
+    #[test]
+    fn legs_fall_back_to_owner_alone() {
+        let owner = Uuid::new_v4();
+        let legs = legs_for(&owner, "10.0.0.9", 5160, "Solo", &[], &[]);
+        assert_eq!(
+            legs,
+            vec![("10.0.0.9".to_string(), 5160, "Solo".to_string())]
+        );
+    }
 }

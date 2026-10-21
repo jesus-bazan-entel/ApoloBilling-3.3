@@ -70,7 +70,10 @@ pub async fn list_rate_cards(
     // Filter by tariff group if requested (defaults to showing every group,
     // e.g. "standard" outbound rates together with "overage_*" tariff sets)
     let rates: Vec<RateCard> = if let Some(group) = &filters.card_group {
-        rates.into_iter().filter(|r| &r.card_group == group).collect()
+        rates
+            .into_iter()
+            .filter(|r| &r.card_group == group)
+            .collect()
     } else {
         rates
     };

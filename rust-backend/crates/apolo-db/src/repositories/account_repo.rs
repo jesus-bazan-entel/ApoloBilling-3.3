@@ -1,10 +1,10 @@
 //! Account repository implementation
 //!
-//! Provides PostgreSQL-backed storage for account entities with optimized queries
-//! for phone number lookups and atomic balance updates.
+//! Provides PostgreSQL-backed storage for account entities with optimized
+//! queries for phone number lookups.
 
 use apolo_core::{
-    models::{Account, AccountStatus, AccountType},
+    models::{Account, AccountStatus},
     traits::{AccountRepository, Repository},
     AppError, AppResult,
 };
@@ -13,6 +13,10 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tracing::{debug, error, instrument};
+
+const ACCOUNT_COLS: &str = "id, account_number, customer_phone, status, max_concurrent_calls, \
+    plan_id, bucket_type, included_minutes, proration_mode, overage_flat_rate_per_minute, \
+    overage_tariff_group, notification_email, created_at, updated_at";
 
 /// PostgreSQL implementation of AccountRepository
 pub struct PgAccountRepository {
@@ -23,11 +27,6 @@ impl PgAccountRepository {
     /// Create a new account repository
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
-    }
-
-    /// Convert database account type string to enum
-    fn parse_account_type(s: &str) -> AccountType {
-        AccountType::from_str(s).unwrap_or(AccountType::Prepaid)
     }
 
     /// Convert database account status string to enum
@@ -42,17 +41,9 @@ impl Repository<Account, i32> for PgAccountRepository {
     async fn find_by_id(&self, id: i32) -> AppResult<Option<Account>> {
         debug!("Finding account by id: {}", id);
 
-        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(
-            r#"
-            SELECT
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            FROM accounts
-            WHERE id = $1
-            "#,
-        )
+        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts WHERE id = $1"
+        ))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -71,18 +62,9 @@ impl Repository<Account, i32> for PgAccountRepository {
             limit, offset
         );
 
-        let rows = sqlx::query_as::<sqlx::Postgres, AccountRow>(
-            r#"
-            SELECT
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            FROM accounts
-            ORDER BY id
-            LIMIT $1 OFFSET $2
-            "#,
-        )
+        let rows = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts ORDER BY id LIMIT $1 OFFSET $2"
+        ))
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
@@ -112,29 +94,28 @@ impl Repository<Account, i32> for PgAccountRepository {
     async fn create(&self, entity: &Account) -> AppResult<Account> {
         debug!("Creating account: {}", entity.account_number);
 
-        let row = sqlx::query_as::<sqlx::Postgres, AccountRow>(
+        let row = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
             r#"
             INSERT INTO accounts (
-                account_number, customer_phone, account_type,
-                balance, credit_limit, currency, status, max_concurrent_calls, plan_id
+                account_number, customer_phone, status, max_concurrent_calls, plan_id,
+                bucket_type, included_minutes, proration_mode,
+                overage_flat_rate_per_minute, overage_tariff_group, notification_email
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            "#,
-        )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING {ACCOUNT_COLS}
+            "#
+        ))
         .bind(&entity.account_number)
         .bind(&entity.customer_phone)
-        .bind(entity.account_type.to_string())
-        .bind(entity.balance)
-        .bind(entity.credit_limit)
-        .bind(&entity.currency)
         .bind(entity.status.to_string())
         .bind(entity.max_concurrent_calls)
         .bind(entity.plan_id)
+        .bind(&entity.bucket_type)
+        .bind(entity.included_minutes)
+        .bind(&entity.proration_mode)
+        .bind(entity.overage_flat_rate_per_minute)
+        .bind(&entity.overage_tariff_group)
+        .bind(&entity.notification_email)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
@@ -153,37 +134,27 @@ impl Repository<Account, i32> for PgAccountRepository {
     async fn update(&self, entity: &Account) -> AppResult<Account> {
         debug!("Updating account: {}", entity.id);
 
-        let row = sqlx::query_as::<sqlx::Postgres, AccountRow>(
+        let row = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
             r#"
             UPDATE accounts
             SET account_number = $2,
                 customer_phone = $3,
-                account_type = $4,
-                balance = $5,
-                credit_limit = $6,
-                currency = $7,
-                status = $8,
-                max_concurrent_calls = $9,
-                plan_id = $10,
+                status = $4,
+                max_concurrent_calls = $5,
+                plan_id = $6,
+                notification_email = $7,
                 updated_at = NOW()
             WHERE id = $1
-            RETURNING
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            "#,
-        )
+            RETURNING {ACCOUNT_COLS}
+            "#
+        ))
         .bind(entity.id)
         .bind(&entity.account_number)
         .bind(&entity.customer_phone)
-        .bind(entity.account_type.to_string())
-        .bind(entity.balance)
-        .bind(entity.credit_limit)
-        .bind(&entity.currency)
         .bind(entity.status.to_string())
         .bind(entity.max_concurrent_calls)
         .bind(entity.plan_id)
+        .bind(&entity.notification_email)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
@@ -219,17 +190,9 @@ impl AccountRepository for PgAccountRepository {
 
         let normalized = Account::normalize_phone(account_number);
 
-        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(
-            r#"
-            SELECT
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            FROM accounts
-            WHERE account_number = $1
-            "#,
-        )
+        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts WHERE account_number = $1"
+        ))
         .bind(&normalized)
         .fetch_optional(&self.pool)
         .await
@@ -247,17 +210,9 @@ impl AccountRepository for PgAccountRepository {
 
         let normalized = Account::normalize_phone(phone);
 
-        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(
-            r#"
-            SELECT
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            FROM accounts
-            WHERE customer_phone = $1
-            "#,
-        )
+        let result = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
+            "SELECT {ACCOUNT_COLS} FROM accounts WHERE customer_phone = $1"
+        ))
         .bind(&normalized)
         .fetch_optional(&self.pool)
         .await
@@ -270,87 +225,44 @@ impl AccountRepository for PgAccountRepository {
     }
 
     #[instrument(skip(self))]
-    async fn update_balance(&self, id: i32, amount: Decimal) -> AppResult<Decimal> {
-        debug!("Updating balance for account {} by {}", id, amount);
-
-        let result: (Decimal,) = sqlx::query_as(
-            r#"
-            UPDATE accounts
-            SET balance = balance + $2,
-                updated_at = NOW()
-            WHERE id = $1
-            RETURNING balance
-            "#,
-        )
-        .bind(id)
-        .bind(amount)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error updating balance for account {}: {}", id, e);
-            AppError::Database(format!("Failed to update balance: {}", e))
-        })?;
-
-        Ok(result.0)
-    }
-
-    #[instrument(skip(self))]
     async fn list_filtered(
         &self,
         status: Option<&str>,
-        account_type: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> AppResult<(Vec<Account>, i64)> {
         debug!(
-            "Listing accounts with filters: status={:?}, type={:?}, limit={}, offset={}",
-            status, account_type, limit, offset
+            "Listing accounts with filters: status={:?}, limit={}, offset={}",
+            status, limit, offset
         );
 
-        // Build dynamic query based on filters
-        let mut query_str = String::from(
+        let rows = sqlx::query_as::<sqlx::Postgres, AccountRow>(&format!(
             r#"
-            SELECT
-                id, account_number, customer_phone,
-                account_type, balance, credit_limit, currency,
-                status, max_concurrent_calls, plan_id,
-                created_at, updated_at
-            FROM accounts
-            WHERE 1=1
-            "#,
-        );
+            SELECT {ACCOUNT_COLS} FROM accounts
+            WHERE ($1::text IS NULL OR status = $1)
+            ORDER BY id
+            LIMIT $2 OFFSET $3
+            "#
+        ))
+        .bind(status)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error fetching filtered accounts: {}", e);
+            AppError::Database(format!("Failed to fetch accounts: {}", e))
+        })?;
 
-        let mut count_query = String::from("SELECT COUNT(*) FROM accounts WHERE 1=1");
-
-        if let Some(s) = status {
-            query_str.push_str(&format!(" AND status = '{}'", s));
-            count_query.push_str(&format!(" AND status = '{}'", s));
-        }
-
-        if let Some(t) = account_type {
-            query_str.push_str(&format!(" AND account_type = '{}'", t));
-            count_query.push_str(&format!(" AND account_type = '{}'", t));
-        }
-
-        query_str.push_str(&format!(" ORDER BY id LIMIT {} OFFSET {}", limit, offset));
-
-        // Get total count
-        let total: (i64,) = sqlx::query_as(&count_query)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("Database error counting filtered accounts: {}", e);
-                AppError::Database(format!("Failed to count accounts: {}", e))
-            })?;
-
-        // Get accounts
-        let rows = sqlx::query_as::<sqlx::Postgres, AccountRow>(&query_str)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("Database error fetching filtered accounts: {}", e);
-                AppError::Database(format!("Failed to fetch accounts: {}", e))
-            })?;
+        let total: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM accounts WHERE ($1::text IS NULL OR status = $1)")
+                .bind(status)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| {
+                    error!("Database error counting filtered accounts: {}", e);
+                    AppError::Database(format!("Failed to count accounts: {}", e))
+                })?;
 
         Ok((rows.into_iter().map(Into::into).collect(), total.0))
     }
@@ -362,13 +274,15 @@ struct AccountRow {
     id: i32,
     account_number: String,
     customer_phone: Option<String>,
-    account_type: String,
-    balance: Decimal,
-    credit_limit: Decimal,
-    currency: String,
     status: String,
     max_concurrent_calls: i32,
     plan_id: Option<i32>,
+    bucket_type: String,
+    included_minutes: i32,
+    proration_mode: String,
+    overage_flat_rate_per_minute: Option<Decimal>,
+    overage_tariff_group: Option<String>,
+    notification_email: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -380,13 +294,15 @@ impl From<AccountRow> for Account {
             account_number: row.account_number,
             account_name: None, // Not in database
             customer_phone: row.customer_phone,
-            account_type: PgAccountRepository::parse_account_type(&row.account_type),
-            balance: row.balance,
-            credit_limit: row.credit_limit,
-            currency: row.currency,
             status: PgAccountRepository::parse_account_status(&row.status),
             max_concurrent_calls: row.max_concurrent_calls,
             plan_id: row.plan_id,
+            bucket_type: row.bucket_type,
+            included_minutes: row.included_minutes,
+            proration_mode: row.proration_mode,
+            overage_flat_rate_per_minute: row.overage_flat_rate_per_minute,
+            overage_tariff_group: row.overage_tariff_group,
+            notification_email: row.notification_email,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

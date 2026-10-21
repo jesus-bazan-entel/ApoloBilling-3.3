@@ -6,6 +6,8 @@
     <list name="pbx-acl" default="deny">
       <node type="allow" cidr="172.16.1.25/32"/>
       <node type="allow" cidr="10.212.134.0/24"/>
+      <node type="allow" cidr="10.30.0.26/32"/>   <!-- PBX Fibertel -->
+      <node type="allow" cidr="10.40.41.124/32"/> <!-- PBX GC GROUP -->
     </list>
 
     <!-- ACL para Kamailio - Todas las interfaces -->

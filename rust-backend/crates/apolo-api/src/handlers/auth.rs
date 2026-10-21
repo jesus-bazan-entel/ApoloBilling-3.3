@@ -45,13 +45,10 @@ pub async fn login(
     let user_repo = PgUserRepository::new(pool.get_ref().clone());
     let user = match user_repo.find_by_username(identifier).await? {
         Some(user) => user,
-        None => user_repo
-            .find_by_email(identifier)
-            .await?
-            .ok_or_else(|| {
-                info!(identifier = %identifier, "Login failed: user not found");
-                AppError::InvalidCredentials
-            })?,
+        None => user_repo.find_by_email(identifier).await?.ok_or_else(|| {
+            info!(identifier = %identifier, "Login failed: user not found");
+            AppError::InvalidCredentials
+        })?,
     };
 
     // Check if user is active

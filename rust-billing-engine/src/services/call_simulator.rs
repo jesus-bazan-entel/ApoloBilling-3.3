@@ -6,7 +6,7 @@
 //! 2. CHANNEL_ANSWER - Call connected
 //! 3. CHANNEL_HANGUP_COMPLETE - CDR generation and balance consumption
 
-use crate::services::{AuthorizationService, CdrGenerator, ReservationManager};
+use crate::services::{AuthorizationService, CdrGenerator};
 use crate::cache::RedisClient;
 use crate::models::{AuthRequest, AuthResponse};
 use chrono::{DateTime, Utc};
@@ -35,6 +35,7 @@ pub struct SimulatedCall {
     pub rate_per_minute: Option<Decimal>,
     pub max_duration_seconds: Option<i32>,
     pub hangup_cause: Option<String>,
+    pub source_ip: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -75,6 +76,9 @@ pub struct SimulateCallRequest {
     /// Hangup cause (default: NORMAL_CLEARING)
     #[serde(default = "default_hangup_cause")]
     pub hangup_cause: String,
+    /// Source IP for IP-authenticated trunk lookup
+    #[serde(default)]
+    pub source_ip: Option<String>,
 }
 
 fn default_direction() -> String {
@@ -133,7 +137,6 @@ pub struct CallSimulator {
     redis_client: RedisClient,
     auth_service: Arc<AuthorizationService>,
     cdr_generator: Arc<CdrGenerator>,
-    reservation_manager: Arc<ReservationManager>,
     active_simulations: Arc<RwLock<HashMap<String, SimulatedCall>>>,
     server_id: String,
 }
@@ -144,14 +147,12 @@ impl CallSimulator {
         redis_client: RedisClient,
         auth_service: Arc<AuthorizationService>,
         cdr_generator: Arc<CdrGenerator>,
-        reservation_manager: Arc<ReservationManager>,
     ) -> Self {
         Self {
             db_pool,
             redis_client,
             auth_service,
             cdr_generator,
-            reservation_manager,
             active_simulations: Arc::new(RwLock::new(HashMap::new())),
             server_id: "simulator-001".to_string(),
         }
@@ -173,6 +174,7 @@ impl CallSimulator {
             callee: req.callee.clone(),
             uuid: Some(call_uuid.clone()),
             direction: Some(req.direction.clone()),
+            source_ip: req.source_ip.clone(),
         };
 
         let auth_result = self.auth_service.authorize(&auth_request).await;
@@ -225,6 +227,7 @@ impl CallSimulator {
                     rate_per_minute: auth.rate_per_minute.map(Decimal::from_f64_retain).flatten(),
                     max_duration_seconds: auth.max_duration_seconds,
                     hangup_cause: None,
+                    source_ip: req.source_ip.clone(),
                 };
 
                 // Store in active simulations
@@ -331,6 +334,7 @@ impl CallSimulator {
                 billsec,
                 hangup_cause: hangup_cause.clone(),
                 server_id: self.server_id.clone(),
+                source_ip: req.source_ip.clone(),
             };
 
             match self.cdr_generator.generate_cdr(hangup_event).await {
@@ -408,7 +412,8 @@ impl CallSimulator {
 
     /// Hangup a specific call
     pub async fn hangup_call(&self, call_uuid: &str, hangup_cause: Option<String>) -> Result<(), String> {
-        let cause = hangup_cause.unwrap_or_else(|| "NORMAL_CLEARING".to_string());
+        let cause = hangup_cause.clone().unwrap_or_else(|| "NORMAL_CLEARING".to_string());
+        let hangup_cause_for_cdr = hangup_cause.unwrap_or_else(|| "NORMAL_CLEARING".to_string());
 
         let call_data = {
             let sims = self.active_simulations.read().await;
@@ -435,7 +440,8 @@ impl CallSimulator {
             // Remove from active_calls
             self.remove_active_call(call_uuid).await?;
 
-            // Generate CDR
+// Generate CDR
+            let billsec = duration;
             let hangup_event = crate::services::cdr_generator::HangupEvent {
                 uuid: call_uuid.to_string(),
                 caller: call.caller.clone(),
@@ -445,9 +451,10 @@ impl CallSimulator {
                 answer_time: call.answer_time,
                 end_time,
                 duration,
-                billsec: duration,
-                hangup_cause: cause.clone(),
+                billsec,
+                hangup_cause: hangup_cause_for_cdr,
                 server_id: self.server_id.clone(),
+                source_ip: call.source_ip.clone(),
             };
 
             self.cdr_generator.generate_cdr(hangup_event).await
@@ -504,6 +511,7 @@ impl CallSimulator {
                 duration_seconds: Some(call.duration_seconds),
                 ring_seconds: 1,
                 hangup_cause: "NORMAL_CLEARING".to_string(),
+                source_ip: None,
             };
 
             match self.start_call(req).await {
@@ -538,7 +546,6 @@ impl CallSimulator {
             redis_client: self.redis_client.clone(),
             auth_service: self.auth_service.clone(),
             cdr_generator: self.cdr_generator.clone(),
-            reservation_manager: self.reservation_manager.clone(),
             active_simulations: self.active_simulations.clone(),
             server_id: self.server_id.clone(),
         }
@@ -551,7 +558,6 @@ struct CallSimulatorRefs {
     redis_client: RedisClient,
     auth_service: Arc<AuthorizationService>,
     cdr_generator: Arc<CdrGenerator>,
-    reservation_manager: Arc<ReservationManager>,
     active_simulations: Arc<RwLock<HashMap<String, SimulatedCall>>>,
     server_id: String,
 }
@@ -610,7 +616,7 @@ impl CallSimulatorRefs {
                 error!("Failed to remove active call: {}", e);
             }
 
-            // Generate CDR
+// Generate CDR
             let hangup_event = crate::services::cdr_generator::HangupEvent {
                 uuid: call_uuid.clone(),
                 caller: call.caller.clone(),
@@ -623,6 +629,7 @@ impl CallSimulatorRefs {
                 billsec,
                 hangup_cause: hangup_cause.clone(),
                 server_id: self.server_id.clone(),
+                source_ip: req.source_ip.clone(),
             };
 
             match self.cdr_generator.generate_cdr(hangup_event).await {

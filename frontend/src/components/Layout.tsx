@@ -5,12 +5,10 @@ import { useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import { MODULES, hasModule, type ModuleKey } from '../constants/modules'
 import {
-  ArrowRightLeft,
   LayoutDashboard,
   Users,
   FileText,
   Phone,
-  DollarSign,
   Globe,
   Activity,
   LogOut,
@@ -27,7 +25,6 @@ import {
   CreditCard,
   Headphones,
   BarChart3,
-  Router,
   Sun,
   Moon,
   Monitor,
@@ -66,10 +63,9 @@ const mainSection: NavSection = {
 const billingSection: NavSection = {
   title: 'Facturación',
   items: [
-    { name: 'Cuentas', href: '/accounts', icon: Users, moduleKey: MODULES.ACCOUNTS },
-    { name: 'Planes', href: '/plans', icon: CreditCard, moduleKey: MODULES.PLANS },
-    { name: 'Saldos', href: '/balance', icon: DollarSign, moduleKey: MODULES.BALANCE },
-    { name: 'Bolsas de Minutos', href: '/minute-buckets', icon: Timer, moduleKey: MODULES.MINUTE_BUCKETS },
+    { name: 'Suscripciones', href: '/accounts', icon: Users, moduleKey: MODULES.ACCOUNTS },
+    { name: 'Planes Tarifarios', href: '/plans', icon: CreditCard, moduleKey: MODULES.PLANS },
+    { name: 'Balances', href: '/minute-buckets', icon: Timer, moduleKey: MODULES.MINUTE_BUCKETS },
   ],
 }
 
@@ -92,17 +88,8 @@ const adminSection: NavSection = {
     { name: 'Rutas Salientes', href: '/outbound-routing', icon: Route, moduleKey: MODULES.OUTBOUND_ROUTING },
     { name: 'Carriers', href: '/carriers', icon: Server, moduleKey: MODULES.CARRIERS },
     { name: 'Carrier Groups', href: '/carrier-groups', icon: Layers, moduleKey: MODULES.CARRIER_GROUPS },
-    { name: 'Endpoints', href: '/endpoints', icon: Shield, moduleKey: MODULES.ENDPOINTS },
+    { name: 'PBX Groups', href: '/pbx-groups', icon: Users, moduleKey: MODULES.SIP_DEVICES },
     { name: 'Monitor Endpoints', href: '/endpoint-monitor', icon: Activity, moduleKey: MODULES.ENDPOINT_MONITOR },
-  ],
-}
-
-// Legacy routing - exclusive to factory support (Superadmin)
-const legacySection: NavSection = {
-  title: 'Legacy',
-  items: [
-    { name: 'Unified Routing', href: '/routing', icon: Router, moduleKey: MODULES.LEGACY_ROUTING },
-    { name: 'Internal Routing', href: '/internal-routing', icon: ArrowRightLeft, moduleKey: MODULES.LEGACY_ROUTING },
   ],
 }
 
@@ -110,12 +97,13 @@ const legacySection: NavSection = {
 const systemSection: NavSection = {
   title: 'Sistema',
   items: [
+    { name: 'Configuración', href: '/settings', icon: Shield, moduleKey: MODULES.SYSTEM_SETTINGS },
     { name: 'Usuarios', href: '/users', icon: UserCog, moduleKey: MODULES.USERS },
     { name: 'Auditoría', href: '/audit-logs', icon: FileSearch, moduleKey: MODULES.AUDIT_LOGS },
   ],
 }
 
-const allSections = [mainSection, billingSection, ratesSection, adminSection, systemSection, legacySection]
+const allSections = [mainSection, billingSection, ratesSection, adminSection, systemSection]
 
 interface LayoutProps {
   children: React.ReactNode

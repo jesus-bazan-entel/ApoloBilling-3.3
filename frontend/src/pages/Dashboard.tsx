@@ -324,9 +324,9 @@ export default function Dashboard() {
       ) : stats ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
-            title="Cuentas Activas"
+            title="Suscripciones Activas"
             value={stats.active_accounts}
-            subtitle={`de ${stats.total_accounts} cuentas totales`}
+            subtitle={`de ${stats.total_accounts} suscripciones totales`}
             icon={Users}
             color="blue"
           />

@@ -1,15 +1,18 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getMinuteBucketReport,
   exportMinuteBucketReport,
   getMinuteBucketHistory,
+  getMinuteBucketStatus,
+  getAccountBucketConfig,
+  updateMinuteBucketCycle,
   fetchAccounts,
 } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import CreditUtilizationBar from '../components/CreditUtilizationBar'
-import { Timer, Download, X, PhoneOff, PlusCircle } from 'lucide-react'
+import { Timer, Download, X, PhoneOff, PlusCircle, Settings2, AlertTriangle } from 'lucide-react'
 import type { MinuteBucketReportRow, CycleHistoryEntry } from '../types'
 
 function currentMonth(): string {
@@ -27,6 +30,7 @@ export default function MinuteBucketsPage() {
   const [bucketTypeFilter, setBucketTypeFilter] = useState<string>('')
   const [accountIdFilter, setAccountIdFilter] = useState<number | undefined>(undefined)
   const [detailRow, setDetailRow] = useState<MinuteBucketReportRow | null>(null)
+  const [adjustRow, setAdjustRow] = useState<MinuteBucketReportRow | null>(null)
 
   const isCurrentMonth = month === currentMonth()
 
@@ -77,7 +81,7 @@ export default function MinuteBucketsPage() {
   const columns = [
     {
       key: 'account_number',
-      header: 'Cuenta',
+      header: 'Suscripción',
       render: (r: MinuteBucketReportRow) => (
         <div>
           <div className="font-mono font-medium text-[var(--color-text-primary)]">
@@ -91,7 +95,7 @@ export default function MinuteBucketsPage() {
     },
     {
       key: 'bucket_type',
-      header: 'Plan',
+      header: 'Tipo',
       render: (r: MinuteBucketReportRow) => (
         <Badge variant={r.bucket_type === 'control' ? 'warning' : 'info'}>
           {r.bucket_type === 'control' ? 'Control' : 'Abierto'}
@@ -100,7 +104,7 @@ export default function MinuteBucketsPage() {
     },
     {
       key: 'included_minutes',
-      header: 'Bolsa',
+      header: 'Incluido',
       render: (r: MinuteBucketReportRow) => (
         <div className="text-sm">
           <span className="font-mono">{r.included_minutes} min</span>
@@ -158,6 +162,22 @@ export default function MinuteBucketsPage() {
           <Badge variant="success">Activo</Badge>
         ),
     },
+    {
+      key: 'actions',
+      header: 'Acciones',
+      render: (r: MinuteBucketReportRow) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setAdjustRow(r)
+          }}
+          className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+          title="Ajustar balance del ciclo actual"
+        >
+          <Settings2 className="w-3.5 h-3.5" /> Ajustar
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -166,10 +186,10 @@ export default function MinuteBucketsPage() {
         <div>
           <h1 className="text-3xl font-bold gradient-text tracking-tight flex items-center">
             <Timer className="w-8 h-8 mr-3 text-blue-600" />
-            Bolsas de Minutos
+            Balances
           </h1>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
-            Estado del ciclo actual y reporte mensual de consumo (Plan Control / Plan Abierto)
+            Estado del balance actual y reporte mensual de consumo (Plan Control / Plan Abierto)
           </p>
         </div>
         <button
@@ -195,12 +215,12 @@ export default function MinuteBucketsPage() {
           />
           <p className="text-xs text-[var(--color-text-tertiary)] mt-1 capitalize">
             {monthLabel(month)}
-            {isCurrentMonth && ' · ciclo en curso (se actualiza solo)'}
+            {isCurrentMonth && ' · balance en curso (se actualiza solo)'}
           </p>
         </div>
         <div>
           <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-            Tipo de plan
+            Tipo de balance
           </label>
           <select
             value={bucketTypeFilter}
@@ -214,7 +234,7 @@ export default function MinuteBucketsPage() {
         </div>
         <div>
           <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-            Cuenta
+            Suscripción
           </label>
           <select
             value={accountIdFilter ?? ''}
@@ -222,13 +242,11 @@ export default function MinuteBucketsPage() {
             className="px-3 py-2 border rounded-lg text-sm min-w-[180px]"
           >
             <option value="">Todas</option>
-            {accounts
-              .filter((a) => a.billing_model === 'minute_bucket')
-              .map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.account_number}
-                </option>
-              ))}
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.account_number}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -236,7 +254,7 @@ export default function MinuteBucketsPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
-          <p className="text-sm text-[var(--color-text-tertiary)]">Cuentas con bolsa</p>
+          <p className="text-sm text-[var(--color-text-tertiary)]">Suscripciones con balance</p>
           <p className="text-2xl font-bold text-[var(--color-text-primary)]">{rows.length}</p>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
@@ -259,15 +277,210 @@ export default function MinuteBucketsPage() {
         columns={columns}
         data={rowsWithId}
         loading={isLoading}
-        emptyMessage="No hay cuentas en modo bolsa de minutos para este período"
+        emptyMessage="No hay suscripciones en modo balance para este período"
         searchable
-        searchPlaceholder="Buscar por número de cuenta..."
+        searchPlaceholder="Buscar por número de suscripción..."
         onRowClick={(r) => setDetailRow(r)}
       />
 
       {detailRow && (
         <BucketDetailModal row={detailRow} onClose={() => setDetailRow(null)} />
       )}
+
+      {adjustRow && (
+        <AdjustCycleModal row={adjustRow} onClose={() => setAdjustRow(null)} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Lets an admin apply a plan-tarifario change to the account's CURRENT open
+ * balance instead of waiting for it to take effect next cycle. The account's
+ * own included_minutes (from its plan tarifario / manual override) is only
+ * copied into a fresh balance row when a new cycle opens — see
+ * ensure_open_cycle on the backend — so an edit made mid-cycle otherwise sits
+ * invisible until next month. This calls the existing
+ * PUT /accounts/{id}/minute-bucket override endpoint directly.
+ */
+function AdjustCycleModal({
+  row,
+  onClose,
+}: {
+  row: MinuteBucketReportRow
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [reason, setReason] = useState('')
+  const [customValue, setCustomValue] = useState<number | ''>('')
+
+  const { data: status, isLoading: statusLoading } = useQuery({
+    queryKey: ['minute-bucket-status', row.account_id],
+    queryFn: () => getMinuteBucketStatus(row.account_id),
+  })
+
+  const { data: config, isLoading: configLoading } = useQuery({
+    queryKey: ['account-bucket-config', row.account_id],
+    queryFn: () => getAccountBucketConfig(row.account_id),
+  })
+
+  const mutation = useMutation({
+    mutationFn: (includedMinutes: number) =>
+      updateMinuteBucketCycle(row.account_id, includedMinutes, reason || 'Ajuste manual desde Balances'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['minute-bucket-report'] })
+      queryClient.invalidateQueries({ queryKey: ['minute-bucket-status', row.account_id] })
+      queryClient.invalidateQueries({ queryKey: ['minute-bucket-history', row.account_id] })
+      onClose()
+    },
+  })
+
+  const isLoading = statusLoading || configLoading
+  const currentCycleMinutes = status?.included_minutes ?? row.included_minutes
+  const planMinutes = config?.included_minutes
+
+  let daysTotal = 0
+  let daysLeft = 0
+  let proratedValue: number | null = null
+  if (status) {
+    const start = new Date(status.cycle_start + 'T00:00:00')
+    const end = new Date(status.cycle_end + 'T00:00:00')
+    const today = new Date(new Date().toDateString())
+    daysTotal = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1)
+    daysLeft = Math.max(0, Math.round((end.getTime() - today.getTime()) / 86400000) + 1)
+    if (planMinutes !== undefined) {
+      proratedValue = Math.round((planMinutes * daysLeft) / daysTotal)
+    }
+  }
+
+  const hasMismatch = planMinutes !== undefined && planMinutes !== currentCycleMinutes
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-[var(--color-bg-card)] rounded-lg p-6 max-w-lg w-full mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold">Ajustar balance del ciclo actual</h3>
+            <p className="text-sm text-[var(--color-text-tertiary)]">{row.account_number}</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-[var(--color-bg-secondary)] rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <p className="text-sm text-[var(--color-text-tertiary)]">Cargando...</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="bg-[var(--color-bg-secondary)] rounded-lg p-3 text-sm space-y-1">
+              <div>
+                Balance del ciclo en curso: <span className="font-mono font-medium">{currentCycleMinutes} min</span>
+                {status && (
+                  <span className="text-[var(--color-text-tertiary)]"> ({status.cycle_start} → {status.cycle_end})</span>
+                )}
+              </div>
+              {planMinutes !== undefined && (
+                <div>
+                  Plan tarifario / suscripción indica: <span className="font-mono font-medium">{planMinutes} min</span>
+                </div>
+              )}
+            </div>
+
+            {hasMismatch ? (
+              <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>
+                  El plan tarifario de esta suscripción ya no coincide con el balance de este ciclo.
+                  El cambio se aplicará recién en el próximo ciclo salvo que lo apliques ahora.
+                </span>
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                Esta suscripción ya está alineada con su plan tarifario. Podés igual forzar un valor puntual para este ciclo.
+              </p>
+            )}
+
+            <div className="space-y-2">
+              {planMinutes !== undefined && (
+                <button
+                  type="button"
+                  onClick={() => mutation.mutate(planMinutes)}
+                  disabled={mutation.isPending}
+                  className="w-full text-left px-3 py-2 border rounded-lg hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                >
+                  <div className="font-medium text-sm">Aplicar ahora — completo</div>
+                  <div className="text-xs text-[var(--color-text-tertiary)]">
+                    Lleva el balance de este ciclo a {planMinutes} min de inmediato.
+                  </div>
+                </button>
+              )}
+              {proratedValue !== null && (
+                <button
+                  type="button"
+                  onClick={() => mutation.mutate(proratedValue as number)}
+                  disabled={mutation.isPending}
+                  className="w-full text-left px-3 py-2 border rounded-lg hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                >
+                  <div className="font-medium text-sm">Aplicar ahora — prorrateado</div>
+                  <div className="text-xs text-[var(--color-text-tertiary)]">
+                    {proratedValue} min, proporcional a los {daysLeft} de {daysTotal} días que quedan del ciclo.
+                  </div>
+                </button>
+              )}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                    Valor puntual (opcional)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={customValue}
+                    onChange={(e) => setCustomValue(e.target.value === '' ? '' : Number(e.target.value))}
+                    placeholder="Minutos"
+                    className="w-full px-3 py-2 border rounded-lg text-sm"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => customValue !== '' && mutation.mutate(customValue)}
+                  disabled={customValue === '' || mutation.isPending}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                Motivo (opcional)
+              </label>
+              <input
+                type="text"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Ej. upgrade de plan a mitad de mes"
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+              />
+            </div>
+
+            {mutation.isError && (
+              <p className="text-sm text-red-600">No se pudo ajustar el balance. Intentá de nuevo.</p>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 border rounded-lg hover:bg-[var(--color-bg-secondary)] text-sm"
+              >
+                Dejar para el próximo ciclo
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -291,7 +504,7 @@ function BucketDetailModal({
           <div>
             <h2 className="text-xl font-bold">{row.account_number}</h2>
             <p className="text-sm text-[var(--color-text-tertiary)]">
-              {row.account_name || 'Historial de ciclos de bolsa de minutos'}
+              {row.account_name || 'Historial de balance'}
             </p>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-[var(--color-bg-secondary)] rounded">
@@ -302,7 +515,7 @@ function BucketDetailModal({
         {isLoading ? (
           <p className="text-sm text-[var(--color-text-tertiary)]">Cargando historial...</p>
         ) : history.length === 0 ? (
-          <p className="text-sm text-[var(--color-text-tertiary)]">Sin ciclos registrados aún.</p>
+          <p className="text-sm text-[var(--color-text-tertiary)]">Sin balances registrados aún.</p>
         ) : (
           <div className="space-y-4">
             {history.map((cycle: CycleHistoryEntry) => (
@@ -315,7 +528,7 @@ function BucketDetailModal({
                     {cycle.cycle_start} → {cycle.cycle_end}
                   </span>
                   <Badge variant={cycle.status === 'open' ? 'success' : 'default'}>
-                    {cycle.status === 'open' ? 'Ciclo actual' : 'Cerrado'}
+                    {cycle.status === 'open' ? 'Balance actual' : 'Cerrado'}
                   </Badge>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
@@ -345,7 +558,7 @@ function BucketDetailModal({
                 {cycle.additions.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-[var(--color-border-primary)]">
                     <p className="text-xs font-medium text-[var(--color-text-tertiary)] mb-1 flex items-center">
-                      <PlusCircle className="w-3 h-3 mr-1" /> Bolsas adicionales
+                      <PlusCircle className="w-3 h-3 mr-1" /> Balances adicionales
                     </p>
                     <ul className="space-y-1">
                       {cycle.additions.map((add) => (

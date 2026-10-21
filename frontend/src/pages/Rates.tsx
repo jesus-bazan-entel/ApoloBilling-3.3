@@ -490,7 +490,7 @@ function RateModal({ rate, zones, cardGroups, onClose, onSubmit, isLoading, erro
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    rate_per_minute: parseFloat(e.target.value) || 0,
+                    rate_per_minute: e.target.value === '' ? 0 : parseFloat(e.target.value),
                   })
                 }
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
@@ -509,7 +509,7 @@ function RateModal({ rate, zones, cardGroups, onClose, onSubmit, isLoading, erro
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    billing_increment: parseInt(e.target.value) || 60,
+                    billing_increment: e.target.value === '' ? 0 : parseInt(e.target.value),
                   })
                 }
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -531,7 +531,7 @@ function RateModal({ rate, zones, cardGroups, onClose, onSubmit, isLoading, erro
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    connection_fee: parseFloat(e.target.value) || 0,
+                    connection_fee: e.target.value === '' ? 0 : parseFloat(e.target.value),
                   })
                 }
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
@@ -550,7 +550,7 @@ function RateModal({ rate, zones, cardGroups, onClose, onSubmit, isLoading, erro
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    priority: parseInt(e.target.value) || 1,
+                    priority: e.target.value === '' ? 0 : parseInt(e.target.value),
                   })
                 }
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

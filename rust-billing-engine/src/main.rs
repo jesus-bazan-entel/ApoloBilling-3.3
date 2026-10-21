@@ -17,9 +17,7 @@ use database::create_pool;
 use cache::RedisClient;
 use services::{
     AuthorizationService,
-    ReservationManager,
     MinuteBucketManager,
-    RealtimeBiller,
     CdrGenerator,
     CallSimulator,
 };
@@ -41,32 +39,25 @@ async fn main() -> std::io::Result<()> {
     // Load configuration
     let config = Config::from_env()
         .expect("Failed to load configuration");
-    
+
     info!("Environment: {}", config.environment);
 
     // Create database pool
     let db_pool = create_pool(&config.database_url)
         .await
         .expect("Failed to create database pool");
-    
+
     info!("✅ Database pool created");
 
     // Create Redis client
     let redis_client = RedisClient::new(&config.redis_url)
         .await
         .expect("Failed to create Redis client");
-    
+
     info!("✅ Redis client connected");
 
-    // Create services
-    let reservation_mgr = Arc::new(ReservationManager::new(
-        db_pool.clone(),
-        redis_client.clone()
-    ));
-
-    // Minute-bucket billing (Plan Control / Plan Abierto) — coexists with
-    // ReservationManager; only exercised for accounts with
-    // billing_model = 'minute_bucket'.
+    // Minute-bucket billing (Plan Control / Plan Abierto) — the only
+    // billing model.
     let minute_bucket_mgr = Arc::new(MinuteBucketManager::new(
         db_pool.clone(),
         redis_client.clone()
@@ -75,18 +66,11 @@ async fn main() -> std::io::Result<()> {
     let auth_service = Arc::new(AuthorizationService::new(
         db_pool.clone(),
         redis_client.clone(),
-        reservation_mgr.clone(),
         minute_bucket_mgr.clone()
-    ));
-
-    let realtime_biller = Arc::new(RealtimeBiller::new(
-        redis_client.clone(),
-        reservation_mgr.clone()
     ));
 
     let cdr_generator = Arc::new(CdrGenerator::new(
         db_pool.clone(),
-        reservation_mgr.clone(),
         minute_bucket_mgr.clone()
     ));
 
@@ -96,7 +80,6 @@ async fn main() -> std::io::Result<()> {
         redis_client.clone(),
         auth_service.clone(),
         cdr_generator.clone(),
-        reservation_mgr.clone(),
     ));
 
     info!("✅ Call Simulator service created");
@@ -106,7 +89,6 @@ async fn main() -> std::io::Result<()> {
         let esl_cluster = FreeSwitchCluster::new(
             config.freeswitch_servers.clone(),
             auth_service.clone(),
-            realtime_biller.clone(),
             cdr_generator.clone(),
             db_pool.clone(),
             redis_client.clone(),
@@ -121,11 +103,10 @@ async fn main() -> std::io::Result<()> {
         info!("✅ FreeSWITCH ESL cluster started (client mode)");
     } else {
         info!("⚠️  No FreeSWITCH servers configured - starting ESL server for testing");
-        
+
         // Start ESL Server (server mode - accept connections from simulator)
         let esl_server = EslServer::new(
             auth_service.clone(),
-            realtime_biller.clone(),
             cdr_generator.clone(),
             db_pool.clone(),
             redis_client.clone(),
@@ -149,7 +130,6 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             .wrap(tracing_actix_web::TracingLogger::default())
             .app_data(web::Data::new(auth_service.clone()))
-            .app_data(web::Data::new(reservation_mgr.clone()))
             .app_data(web::Data::new(cdr_generator.clone()))
             .app_data(web::Data::new(call_simulator.clone()))
             .configure(api::routes::configure)

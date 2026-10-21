@@ -6,7 +6,6 @@ import type {
   RateCard,
   CDR,
   ActiveCall,
-  Reservation,
   DashboardStats,
   PaginatedResponse,
   CDRFilters,
@@ -87,15 +86,6 @@ export const updateAccount = async (id: number, account: Partial<Account>): Prom
 
 export const deleteAccount = async (id: number): Promise<void> => {
   await api.delete(`/accounts/${id}`)
-}
-
-export const topupAccount = async (
-  id: number,
-  amount: number,
-  reason?: string
-): Promise<{ previous_balance: number; amount: number; new_balance: number }> => {
-  const { data } = await api.post(`/accounts/${id}/topup`, { amount, reason })
-  return data.data || data
 }
 
 // ============== PLANS ==============
@@ -387,19 +377,6 @@ export const deleteActiveCall = async (callId: string): Promise<void> => {
   await api.delete(`/active-calls/${callId}`)
 }
 
-// ============== RESERVATIONS ==============
-
-export const fetchReservations = async (status?: string): Promise<Reservation[]> => {
-  const params = status ? `?status=${status}` : ''
-  const { data } = await api.get(`/reservations${params}`)
-  return data
-}
-
-export const fetchActiveReservations = async (): Promise<Reservation[]> => {
-  const { data } = await api.get('/reservations/active')
-  return data
-}
-
 // ============== AUTHENTICATION ==============
 
 export interface LoginCredentials {
@@ -537,12 +514,12 @@ export interface DailyRevenueStats {
   total_minutes: number
 }
 
-export interface BalanceTrendPoint {
+export interface BucketTrendPoint {
   date: string
   day: number
-  total_balance: number
+  total_overage_cost: number
+  total_minutes_consumed: number
   active_accounts: number
-  average_balance: number
 }
 
 export const fetchCallsByHour = async (): Promise<HourlyCallStats[]> => {
@@ -557,8 +534,8 @@ export const fetchRevenueByDay = async (): Promise<DailyRevenueStats[]> => {
   return data.data?.data || data.data || data
 }
 
-export const fetchBalanceTrend = async (): Promise<BalanceTrendPoint[]> => {
-  const { data } = await api.get('/stats/balance-trend')
+export const fetchBucketTrend = async (): Promise<BucketTrendPoint[]> => {
+  const { data } = await api.get('/stats/bucket-trend')
   // Backend returns { data: { data: [...] } }
   return data.data?.data || data.data || data
 }
@@ -847,6 +824,38 @@ export const deleteKamailioCarrier = async (id: number): Promise<void> => {
   await api.delete(`/kamailio-dialplan/carriers/${id}`)
 }
 
+// PBX Groups (same-owner failover sets)
+export const fetchPbxGroups = async (): Promise<PbxGroupWithMembers[]> => {
+  const { data } = await api.get('/pbx-groups')
+  return data.data || data
+}
+
+export const createPbxGroup = async (group: CreatePbxGroupRequest): Promise<PbxGroupWithMembers> => {
+  const { data } = await api.post('/pbx-groups', group)
+  return data.data || data
+}
+
+export const updatePbxGroup = async (id: string, group: UpdatePbxGroupRequest): Promise<PbxGroupWithMembers> => {
+  const { data } = await api.put(`/pbx-groups/${id}`, group)
+  return data.data || data
+}
+
+export const deletePbxGroup = async (id: string): Promise<void> => {
+  await api.delete(`/pbx-groups/${id}`)
+}
+
+export const addPbxGroupMember = async (groupId: string, member: AddPbxGroupMemberRequest): Promise<void> => {
+  await api.post(`/pbx-groups/${groupId}/members`, member)
+}
+
+export const updatePbxGroupMember = async (groupId: string, memberId: string, priority: number): Promise<void> => {
+  await api.put(`/pbx-groups/${groupId}/members/${memberId}`, { priority })
+}
+
+export const removePbxGroupMember = async (groupId: string, memberId: string): Promise<void> => {
+  await api.delete(`/pbx-groups/${groupId}/members/${memberId}`)
+}
+
 // Outbound Routes
 export const fetchKamailioOutboundRoutes = async (): Promise<KamailioOutboundRoute[]> => {
   try {
@@ -885,57 +894,101 @@ export const reloadKamailio = async (): Promise<{ message: string }> => {
   return data.data || data
 }
 
-// ============== SIP DEVICES ==============
+// ============== SIP ENDPOINTS (unified extensions + trunks) ==============
 
 import type {
-  SipDevice,
-  SipDeviceWithPassword,
-  SipDeviceCreateRequest,
-  SipDeviceUpdateRequest,
+  SipEndpoint,
+  SipEndpointWithPassword,
+  SipEndpointCreateRequest,
+  SipEndpointUpdateRequest,
   FreeswitchAllowedIp,
+  PbxGroupWithMembers,
+  CreatePbxGroupRequest,
+  UpdatePbxGroupRequest,
+  AddPbxGroupMemberRequest,
 } from '../types'
 
-export const fetchSipDevices = async (accountId?: number): Promise<SipDevice[]> => {
-  const params = accountId ? `?account_id=${accountId}` : ''
-  const { data } = await api.get(`/sip-devices${params}`)
+export const fetchSipEndpoints = async (accountId?: number): Promise<SipEndpoint[]> => {
+  const accountParam = accountId ? `&account_id=${accountId}` : ''
+  const perPage = 1000 // backend max for per_page
+
+  const all: SipEndpoint[] = []
+  let page = 1
+  let totalPages = 1
+
+  do {
+    const { data } = await api.get(
+      `/sip-endpoints?page=${page}&per_page=${perPage}${accountParam}`
+    )
+    all.push(...(data.data || data))
+    totalPages = data.pagination?.total_pages ?? 1
+    page += 1
+  } while (page <= totalPages)
+
+  return all
+}
+
+export const fetchSipEndpoint = async (id: string): Promise<SipEndpoint> => {
+  const { data } = await api.get(`/sip-endpoints/${id}`)
   return data.data || data
 }
 
-export const fetchSipDevice = async (id: number): Promise<SipDevice> => {
-  const { data } = await api.get(`/sip-devices/${id}`)
+export const createSipEndpoint = async (
+  endpoint: SipEndpointCreateRequest
+): Promise<SipEndpointWithPassword | SipEndpoint> => {
+  const { data } = await api.post('/sip-endpoints', endpoint)
   return data.data || data
 }
 
-export const createSipDevice = async (device: SipDeviceCreateRequest): Promise<SipDeviceWithPassword> => {
-  const { data } = await api.post('/sip-devices', device)
+export const updateSipEndpoint = async (
+  id: string,
+  endpoint: SipEndpointUpdateRequest
+): Promise<SipEndpoint> => {
+  const { data } = await api.put(`/sip-endpoints/${id}`, endpoint)
   return data.data || data
 }
 
-export const updateSipDevice = async (id: number, device: SipDeviceUpdateRequest): Promise<SipDevice> => {
-  const { data } = await api.put(`/sip-devices/${id}`, device)
+export const deleteSipEndpoint = async (id: string): Promise<void> => {
+  await api.delete(`/sip-endpoints/${id}`)
+}
+
+export const getSipEndpointPassword = async (id: string): Promise<SipEndpointWithPassword> => {
+  const { data } = await api.get(`/sip-endpoints/${id}/password`)
   return data.data || data
 }
 
-export const deleteSipDevice = async (id: number): Promise<void> => {
-  await api.delete(`/sip-devices/${id}`)
-}
-
-export const getSipDevicePassword = async (id: number): Promise<SipDeviceWithPassword> => {
-  const { data } = await api.get(`/sip-devices/${id}/password`)
-  return data.data || data
-}
-
-export const regenerateSipDevicePassword = async (id: number): Promise<{
-  id: number
+export const regenerateSipEndpointPassword = async (id: string): Promise<{
+  id: string
   sip_username: string
   sip_domain: string
   new_password: string
 }> => {
-  const { data } = await api.post(`/sip-devices/${id}/regenerate-password`)
+  const { data } = await api.post(`/sip-endpoints/${id}/regenerate-password`)
   return data.data || data
 }
 
-// SIP Registration Status
+export const syncSipEndpoint = async (id: string): Promise<SipEndpoint> => {
+  const { data } = await api.post(`/sip-endpoints/${id}/sync`)
+  return data.data || data
+}
+
+export const syncAllSipEndpoints = async (): Promise<{
+  total: number
+  succeeded: number
+  failed: number
+  results: Array<{
+    endpoint_id: string
+    endpoint_name: string
+    kamailio_gwid?: number
+    success: boolean
+    error?: string
+  }>
+}> => {
+  const { data } = await api.post('/sip-endpoints/sync-all')
+  return data.data || data
+}
+
+// SIP Registration Status (auth_mode = credentials only)
 export interface SipRegistrationStatus {
   registered: boolean
   sip_username: string
@@ -950,14 +1003,14 @@ export interface SipRegistrationStatus {
   expires_at?: string
 }
 
-export const getSipDeviceRegistrationStatus = async (id: number): Promise<SipRegistrationStatus> => {
-  const { data } = await api.get(`/sip-devices/${id}/registration-status`)
+export const getSipEndpointRegistrationStatus = async (id: string): Promise<SipRegistrationStatus> => {
+  const { data } = await api.get(`/sip-endpoints/${id}/registration-status`)
   return data.data || data
 }
 
 // FreeSWITCH Allowed IPs
 export const fetchFreeswitchAllowedIps = async (): Promise<FreeswitchAllowedIp[]> => {
-  const { data } = await api.get('/sip-devices/allowed-ips')
+  const { data } = await api.get('/sip-endpoints/allowed-ips')
   return data.data || data
 }
 
@@ -966,12 +1019,12 @@ export const createFreeswitchAllowedIp = async (ip: {
   description?: string
   enabled?: boolean
 }): Promise<FreeswitchAllowedIp> => {
-  const { data } = await api.post('/sip-devices/allowed-ips', ip)
+  const { data } = await api.post('/sip-endpoints/allowed-ips', ip)
   return data.data || data
 }
 
 export const deleteFreeswitchAllowedIp = async (id: number): Promise<void> => {
-  await api.delete(`/sip-devices/allowed-ips/${id}`)
+  await api.delete(`/sip-endpoints/allowed-ips/${id}`)
 }
 
 // ============== UNIFIED ROUTING ==============
@@ -1150,6 +1203,7 @@ export const getTrunkSipHistory = async (
 
 import type {
   InboundRoute,
+  InboundGatewayOption,
   CreateInboundRouteRequest,
   UpdateInboundRouteRequestNew,
   // Deprecated types kept for backward compatibility
@@ -1170,6 +1224,13 @@ export const fetchInboundRoutes = async (): Promise<InboundRoute[]> => {
 
 export const fetchInboundRoute = async (id: string): Promise<InboundRoute> => {
   const { data } = await api.get(`/inbound-routing/${id}`)
+  return data.data || data
+}
+
+// Destination trunks (PBX) for the route destination dropdown:
+// SIP devices with endpoint_type = 'trunk'
+export const fetchInboundDestinations = async (): Promise<InboundGatewayOption[]> => {
+  const { data } = await api.get('/inbound-routing/destinations')
   return data.data || data
 }
 
@@ -1328,10 +1389,6 @@ import type {
   UpdateSipCarrierRequest,
   CarrierSipCheckResult,
   BulkCarrierSyncResult,
-  SipEndpoint,
-  SipEndpointListResponse,
-  CreateSipEndpointRequest,
-  UpdateSipEndpointRequest,
   CarrierGroupWithMembers,
   CarrierGroupListResponse,
   CreateCarrierGroupRequest,
@@ -1385,42 +1442,6 @@ export const checkSipCarrierStatus = async (
 
 export const syncAllSipCarriers = async (): Promise<BulkCarrierSyncResult> => {
   const { data } = await api.post('/carriers/sync')
-  return data.data || data
-}
-
-// ============== ENDPOINTS ==============
-
-export const fetchSipEndpoints = async (): Promise<SipEndpointListResponse> => {
-  const { data } = await api.get('/endpoints')
-  return data.data || data
-}
-
-export const fetchSipEndpoint = async (id: string): Promise<SipEndpoint> => {
-  const { data } = await api.get(`/endpoints/${id}`)
-  return data.data || data
-}
-
-export const createSipEndpoint = async (
-  endpoint: CreateSipEndpointRequest
-): Promise<SipEndpoint> => {
-  const { data } = await api.post('/endpoints', endpoint)
-  return data.data || data
-}
-
-export const updateSipEndpoint = async (
-  id: string,
-  endpoint: UpdateSipEndpointRequest
-): Promise<SipEndpoint> => {
-  const { data } = await api.put(`/endpoints/${id}`, endpoint)
-  return data.data || data
-}
-
-export const deleteSipEndpoint = async (id: string): Promise<void> => {
-  await api.delete(`/endpoints/${id}`)
-}
-
-export const syncAllSipEndpoints = async (): Promise<{ message: string }> => {
-  const { data } = await api.post('/endpoints/sync')
   return data.data || data
 }
 

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1340" font-family="DejaVu Sans, Verdana, sans-serif">
+  <defs>
+    <style>
+      .t { font-size: 15px; fill: #1a1a1a; }
+      .ts { font-size: 13px; fill: #1a1a1a; }
+      .tl { font-size: 13px; fill: #555; }
+      .tag { font-size: 12px; font-weight: bold; }
+      .stage { font-size: 14px; font-weight: bold; fill: #fff; }
+    </style>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#333" stroke-width="1.6"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="1340" fill="#ffffff"/>
+  <text x="500" y="34" text-anchor="middle" font-size="21" font-weight="bold" fill="#1a1a1a">Algoritmo de enrutamiento INBOUND — ApoloBilling SBC v3.0</text>
+  <text x="500" y="56" text-anchor="middle" font-size="13" fill="#555">ETAPA 1: clasificar + normalizar (carrier) → ETAPA 2: decidir sobre el número nacional · cero-config por DID</text>
+
+  <!-- START -->
+  <ellipse cx="400" cy="100" rx="230" ry="30" fill="#d9f2d9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="400" y="106" text-anchor="middle" class="t">INVITE sip:DID@SBC desde carrier</text>
+  <line x1="400" y1="130" x2="400" y2="152" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- D0 carrier? -->
+  <polygon points="400,152 560,212 400,272 240,212" fill="#fff3d6" stroke="#b7791f" stroke-width="2"/>
+  <text x="400" y="206" text-anchor="middle" class="t">¿Origen = carrier?</text>
+  <text x="400" y="226" text-anchor="middle" class="ts">FLB_SRC_CARRIER</text>
+  <line x1="560" y1="212" x2="690" y2="212" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="625" y="204" text-anchor="middle" class="tl">no</text>
+  <rect x="690" y="182" width="240" height="60" rx="8" fill="#f8d7da" stroke="#a72828" stroke-width="2"/>
+  <text x="810" y="206" text-anchor="middle" class="t">407 Proxy Auth</text>
+  <text x="810" y="226" text-anchor="middle" class="ts">Required (fin)</text>
+  <line x1="400" y1="272" x2="400" y2="294" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="288" class="tl">sí</text>
+
+  <!-- Kamailio -->
+  <rect x="170" y="294" width="460" height="72" rx="8" fill="#e8e0f5" stroke="#5b3fa8" stroke-width="2"/>
+  <text x="400" y="317" text-anchor="middle" class="tag" fill="#5b3fa8">KAMAILIO — sin reglas por DID</text>
+  <text x="400" y="336" text-anchor="middle" class="ts">P-hint + P-Early-Media + track IMS · do_routing(9000)</text>
+  <text x="400" y="354" text-anchor="middle" class="ts">UNA regla catch-all → relay al FreeSWITCH local</text>
+  <line x1="400" y1="366" x2="400" y2="386" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- ETAPA 1 banner -->
+  <rect x="170" y="386" width="460" height="30" rx="8" fill="#2f6db3"/>
+  <text x="400" y="406" text-anchor="middle" class="stage">ETAPA 1 · to-kamailio — clasificar + normalizar</text>
+  <line x1="400" y1="416" x2="400" y2="434" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- D-E1 exact? -->
+  <polygon points="400,434 570,494 400,554 230,494" fill="#fff3d6" stroke="#b7791f" stroke-width="2"/>
+  <text x="400" y="486" text-anchor="middle" class="ts">¿DID exacto especial?</text>
+  <text x="400" y="504" text-anchor="middle" class="ts">IVR / servicio único (hoy: 0)</text>
+  <line x1="570" y1="494" x2="690" y2="494" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="630" y="486" text-anchor="middle" class="tl">sí</text>
+  <rect x="690" y="464" width="250" height="60" rx="8" fill="#e3ecf7" stroke="#2f6db3" stroke-width="2"/>
+  <text x="815" y="488" text-anchor="middle" class="ts">Override: bridge directo</text>
+  <text x="815" y="506" text-anchor="middle" class="ts">a su destino fijo</text>
+  <line x1="400" y1="554" x2="400" y2="572" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="568" class="tl">no</text>
+
+  <!-- D-E2 RN? -->
+  <polygon points="400,572 570,632 400,692 230,632" fill="#fff3d6" stroke="#b7791f" stroke-width="2"/>
+  <text x="400" y="624" text-anchor="middle" class="ts">¿prefijo RN conocido?</text>
+  <text x="400" y="642" text-anchor="middle" class="ts">6720 · 6721 · 6722 (1 fila c/u)</text>
+  <line x1="570" y1="632" x2="690" y2="632" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="630" y="624" text-anchor="middle" class="tl">sí</text>
+  <rect x="690" y="590" width="250" height="84" rx="8" fill="#e3ecf7" stroke="#2f6db3" stroke-width="2"/>
+  <text x="815" y="614" text-anchor="middle" class="ts">strip → nacional + clase</text>
+  <text x="815" y="632" text-anchor="middle" class="ts">carrier (t/o, 100rel,</text>
+  <text x="815" y="650" text-anchor="middle" class="ts">ringback + pre_answer)</text>
+  <line x1="400" y1="692" x2="400" y2="710" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="706" class="tl">no</text>
+
+  <!-- Passthrough -->
+  <rect x="170" y="710" width="460" height="60" rx="8" fill="#e3ecf7" stroke="#2f6db3" stroke-width="2"/>
+  <text x="400" y="733" text-anchor="middle" class="ts">Passthrough: ya es nacional</text>
+  <text x="400" y="751" text-anchor="middle" class="ts">(timeout default 55s)</text>
+
+  <!-- transfers to ETAPA 2 -->
+  <line x1="815" y1="674" x2="815" y2="800" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="829" y="740" class="tl">transfer</text>
+  <line x1="400" y1="770" x2="400" y2="800" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="794" class="tl">transfer</text>
+
+  <!-- ETAPA 2 banner -->
+  <rect x="170" y="800" width="460" height="30" rx="8" fill="#2e7d32"/>
+  <text x="400" y="820" text-anchor="middle" class="stage">ETAPA 2 · national-routing — decidir (nacional)</text>
+  <line x1="400" y1="830" x2="400" y2="848" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+
+  <!-- D-L2 -->
+  <polygon points="400,848 570,908 400,968 230,908" fill="#fff3d6" stroke="#b7791f" stroke-width="2"/>
+  <text x="400" y="900" text-anchor="middle" class="tag" fill="#7a5b00">L2 · ¿REGISTRADA?</text>
+  <text x="400" y="918" text-anchor="middle" class="ts">sofia_contact = HLR</text>
+  <line x1="570" y1="908" x2="690" y2="908" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="630" y="900" text-anchor="middle" class="tl">sí</text>
+  <rect x="690" y="878" width="250" height="60" rx="8" fill="#d9f2d9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="815" y="902" text-anchor="middle" class="ts">Bridge user/ext</text>
+  <text x="815" y="922" text-anchor="middle" class="ts">✓ llamada establecida</text>
+  <line x1="400" y1="968" x2="400" y2="986" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="982" class="tl">no</text>
+
+  <!-- D-L3 -->
+  <polygon points="400,986 570,1046 400,1106 230,1046" fill="#fff3d6" stroke="#b7791f" stroke-width="2"/>
+  <text x="400" y="1038" text-anchor="middle" class="tag" fill="#7a5b00">L3 · ¿RANGO CON DUEÑA?</text>
+  <text x="400" y="1056" text-anchor="middle" class="ts">did_ranges · longest-match</text>
+  <line x1="570" y1="1046" x2="690" y2="1046" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="630" y="1038" text-anchor="middle" class="tl">sí</text>
+  <rect x="690" y="1008" width="250" height="76" rx="8" fill="#d9f2d9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="815" y="1030" text-anchor="middle" class="ts">Bridge SOLO su PBX</text>
+  <text x="815" y="1048" text-anchor="middle" class="ts">grupo = failover dueño</text>
+  <text x="815" y="1066" text-anchor="middle" class="ts">✓ jamás a terceros</text>
+  <line x1="400" y1="1106" x2="400" y2="1124" stroke="#333" stroke-width="1.6" marker-end="url(#arr)"/>
+  <text x="414" y="1120" class="tl">no</text>
+
+  <!-- L4 -->
+  <rect x="210" y="1124" width="380" height="60" rx="8" fill="#eeeeee" stroke="#555" stroke-width="2"/>
+  <text x="400" y="1147" text-anchor="middle" class="tag" fill="#333">L4 · 480 Temporarily Unavailable</text>
+  <text x="400" y="1166" text-anchor="middle" class="ts">Q.850 causa 20 (nunca 403)</text>
+
+  <!-- Anti-solape note -->
+  <rect x="650" y="1124" width="290" height="60" rx="8" fill="#fff3d6" stroke="#b7791f" stroke-width="1.5"/>
+  <text x="795" y="1147" text-anchor="middle" class="ts">Regla: 1 prefijo = 1 dueña</text>
+  <text x="795" y="1166" text-anchor="middle" class="ts">solape → error con dueño</text>
+
+  <!-- Legend -->
+  <text x="60" y="1215" class="tl">Leyenda:</text>
+  <rect x="60" y="1223" width="18" height="14" fill="#fff3d6" stroke="#b7791f"/>
+  <text x="84" y="1235" class="tl">decisión</text>
+  <rect x="170" y="1223" width="18" height="14" fill="#e3ecf7" stroke="#2f6db3"/>
+  <text x="194" y="1235" class="tl">acción FS</text>
+  <rect x="290" y="1223" width="18" height="14" fill="#e8e0f5" stroke="#5b3fa8"/>
+  <text x="314" y="1235" class="tl">Kamailio</text>
+  <rect x="410" y="1223" width="18" height="14" fill="#d9f2d9" stroke="#2e7d32"/>
+  <text x="434" y="1235" class="tl">éxito</text>
+  <rect x="520" y="1223" width="18" height="14" fill="#eeeeee" stroke="#555"/>
+  <text x="544" y="1235" class="tl">L4 fallback</text>
+  <rect x="650" y="1223" width="18" height="14" fill="#f8d7da" stroke="#a72828"/>
+  <text x="674" y="1235" class="tl">fin con causa (407)</text>
+
+  <text x="500" y="1270" text-anchor="middle" font-size="12" fill="#777">Cero-config por DID: un DID nuevo cae en su RN · un carrier nuevo = 1 wildcard · solo servicios especiales llevan exacta · rangos en la ficha PBX · failover en PBX Groups</text>
+</svg>

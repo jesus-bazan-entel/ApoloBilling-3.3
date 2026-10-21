@@ -37,7 +37,8 @@ const CDR_SELECT_COLUMNS: &str = r#"
     rate_id, rate_per_minute, cost,
     hangup_cause, direction,
     freeswitch_server_id, reservation_id,
-    created_at, processed_at
+    created_at, processed_at,
+    bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied
 "#;
 
 #[async_trait]
@@ -418,6 +419,11 @@ struct CdrRow {
     reservation_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     processed_at: Option<DateTime<Utc>>,
+    bucket_cycle_id: Option<i32>,
+    in_bucket_minutes: Option<Decimal>,
+    overage_minutes: Option<Decimal>,
+    overage_cost: Option<Decimal>,
+    overage_rate_applied: Option<Decimal>,
 }
 
 impl From<CdrRow> for Cdr {
@@ -443,6 +449,11 @@ impl From<CdrRow> for Cdr {
             reservation_id: row.reservation_id,
             created_at: row.created_at,
             processed_at: row.processed_at,
+            bucket_cycle_id: row.bucket_cycle_id,
+            in_bucket_minutes: row.in_bucket_minutes,
+            overage_minutes: row.overage_minutes,
+            overage_cost: row.overage_cost,
+            overage_rate_applied: row.overage_rate_applied,
         }
     }
 }
@@ -475,6 +486,11 @@ mod tests {
             reservation_id: None,
             created_at: now,
             processed_at: None,
+            bucket_cycle_id: None,
+            in_bucket_minutes: None,
+            overage_minutes: None,
+            overage_cost: None,
+            overage_rate_applied: None,
         };
 
         let cdr: Cdr = row.into();

@@ -3,7 +3,7 @@
 //! HTTP handlers for dashboard statistics endpoints.
 
 use crate::dto::{
-    ApiResponse, BalanceTrendPoint, BalanceTrendResponse, CallTypeStats, CallsByHourResponse,
+    ApiResponse, BucketTrendPoint, BucketTrendResponse, CallTypeStats, CallsByHourResponse,
     CallsByTypeResponse, CallsByZoneResponse, DailyRevenueStats, HourlyCallStats,
     RevenueByDayResponse, TrafficByDirectionResponse, TrafficStats, ZoneStats,
 };
@@ -165,107 +165,66 @@ pub async fn get_revenue_by_day(
     )
 }
 
-/// Get balance trend (last 30 days)
+/// Get bucket overage/consumption trend (last 30 days)
 ///
-/// GET /api/v1/stats/balance-trend
+/// GET /api/v1/stats/bucket-trend
 #[instrument(skip(pool, _user))]
-pub async fn get_balance_trend(
+pub async fn get_bucket_trend(
     pool: web::Data<PgPool>,
     _user: AuthenticatedUser,
 ) -> Result<HttpResponse, AppError> {
-    debug!("Fetching balance trend");
+    debug!("Fetching bucket overage/consumption trend");
 
     let now = Utc::now();
-
-    // Get daily snapshots from balance_transactions or calculate from current state
-    // For simplicity, we'll aggregate current balance by date for the last 30 days
     let start_date = (now - Duration::days(30)).date_naive();
 
     let rows = sqlx::query(
         r#"
         SELECT
-            DATE(created_at) as date,
-            SUM(new_balance)::NUMERIC as total_balance,
+            DATE(end_time) as date,
+            COALESCE(SUM(overage_cost), 0)::NUMERIC as total_overage_cost,
+            COALESCE(SUM(in_bucket_minutes + overage_minutes), 0)::NUMERIC as total_minutes,
             COUNT(DISTINCT account_id)::BIGINT as account_count
-        FROM (
-            SELECT DISTINCT ON (account_id, DATE(created_at))
-                account_id,
-                new_balance,
-                created_at
-            FROM balance_transactions
-            WHERE DATE(created_at) >= $1
-            ORDER BY account_id, DATE(created_at), created_at DESC
-        ) latest_per_day
-        GROUP BY DATE(created_at)
+        FROM cdrs
+        WHERE bucket_cycle_id IS NOT NULL AND DATE(end_time) >= $1
+        GROUP BY DATE(end_time)
         ORDER BY date
         "#,
     )
     .bind(start_date)
     .fetch_all(pool.get_ref())
     .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch balance trend: {}", e)))?;
+    .map_err(|e| AppError::Database(format!("Failed to fetch bucket trend: {}", e)))?;
 
-    // If no transaction history, get current balance
-    let current_balance_row = sqlx::query(
-        r#"
-        SELECT
-            COALESCE(SUM(balance), 0) as total_balance,
-            COUNT(*)::BIGINT as active_accounts
-        FROM accounts
-        WHERE status = 'active'
-        "#,
-    )
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch current balance: {}", e)))?;
-
-    let current_total: Decimal = current_balance_row.get("total_balance");
-    let current_count: i64 = current_balance_row.get("active_accounts");
-
-    let mut data: Vec<BalanceTrendPoint> = Vec::new();
-
-    // If we have historical data, use it
-    if !rows.is_empty() {
-        for (index, row) in rows.iter().enumerate() {
-            let date: chrono::NaiveDate = row.get("date");
-            let total_balance: Decimal = row.get("total_balance");
-            let account_count: i64 = row.get("account_count");
-
-            let avg_balance = if account_count > 0 {
-                total_balance / Decimal::from(account_count)
-            } else {
-                Decimal::ZERO
-            };
-
-            data.push(BalanceTrendPoint {
-                date: date.format("%Y-%m-%d").to_string(),
-                day: (index + 1) as i32,
-                total_balance,
-                active_accounts: account_count,
-                average_balance: avg_balance,
-            });
-        }
-    } else {
-        // No historical data, create a flat line with current balance
-        for i in 0..30 {
-            let date = (now - Duration::days(29 - i)).date_naive();
-            let avg_balance = if current_count > 0 {
-                current_total / Decimal::from(current_count)
-            } else {
-                Decimal::ZERO
-            };
-
-            data.push(BalanceTrendPoint {
-                date: date.format("%Y-%m-%d").to_string(),
-                day: (i + 1) as i32,
-                total_balance: current_total,
-                active_accounts: current_count,
-                average_balance: avg_balance,
-            });
-        }
+    let mut by_date: std::collections::HashMap<chrono::NaiveDate, (Decimal, Decimal, i64)> =
+        std::collections::HashMap::new();
+    for row in &rows {
+        let date: chrono::NaiveDate = row.get("date");
+        let cost: Decimal = row.get("total_overage_cost");
+        let minutes: Decimal = row.get("total_minutes");
+        let accounts: i64 = row.get("account_count");
+        by_date.insert(date, (cost, minutes, accounts));
     }
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(BalanceTrendResponse { data })))
+    let mut data: Vec<BucketTrendPoint> = Vec::new();
+    for i in 0..30 {
+        let date = (now - Duration::days(29 - i)).date_naive();
+        let (cost, minutes, accounts) =
+            by_date
+                .get(&date)
+                .cloned()
+                .unwrap_or((Decimal::ZERO, Decimal::ZERO, 0));
+
+        data.push(BucketTrendPoint {
+            date: date.format("%Y-%m-%d").to_string(),
+            day: (i + 1) as i32,
+            total_overage_cost: cost,
+            total_minutes_consumed: minutes,
+            active_accounts: accounts,
+        });
+    }
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(BucketTrendResponse { data })))
 }
 
 /// Get calls by type (last 30 days)
@@ -481,7 +440,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/stats")
             .route("/calls-by-hour", web::get().to(get_calls_by_hour))
             .route("/revenue-by-day", web::get().to(get_revenue_by_day))
-            .route("/balance-trend", web::get().to(get_balance_trend))
+            .route("/bucket-trend", web::get().to(get_bucket_trend))
             .route("/calls-by-type", web::get().to(get_calls_by_type))
             .route("/calls-by-zone", web::get().to(get_calls_by_zone))
             .route(

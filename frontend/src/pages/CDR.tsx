@@ -111,6 +111,48 @@ export default function CDRPage() {
       className: 'text-right',
     },
     {
+      key: 'in_bucket_minutes',
+      header: 'Min. en Bolsa',
+      render: (cdr: CDR) => {
+        if (cdr.bucket_cycle_id == null) return <span className="text-[var(--color-text-tertiary)]">-</span>
+        const inBucket = parseFloat(String(cdr.in_bucket_minutes ?? 0)) || 0
+        return (
+          <span className="font-mono text-green-600 text-[var(--color-text-primary)]">
+            {inBucket.toFixed(2)} min
+          </span>
+        )
+      },
+      className: 'text-right',
+    },
+    {
+      key: 'overage_minutes',
+      header: 'Min. Excedente',
+      render: (cdr: CDR) => {
+        if (cdr.bucket_cycle_id == null) return <span className="text-[var(--color-text-tertiary)]">-</span>
+        const overage = parseFloat(String(cdr.overage_minutes ?? 0)) || 0
+        return (
+          <span className={overage > 0 ? 'font-mono text-amber-600' : 'font-mono text-[var(--color-text-tertiary)]'}>
+            {overage.toFixed(2)} min
+          </span>
+        )
+      },
+      className: 'text-right',
+    },
+    {
+      key: 'overage_cost',
+      header: 'Costo Excedente',
+      render: (cdr: CDR) => {
+        if (cdr.bucket_cycle_id == null) return <span className="text-[var(--color-text-tertiary)]">-</span>
+        const overageCost = parseFloat(String(cdr.overage_cost ?? 0)) || 0
+        return (
+          <span className={overageCost > 0 ? 'font-mono font-medium text-red-600' : 'font-mono text-[var(--color-text-tertiary)]'}>
+            S/{overageCost.toFixed(4)}
+          </span>
+        )
+      },
+      className: 'text-right',
+    },
+    {
       key: 'hangup_cause',
       header: 'Estado',
       render: (cdr: CDR) => (

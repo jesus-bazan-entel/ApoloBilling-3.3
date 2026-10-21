@@ -72,6 +72,22 @@ pub struct Cdr {
 
     /// When billing was processed
     pub processed_at: Option<DateTime<Utc>>,
+
+    /// Minute-bucket cycle this call was billed against, if any
+    /// (Plan Control / Plan Abierto model - see minute_bucket_cycles)
+    pub bucket_cycle_id: Option<i32>,
+
+    /// Minutes of this call covered by the account's balance
+    pub in_bucket_minutes: Option<Decimal>,
+
+    /// Minutes of this call billed as overage beyond the balance
+    pub overage_minutes: Option<Decimal>,
+
+    /// Cost of the overage minutes (0 if fully covered by the balance)
+    pub overage_cost: Option<Decimal>,
+
+    /// Rate per minute applied to overage minutes (if any)
+    pub overage_rate_applied: Option<Decimal>,
 }
 
 impl Cdr {
@@ -137,6 +153,11 @@ impl Default for Cdr {
             reservation_id: None,
             created_at: now,
             processed_at: None,
+            bucket_cycle_id: None,
+            in_bucket_minutes: None,
+            overage_minutes: None,
+            overage_cost: None,
+            overage_rate_applied: None,
         }
     }
 }

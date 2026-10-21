@@ -1,8 +1,9 @@
 //! Minute bucket DTOs
 //!
 //! Request/response types for the "bolsa de minutos" billing model endpoints.
+//! Every account and plan uses this model — there is no other.
 
-use apolo_core::models::{BillingModel, BucketConfig, BucketType, ProrationMode};
+use apolo_core::models::{BucketConfig, BucketType};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -11,11 +12,8 @@ use validator::Validate;
 /// `PUT /accounts/{id}/bucket-config`.
 #[derive(Debug, Clone, Deserialize, Validate)]
 pub struct BucketConfigRequest {
-    /// "balance" | "minute_bucket"
-    pub billing_model: String,
-
-    /// "control" | "abierto" — required when billing_model = "minute_bucket"
-    pub bucket_type: Option<String>,
+    /// "control" | "abierto"
+    pub bucket_type: String,
 
     /// Minutes included in the monthly base bucket
     #[validate(range(min = 0, max = 1_000_000, message = "included_minutes out of range"))]
@@ -40,24 +38,8 @@ fn default_proration_mode() -> String {
 impl BucketConfigRequest {
     /// Cross-field validation not expressible with `validator` derive macros.
     pub fn validate_business(&self) -> Result<(), String> {
-        let model = BillingModel::from_str(&self.billing_model);
-
-        if !matches!(self.billing_model.as_str(), "balance" | "minute_bucket") {
-            return Err(format!("Invalid billing_model: {}", self.billing_model));
-        }
-
-        if matches!(model, BillingModel::MinuteBucket) {
-            match &self.bucket_type {
-                None => {
-                    return Err(
-                        "bucket_type is required when billing_model = minute_bucket".to_string(),
-                    )
-                }
-                Some(bt) if BucketType::from_str(bt).is_none() => {
-                    return Err(format!("Invalid bucket_type: {}", bt))
-                }
-                _ => {}
-            }
+        if BucketType::from_str(&self.bucket_type).is_none() {
+            return Err(format!("Invalid bucket_type: {}", self.bucket_type));
         }
 
         if !matches!(self.proration_mode.as_str(), "full" | "prorated") {
@@ -67,13 +49,13 @@ impl BucketConfigRequest {
         Ok(())
     }
 
-    /// Convert to the shared core config type.
+    /// Convert to the shared core config type. Callers must run
+    /// `validate_business()` first.
     pub fn to_config(&self) -> BucketConfig {
         BucketConfig {
-            billing_model: BillingModel::from_str(&self.billing_model),
-            bucket_type: self.bucket_type.as_deref().and_then(BucketType::from_str),
+            bucket_type: BucketType::from_str(&self.bucket_type).unwrap_or(BucketType::Control),
             included_minutes: self.included_minutes,
-            proration_mode: ProrationMode::from_str(&self.proration_mode),
+            proration_mode: apolo_core::models::ProrationMode::from_str(&self.proration_mode),
             overage_flat_rate_per_minute: self.overage_flat_rate_per_minute,
             overage_tariff_group: self.overage_tariff_group.clone(),
         }
@@ -127,10 +109,8 @@ pub struct MinuteBucketStatusResponse {
     pub account_id: i32,
     /// Account number
     pub account_number: String,
-    /// "balance" | "minute_bucket"
-    pub billing_model: String,
     /// "control" | "abierto"
-    pub bucket_type: Option<String>,
+    pub bucket_type: String,
     /// First day of the current cycle
     pub cycle_start: chrono::NaiveDate,
     /// Last day of the current cycle
@@ -153,7 +133,7 @@ pub struct MinuteBucketStatusResponse {
     pub utilization_percent: Decimal,
     /// True only for bucket_type=control with no minutes left
     pub is_blocked: bool,
-    /// "flat" | "rate_card_group:<name>" | "standard" | "none" (balance model)
+    /// "flat" | "rate_card_group:<name>" | "standard"
     pub overage_rate_source: String,
     /// "open" | "closed"
     pub status: String,

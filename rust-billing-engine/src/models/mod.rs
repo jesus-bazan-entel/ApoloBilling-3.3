@@ -1,11 +1,9 @@
 // src/models/mod.rs
 pub mod account;
-pub mod reservation;
 pub mod rate;
 pub mod cdr;
 
-pub use account::{Account, AccountType, AccountStatus};
-pub use reservation::{BalanceReservation, ReservationStatus, ReservationType};
+pub use account::{Account, AccountStatus};
 pub use rate::RateCard;
 pub use cdr::Cdr;
 
@@ -22,6 +20,8 @@ pub struct AuthRequest {
     pub uuid: Option<String>,
     #[serde(default)]
     pub direction: Option<String>,
+    #[serde(default)]
+    pub source_ip: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,21 +41,6 @@ pub struct AuthResponse {
     pub max_duration_seconds: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_per_minute: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ConsumeReservationRequest {
-    pub call_uuid: String,
-    pub actual_cost: f64,
-    pub actual_billsec: i32,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ConsumeReservationResponse {
-    pub success: bool,
-    pub total_reserved: f64,
-    pub consumed: f64,
-    pub released: f64,
 }
 
 #[derive(Debug, Serialize)]

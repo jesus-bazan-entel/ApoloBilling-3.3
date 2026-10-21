@@ -1,5 +1,3 @@
-// Account types based on PRD
-export type AccountType = 'prepaid' | 'postpaid' | 'PREPAID' | 'POSTPAID'
 export type AccountStatus = 'active' | 'suspended' | 'closed' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED'
 
 // User types
@@ -52,21 +50,13 @@ export interface Account {
   account_number: string
   account_name?: string
   customer_phone?: string
-  account_type: AccountType
-  balance: number
-  credit_limit: number
-  currency?: string
   status: AccountStatus
   max_concurrent_calls: number
-  available_balance?: number
   plan_id?: number              // Plan used to create this account
-  consumed_credit?: number      // Postpago: crédito consumido (backend)
-  utilization_percent?: number  // Postpago: % de utilización (backend)
-  // Minute-bucket billing (optional — most accounts stay on billing_model='balance')
-  billing_model?: BillingModel
-  bucket_type?: BucketType | null
-  included_minutes?: number
-  proration_mode?: ProrationMode
+  // Minute-bucket billing (Plan Control / Plan Abierto) — every account has this
+  bucket_type: BucketType
+  included_minutes: number
+  proration_mode: ProrationMode
   overage_flat_rate_per_minute?: number | null
   overage_tariff_group?: string | null
   notification_email?: string | null
@@ -76,13 +66,11 @@ export interface Account {
 
 // ============== Minute Bucket Billing (Plan Control / Plan Abierto) ==============
 
-export type BillingModel = 'balance' | 'minute_bucket'
 export type BucketType = 'control' | 'abierto'
 export type ProrationMode = 'full' | 'prorated'
 
 export interface BucketConfig {
-  billing_model: BillingModel
-  bucket_type: BucketType | null
+  bucket_type: BucketType
   included_minutes: number
   proration_mode: ProrationMode
   overage_flat_rate_per_minute: number | null
@@ -101,8 +89,7 @@ export interface AccountBucketConfig extends BucketConfig {
 export interface MinuteBucketStatus {
   account_id: number
   account_number: string
-  billing_model: string
-  bucket_type: BucketType | null
+  bucket_type: BucketType
   cycle_start: string
   cycle_end: string
   included_minutes: number
@@ -151,7 +138,7 @@ export interface MinuteBucketReportRow {
   account_id: number
   account_number: string
   account_name: string | null
-  bucket_type: string | null
+  bucket_type: string
   included_minutes: number
   is_prorated: boolean
   additional_minutes: number
@@ -169,35 +156,18 @@ export interface Plan {
   id: number
   plan_name: string
   plan_code: string
-  account_type: AccountType
-  initial_balance: number
-  credit_limit: number
   max_concurrent_calls: number
   description?: string
   enabled: boolean
-  // Minute-bucket billing template (optional — most plans stay on billing_model='balance')
-  billing_model?: BillingModel
-  bucket_type?: BucketType | null
-  included_minutes?: number
-  proration_mode?: ProrationMode
+  // Minute-bucket billing template (Plan Control / Plan Abierto)
+  bucket_type: BucketType
+  included_minutes: number
+  proration_mode: ProrationMode
   overage_flat_rate_per_minute?: number | null
   overage_tariff_group?: string | null
   created_at: string
   updated_at: string
   created_by: string
-}
-
-// Account display information (for UI transformation)
-export interface AccountDisplayInfo {
-  currentBalance?: number       // Prepaid: saldo actual
-  consumedCredit?: number       // Postpago: crédito consumido
-  creditLimit?: number          // Postpago: límite total
-  availableCredit?: number      // Postpago: disponible para gastar
-  utilizationPercent?: number   // Postpago: 0-100%
-  displayValue: string          // Texto formateado para mostrar
-  isPrepaid: boolean
-  isLowBalance: boolean         // Alerta de saldo bajo
-  balanceColor: 'success' | 'warning' | 'error'  // Color según nivel
 }
 
 // Zone types
@@ -257,6 +227,13 @@ export interface CDR {
   zone_name?: string
   account_id?: number
   answered?: boolean
+
+  // Minute-bucket billing (Plan Control / Plan Abierto)
+  bucket_cycle_id?: number
+  in_bucket_minutes?: number
+  overage_minutes?: number
+  overage_cost?: number
+  overage_rate_applied?: number
 }
 
 // Active Call for real-time monitoring
@@ -282,48 +259,17 @@ export interface ActiveCall {
 }
 
 // Balance Reservation
-export interface Reservation {
-  id: string | number
-  account_id: number
-  call_uuid: string
-  reserved_amount: number
-  consumed_amount: number
-  released_amount: number
-  status: string
-  reservation_type: string
-  destination_prefix?: string
-  rate_per_minute: number
-  reserved_minutes?: number
-  created_at: string
-  updated_at?: string
-  expires_at: string
-}
-
-// Balance Transaction for audit
-export interface BalanceTransaction {
-  id: number
-  account_id: number
-  transaction_type: 'recharge' | 'deduction' | 'adjustment' | 'refund'
-  amount: number
-  balance_before: number
-  balance_after: number
-  description: string
-  created_at: string
-  created_by: string
-}
-
 // Dashboard Statistics - matches Rust backend DashboardStats
 export interface DashboardStats {
   total_accounts: number
   active_accounts: number
-  total_balance: number
+  total_overage_cost_month: number
   active_calls: number
-  active_reservations: number
+  blocked_accounts: number
   cdrs_today: number
   revenue_today: number
   minutes_today: number
   // Legacy fields for compatibility
-  reserved_amount?: number
   calls_today?: number
   calls_this_month?: number
   revenue_this_month?: number
@@ -408,51 +354,91 @@ export interface DialplanRoute {
 }
 
 // SIP Device types
-export interface SipDevice {
-  id: number
-  account_id: number
-  sip_username: string
-  sip_domain: string
-  display_name?: string
+// Unified SIP Endpoint model: an "extension" (single softphone/device) or a
+// "trunk" (PBX carrying many calls), authenticated either by SIP credentials
+// (REGISTER) or by trusted source IP (Kamailio ACL, trunk only).
+export type EndpointType = 'extension' | 'trunk'
+export type EndpointAuthMode = 'credentials' | 'ip'
+
+export interface SipEndpoint {
+  id: string
+  name: string
   description?: string
-  context: string
+  endpoint_type: EndpointType
+  auth_mode: EndpointAuthMode
+  account_id?: number
+
+  // auth_mode = credentials
+  sip_username?: string
+  sip_domain?: string
+  aor?: string
+  max_registrations: number
+  // Llamadas simultaneas (enforceada por billing engine/ESL en extensiones)
+  max_concurrent_calls: number
+
+  // auth_mode = ip
+  host?: string
+  port: number
+  transport: TransportProtocol
+  kamailio_gwid?: number
+  sync_status: KamailioSyncStatus
+  sync_error?: string
+  is_default: boolean
+  did_ranges: string
+
+  display_name?: string
   accountcode?: string
   codecs: string
-  max_registrations: number
   enabled: boolean
-  aor: string
   created_at: string
   updated_at: string
 }
 
-export interface SipDeviceWithPassword extends SipDevice {
+export interface SipEndpointWithPassword extends SipEndpoint {
   password: string
 }
 
-export interface SipDeviceCreateRequest {
-  account_id: number
-  sip_username: string
+export interface SipEndpointCreateRequest {
+  name: string
+  description?: string
+  endpoint_type: EndpointType
+  auth_mode: EndpointAuthMode
+  account_id?: number
+
+  sip_username?: string
   sip_domain?: string
   password?: string
+  max_registrations?: number
+  max_concurrent_calls?: number
+
+  host?: string
+  port?: number
+  transport?: TransportProtocol
+  is_default?: boolean
+  did_ranges?: string
+
   display_name?: string
-  description?: string
-  context?: string
   accountcode?: string
   codecs?: string
-  max_registrations?: number
   enabled?: boolean
 }
 
-export interface SipDeviceUpdateRequest {
+export interface SipEndpointUpdateRequest {
+  name?: string
+  description?: string
   account_id?: number
   sip_username?: string
   sip_domain?: string
+  max_registrations?: number
+  max_concurrent_calls?: number
+  host?: string
+  port?: number
+  transport?: TransportProtocol
+  is_default?: boolean
+  did_ranges?: string
   display_name?: string
-  description?: string
-  context?: string
   accountcode?: string
   codecs?: string
-  max_registrations?: number
   enabled?: boolean
 }
 
@@ -849,8 +835,10 @@ export interface InboundRoute {
   is_wildcard: boolean      // computed from pattern
   source_ip?: string
   destination_type: 'extension' | 'gateway'
-  gateway_id?: string
+  sip_endpoint_id?: string
   gateway_name?: string
+  gateway_host?: string
+  gateway_port?: number
   destination_host: string
   strip_digits: number
   prefix_to_add: string
@@ -865,13 +853,15 @@ export interface InboundRoute {
 }
 
 // Request type for creating inbound route
+// sip_endpoint_id (SIP device trunk, endpoint_type = 'trunk') selects the
+// destination trunk; null = no trunk selected
 export interface CreateInboundRouteRequest {
   name: string
   description?: string
   pattern: string
   source_ip?: string
   destination_type?: string
-  gateway_id?: string
+  sip_endpoint_id?: string | null
   destination_host?: string
   strip_digits?: number
   prefix_to_add?: string
@@ -882,13 +872,14 @@ export interface CreateInboundRouteRequest {
 }
 
 // Request type for updating inbound route
+// sip_endpoint_id: omit = keep current value, null = clear
 export interface UpdateInboundRouteRequestNew {
   name?: string
   description?: string
   pattern?: string
   source_ip?: string
   destination_type?: string
-  gateway_id?: string
+  sip_endpoint_id?: string | null
   destination_host?: string
   strip_digits?: number
   prefix_to_add?: string
@@ -896,6 +887,17 @@ export interface UpdateInboundRouteRequestNew {
   ims_mode?: boolean
   early_media?: boolean
   enabled?: boolean
+}
+
+// Destination trunk (PBX) option for the inbound route gateway dropdown.
+// Source: SIP devices with endpoint_type = 'trunk' (GET /inbound-routing/destinations)
+export interface InboundGatewayOption {
+  id: string
+  name: string
+  host: string
+  port: number
+  transport: string
+  fs_profile: string
 }
 
 // DEPRECATED: Kept for backward compatibility
@@ -1204,61 +1206,6 @@ export interface BulkCarrierSyncResult {
   results: CarrierSyncResult[]
 }
 
-// ============== ENDPOINTS (dr_gateways type=9) ==============
-
-export interface SipEndpoint {
-  id: string
-  name: string
-  description?: string
-  host: string
-  port: number
-  transport: TransportProtocol
-  fs_profile: string
-  kamailio_gwid?: number
-  sync_status: KamailioSyncStatus
-  sync_error?: string
-  enabled: boolean
-  is_default: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface CreateSipEndpointRequest {
-  name: string
-  description?: string
-  host: string
-  port?: number
-  transport?: TransportProtocol
-  fs_profile?: string
-  enabled?: boolean
-  is_default?: boolean
-}
-
-export interface UpdateSipEndpointRequest {
-  name?: string
-  description?: string
-  host?: string
-  port?: number
-  transport?: TransportProtocol
-  fs_profile?: string
-  enabled?: boolean
-  is_default?: boolean
-}
-
-export interface SipEndpointListResponse {
-  endpoints: SipEndpoint[]
-  total: number
-  enabled_count: number
-}
-
-export interface EndpointSyncResult {
-  endpoint_id: string
-  endpoint_name: string
-  kamailio_gwid?: number
-  success: boolean
-  error?: string
-}
-
 // ============== CARRIER GROUPS ==============
 
 export interface CarrierGroupMember {
@@ -1380,4 +1327,43 @@ export interface OutboundSyncAllResult {
   routes_failed: number
   kamailio_reloaded: boolean
   errors: string[]
+}
+
+export interface PbxGroupMember {
+  id: string
+  sip_endpoint_id: string
+  endpoint_name: string
+  host: string
+  port: number
+  priority: number
+}
+
+export interface PbxGroupWithMembers {
+  id: string
+  name: string
+  description?: string
+  strategy: string
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  members: PbxGroupMember[]
+}
+
+export interface CreatePbxGroupRequest {
+  name: string
+  description?: string
+  strategy?: string
+  enabled?: boolean
+}
+
+export interface UpdatePbxGroupRequest {
+  name?: string
+  description?: string
+  strategy?: string
+  enabled?: boolean
+}
+
+export interface AddPbxGroupMemberRequest {
+  sip_endpoint_id: string
+  priority?: number
 }

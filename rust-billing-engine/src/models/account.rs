@@ -7,46 +7,16 @@ use chrono::{DateTime, Utc};
 pub struct Account {
     pub id: i32,  // PostgreSQL integer = i32, not i64
     pub account_number: String,
-    pub account_type: AccountType,
-    pub balance: Decimal,
-    pub credit_limit: Decimal,
-    pub currency: String,
     pub status: AccountStatus,
     pub max_concurrent_calls: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    /// "balance" | "minute_bucket" — see minute_bucket.rs for the bolsa-de-minutos engine
-    pub billing_model: String,
-    /// "control" | "abierto" — only meaningful when billing_model = "minute_bucket"
+    /// "control" | "abierto" — see minute_bucket_manager.rs for the bolsa-de-minutos engine
     pub bucket_type: Option<String>,
-    /// Flat overage rate per minute for minute_bucket accounts, if configured
+    /// Flat overage rate per minute, if configured
     pub overage_flat_rate_per_minute: Option<Decimal>,
     /// rate_cards.card_group to use for LPM overage tariffing when no flat rate is set
     pub overage_tariff_group: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum AccountType {
-    Prepaid,
-    Postpaid,
-}
-
-impl AccountType {
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "prepaid" => AccountType::Prepaid,
-            "postpaid" => AccountType::Postpaid,
-            _ => AccountType::Prepaid,
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            AccountType::Prepaid => "prepaid",
-            AccountType::Postpaid => "postpaid",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -71,15 +41,5 @@ impl AccountStatus {
 impl Account {
     pub fn is_active(&self) -> bool {
         self.status == AccountStatus::Active
-    }
-
-    pub fn can_authorize(&self, required_balance: Decimal) -> bool {
-        match self.account_type {
-            AccountType::Prepaid => self.balance >= required_balance,
-            AccountType::Postpaid => {
-                let total_debt = self.balance.abs();
-                total_debt < self.credit_limit
-            }
-        }
     }
 }

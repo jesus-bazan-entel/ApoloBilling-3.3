@@ -82,15 +82,14 @@ impl PgRateRepository {
     /// List distinct tariff groups currently in use (for the frontend selector).
     #[instrument(skip(self))]
     pub async fn list_card_groups(&self) -> AppResult<Vec<String>> {
-        let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT DISTINCT card_group FROM rate_cards ORDER BY card_group",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("Database error listing card groups: {}", e);
-            AppError::Database(format!("Failed to list card groups: {}", e))
-        })?;
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT DISTINCT card_group FROM rate_cards ORDER BY card_group")
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| {
+                    error!("Database error listing card groups: {}", e);
+                    AppError::Database(format!("Failed to list card groups: {}", e))
+                })?;
 
         Ok(rows.into_iter().map(|(g,)| g).collect())
     }

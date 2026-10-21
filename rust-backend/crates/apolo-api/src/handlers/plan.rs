@@ -6,7 +6,7 @@ use crate::dto::plan::{PlanCreateRequest, PlanResponse, PlanUpdateRequest};
 use crate::dto::ApiResponse;
 use actix_web::{web, HttpResponse};
 use apolo_auth::AuthenticatedUser;
-use apolo_core::models::{AccountType, AuditLogBuilder};
+use apolo_core::models::AuditLogBuilder;
 use apolo_core::AppError;
 use apolo_db::PgPlanRepository;
 use sqlx::PgPool;
@@ -119,18 +119,16 @@ pub async fn create_plan(
         )));
     }
 
-    // Parse account type
-    let account_type = AccountType::from_str(&req.account_type)
-        .ok_or_else(|| AppError::Validation("Invalid account type".to_string()))?;
-
     // Create plan
     let created = repo
         .create(
             &req.plan_name,
             &req.plan_code,
-            &account_type,
-            req.initial_balance,
-            req.credit_limit,
+            &req.bucket_type,
+            req.included_minutes,
+            &req.proration_mode,
+            req.overage_flat_rate_per_minute,
+            req.overage_tariff_group.as_deref(),
             req.max_concurrent_calls,
             req.description.as_deref(),
             req.enabled,
@@ -148,9 +146,8 @@ pub async fn create_plan(
     let audit_details = serde_json::json!({
         "plan_name": created.plan_name,
         "plan_code": created.plan_code,
-        "account_type": format!("{:?}", created.account_type),
-        "initial_balance": created.initial_balance,
-        "credit_limit": created.credit_limit,
+        "bucket_type": created.bucket_type,
+        "included_minutes": created.included_minutes,
         "max_concurrent_calls": created.max_concurrent_calls,
     });
 
@@ -209,20 +206,6 @@ pub async fn update_plan(
         });
     }
 
-    if let Some(balance) = req.initial_balance {
-        changes["initial_balance"] = serde_json::json!({
-            "old": existing.initial_balance,
-            "new": balance
-        });
-    }
-
-    if let Some(limit) = req.credit_limit {
-        changes["credit_limit"] = serde_json::json!({
-            "old": existing.credit_limit,
-            "new": limit
-        });
-    }
-
     if let Some(calls) = req.max_concurrent_calls {
         changes["max_concurrent_calls"] = serde_json::json!({
             "old": existing.max_concurrent_calls,
@@ -249,8 +232,6 @@ pub async fn update_plan(
         .update(
             plan_id,
             req.plan_name.as_deref(),
-            req.initial_balance,
-            req.credit_limit,
             req.max_concurrent_calls,
             req.description.as_deref(),
             req.enabled,
@@ -330,6 +311,8 @@ pub async fn delete_plan(
 
 /// Configure plan routes
 pub fn configure(cfg: &mut web::ServiceConfig) {
+    use super::minute_bucket::{get_plan_bucket_config, update_plan_bucket_config};
+
     cfg.service(
         web::scope("/plans")
             .route("", web::get().to(list_plans))
@@ -337,6 +320,13 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .route("/active", web::get().to(list_active_plans))
             .route("/{id}", web::get().to(get_plan))
             .route("/{id}", web::put().to(update_plan))
-            .route("/{id}", web::delete().to(delete_plan)),
+            .route("/{id}", web::delete().to(delete_plan))
+            // Minute-bucket billing config — see account.rs::configure() for
+            // why this can't live in its own `web::scope("/plans")`.
+            .route("/{id}/bucket-config", web::get().to(get_plan_bucket_config))
+            .route(
+                "/{id}/bucket-config",
+                web::put().to(update_plan_bucket_config),
+            ),
     );
 }

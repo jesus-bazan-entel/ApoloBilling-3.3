@@ -654,7 +654,7 @@ function CarrierModal({ onClose, onSubmit, isLoading, error }: CarrierModalProps
               <input
                 type="number"
                 value={strip}
-                onChange={(e) => setStrip(parseInt(e.target.value) || 0)}
+                onChange={(e) => setStrip(e.target.value === '' ? 0 : parseInt(e.target.value))}
                 min="0"
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
@@ -795,7 +795,7 @@ function OutboundRouteModal({ carrierGroups, onClose, onSubmit, isLoading, error
             <input
               type="number"
               value={priority}
-              onChange={(e) => setPriority(parseInt(e.target.value) || 1)}
+              onChange={(e) => setPriority(e.target.value === '' ? 0 : parseInt(e.target.value))}
               min="1"
               className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
             />

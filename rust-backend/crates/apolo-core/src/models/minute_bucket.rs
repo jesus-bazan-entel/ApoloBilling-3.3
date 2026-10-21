@@ -1,45 +1,12 @@
 //! Minute bucket billing model
 //!
-//! Supports the "bolsa de minutos" billing model (Plan Control / Plan
-//! Abierto), which coexists with the balance-based model via
-//! `accounts.billing_model` / `plans.billing_model`. See the "Bolsas de
-//! Minutos" PRD for the full business rules.
+//! Every account and plan bills via the "bolsa de minutos" model (Plan
+//! Control / Plan Abierto) — there is no other billing model.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-/// Billing model for an account or plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum BillingModel {
-    /// Current behavior: dollar/sol balance with reservations.
-    #[default]
-    Balance,
-    /// New behavior: monthly minute bucket (Control or Abierto).
-    MinuteBucket,
-}
-
-impl fmt::Display for BillingModel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Balance => write!(f, "balance"),
-            Self::MinuteBucket => write!(f, "minute_bucket"),
-        }
-    }
-}
-
-impl BillingModel {
-    /// Parse from string (case-insensitive). Defaults to `Balance` for
-    /// unknown/empty values so existing rows never fail to parse.
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "minute_bucket" => Self::MinuteBucket,
-            _ => Self::Balance,
-        }
-    }
-}
 
 /// Minute bucket behavior when the bucket is exhausted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -109,10 +76,8 @@ impl ProrationMode {
 /// Minute-bucket configuration fields shared by `plans` and `accounts`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BucketConfig {
-    /// balance | minute_bucket
-    pub billing_model: BillingModel,
-    /// control | abierto (only meaningful when billing_model = minute_bucket)
-    pub bucket_type: Option<BucketType>,
+    /// control | abierto
+    pub bucket_type: BucketType,
     /// Minutes included in the monthly base bucket
     pub included_minutes: i32,
     /// full | prorated
@@ -259,7 +224,7 @@ pub struct MinuteBucketReportRow {
     /// Account display name
     pub account_name: Option<String>,
     /// control | abierto
-    pub bucket_type: Option<String>,
+    pub bucket_type: String,
     /// Base minutes included for the cycle
     pub included_minutes: i32,
     /// Whether the base was prorated

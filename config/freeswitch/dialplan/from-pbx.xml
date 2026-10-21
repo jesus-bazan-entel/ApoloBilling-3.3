@@ -2,12 +2,109 @@
 <include>
   <context name="from-pbx">
 
+    <!-- ============================================================ -->
+    <!-- Extensión para tono de congestión (usada por transfer_on_cancel) -->
+    <!-- IMPORTANTE: Requiere que FreeSWITCH maneje el media para reproducir tonos -->
+    <!-- ============================================================ -->
+    <extension name="congestion-tone">
+      <condition field="destination_number" expression="^_congestion_tone_$">
+        <action application="log" data="WARNING FS: Llamada cancelada - reproduciendo tono de congestión"/>
+
+        <!-- Forzar que el media pase por FreeSWITCH para poder reproducir tono -->
+        <action application="set" data="bypass_media=false"/>
+
+        <!-- Deshabilitar proxy media para tener control total del RTP -->
+        <action application="set" data="proxy_media=false"/>
+
+        <!-- Responder con early media (183 con SDP) para enviar audio -->
+        <action application="set" data="ringback="/>
+        <action application="pre_answer"/>
+
+        <!-- Reproducir tono de congestión (fast busy) por 3 segundos -->
+        <!-- Formato: %(on_ms,off_ms,freq1,freq2) -->
+        <!-- Tono de congestión estándar ITU-T: 480Hz + 620Hz, 250ms on, 250ms off -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+
+        <!-- Colgar con cause 31 (Normal, unspecified) para mapear al 487 -->
+        <action application="hangup" data="NORMAL_UNSPECIFIED"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
+    <!-- Extensión para tono de congestión cuando no hay respuesta -->
+    <!-- ============================================================ -->
+    <extension name="no-answer-congestion">
+      <condition field="destination_number" expression="^_no_answer_$">
+        <action application="log" data="WARNING FS: Sin respuesta - reproduciendo tono de congestión"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="set" data="proxy_media=false"/>
+        <action application="pre_answer"/>
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="hangup" data="NO_ANSWER"/>
+      </condition>
+    </extension>
+
+    <!-- ============================================================ -->
+    <!-- Extensiones de tono de fallo (llamadas por transfer)         -->
+    <!-- IMPORTANTE: Deben estar ANTES de outbound-to-kamailio        -->
+    <!-- ============================================================ -->
+
+    <!-- 486 Busy Here → Tono de ocupado -->
+    <extension name="failure-tone-busy">
+      <condition field="destination_number" expression="^_failure_tone_(USER_BUSY|BUSY)$">
+        <action application="log" data="INFO FS: Reproduciendo tono de OCUPADO (486 Busy)"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="pre_answer"/>
+        <!-- Tono de ocupado: 480Hz+620Hz, 500ms on, 500ms off, 4 segundos -->
+        <action application="playback" data="tone_stream://%(500,500,480,620);loops=4"/>
+        <action application="set" data="destination_number=${original_destination}"/>
+        <action application="hangup" data="USER_BUSY"/>
+      </condition>
+    </extension>
+
+    <!-- No Answer / Timeout → Tono de congestión -->
+    <extension name="failure-tone-no-answer">
+      <condition field="destination_number" expression="^_failure_tone_(NO_ANSWER|NO_USER_RESPONSE|RECOVERY_ON_TIMER_EXPIRE|ORIGINATOR_CANCEL)$">
+        <action application="log" data="INFO FS: Reproduciendo tono de CONGESTIÓN (no answer/cancel)"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="pre_answer"/>
+        <!-- Tono de congestión: 480Hz+620Hz, 250ms on, 250ms off (más rápido) -->
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=8"/>
+        <action application="set" data="destination_number=${original_destination}"/>
+        <action application="hangup" data="NO_ANSWER"/>
+      </condition>
+    </extension>
+
+    <!-- Service Unavailable → Tono de congestión -->
+    <extension name="failure-tone-unavailable">
+      <condition field="destination_number" expression="^_failure_tone_(UNAVAILABLE|NORMAL_TEMPORARY_FAILURE|DESTINATION_OUT_OF_ORDER|SERVICE_UNAVAILABLE|SUBSCRIBER_ABSENT|NETWORK_OUT_OF_ORDER)$">
+        <action application="log" data="INFO FS: Reproduciendo tono de CONGESTIÓN (unavailable)"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="pre_answer"/>
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=8"/>
+        <action application="set" data="destination_number=${original_destination}"/>
+        <action application="hangup" data="NORMAL_TEMPORARY_FAILURE"/>
+      </condition>
+    </extension>
+
+    <!-- Default: cualquier otra causa → Tono de congestión -->
+    <extension name="failure-tone-default">
+      <condition field="destination_number" expression="^_failure_tone_">
+        <action application="log" data="INFO FS: Reproduciendo tono de CONGESTIÓN (default) - causa=${bridge_hangup_cause}"/>
+        <action application="set" data="bypass_media=false"/>
+        <action application="pre_answer"/>
+        <action application="playback" data="tone_stream://%(250,250,480,620);loops=6"/>
+        <action application="set" data="destination_number=${original_destination}"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
     <!-- Llamadas entrantes desde fibertelperu hacia Kamailio -->
     <extension name="inbound-fibertelperu">
       <condition field="${sip_gateway_name}" expression="^fibertelperu$">
         <action application="log" data="INFO FS: Llamada ENTRANTE fibertelperu ${caller_id_number} -> ${destination_number}"/>
 
-        <!-- Bypass media para mejor rendimiento -->
+        <!-- Bypass media: RTP pasa por FreeSWITCH -->
         <action application="set" data="bypass_media=true"/>
         <action application="set" data="inherit_codec=true"/>
 
@@ -18,6 +115,9 @@
         <!-- Preservar caller ID original -->
         <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
         <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
+
+        <!-- Transferir a tono de congestión si el carrier cancela -->
+        <action application="set" data="transfer_on_cancel=_congestion_tone_"/>
 
         <action application="log" data="INFO FS: Bridge a Kamailio ${destination_number}@10.10.22.4:5060"/>
 
@@ -37,6 +137,10 @@
       <condition field="${sofia_contact(user/${dialed_extension}@10.10.22.4)}" expression="^sofia/">
         <action application="log" data="INFO FS: Usuario local ${dialed_extension} REGISTRADO - conectando"/>
 
+        <!-- Habilitar 100rel/PRACK para llamadas entrantes -->
+        <action application="set" data="sip_enable_100rel=true"/>
+        <action application="export" data="sip_enable_100rel=true"/>
+
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="hangup_after_bridge=true"/>
 
@@ -44,19 +148,83 @@
         <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
         <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
 
+        <!-- Transferir a tono de congestión si el carrier cancela -->
+        <action application="set" data="transfer_on_cancel=_congestion_tone_"/>
+
         <!-- Conectar con el usuario registrado -->
         <action application="bridge" data="user/${dialed_extension}@10.10.22.4"/>
       </condition>
     </extension>
 
+    <!-- ============================================================ -->
+    <!-- POST-BRIDGE: cada extension tiene UNA sola condition con       -->
+    <!-- actions, alcanzada por transfer (plan nuevo, causa ya seteada)-->
+    <!--                                                             -->
+    <!-- DEBEN IR ANTES de outbound-to-kamailio: esa extension es un -->
+    <!-- comodin y capturaria _post_bridge_ Xinjiang, provocando un   -->
+    <!-- loop infinito de transfer + overwrite de original_destination-->
+    <!-- ============================================================ -->
+
+    <!-- Llamada exitosa: cuelga limpio, SIN tono -->
+    <extension name="post-bridge-success">
+      <condition field="destination_number" expression="^_post_bridge_$"/>
+      <condition field="${bridge_hangup_cause}" expression="^(NORMAL_CLEARING|SUCCESS)$">
+        <action application="log" data="INFO FS: Bridge exitoso (${bridge_hangup_cause}) - hangup limpio"/>
+        <action application="set" data="destination_number=${original_destination}"/>
+        <action application="hangup" data="NORMAL_CLEARING"/>
+      </condition>
+    </extension>
+
+    <!-- 486 Busy Here -> tono de ocupado -->
+    <extension name="post-bridge-busy">
+      <condition field="destination_number" expression="^_post_bridge_$"/>
+      <condition field="${bridge_hangup_cause}" expression="^USER_BUSY$">
+        <action application="transfer" data="_failure_tone_USER_BUSY"/>
+      </condition>
+    </extension>
+
+    <!-- No answer / cancel -> tono de congestion -->
+    <extension name="post-bridge-no-answer">
+      <condition field="destination_number" expression="^_post_bridge_$"/>
+      <condition field="${bridge_hangup_cause}" expression="^(NO_ANSWER|NO_USER_RESPONSE|RECOVERY_ON_TIMER_EXPIRE|ORIGINATOR_CANCEL)$">
+        <action application="transfer" data="_failure_tone_NO_ANSWER"/>
+      </condition>
+    </extension>
+
+    <!-- Unavailable / congested -> tono de congestion -->
+    <extension name="post-bridge-unavailable">
+      <condition field="destination_number" expression="^_post_bridge_$"/>
+      <condition field="${bridge_hangup_cause}" expression="^(NORMAL_TEMPORARY_FAILURE|DESTINATION_OUT_OF_ORDER|SERVICE_UNAVAILABLE|SUBSCRIBER_ABSENT|NETWORK_OUT_OF_ORDER)$">
+        <action application="transfer" data="_failure_tone_UNAVAILABLE"/>
+      </condition>
+    </extension>
+
+    <!-- Default: cualquier otra causa -> tono de congestion -->
+    <extension name="post-bridge-default">
+      <condition field="destination_number" expression="^_post_bridge_$"/>
+      <condition field="${bridge_hangup_cause}" expression="^(.+)$">
+        <action application="transfer" data="_failure_tone_DEFAULT"/>
+      </condition>
+    </extension>
+
     <extension name="outbound-to-kamailio">
-      <condition field="destination_number" expression="^(.+)$">
+      <!--
+        Regex endurecida: solo numeros. Excluye tokens internos que empiezan
+        con "_" para que este comodin nunca capture un transfer de otra
+        extension (evita loops y protege original_destination).
+      -->
+      <condition field="destination_number" expression="^(\d+)$">
 
         <action application="log" data="INFO FS: Llamada desde ${network_ip} → $1"/>
 
-        <!-- IMPORTANTE: Configurar bypass ANTES de bridge -->
-        <action application="set" data="bypass_media=true"/>
-        <action application="set" data="inherit_codec=true"/>
+        <!-- ============================================================ -->
+        <!-- TOPOLOGY HIDING: FreeSWITCH actúa como B2BUA completo        -->
+        <!-- Esto genera un SDP limpio sin atributos propietarios del     -->
+        <!-- softphone (a=alt:, a=x-rtp-session-id, s=CounterPath, etc.)  -->
+        <!-- RTPEngine (via Kamailio) sigue manejando el relay de media   -->
+        <!-- ============================================================ -->
+        <action application="set" data="bypass_media=false"/>
+        <action application="set" data="proxy_media=false"/>
 
         <!-- Habilitar 100rel -->
         <action application="set" data="sip_enable_100rel=true"/>
@@ -65,11 +233,35 @@
         <!-- Headers -->
         <action application="export" data="sip_h_P-Asserted-Identity=${sip_h_P-Asserted-Identity}"/>
 
+        <!-- Continuar después del bridge para manejar fallos (486, 503, etc.) -->
+        <action application="set" data="hangup_after_bridge=false"/>
+        <action application="set" data="continue_on_fail=true"/>
+
+        <!-- Destino original: sobrevive al transfer_post_bridge y lo usa el CDR -->
+        <action application="set" data="original_destination=$1"/>
+        <action application="export" data="original_destination=$1"/>
+
         <action application="log" data="INFO FS: Bridge a Kamailio $1@10.10.22.4:5060"/>
 
-        <!-- Bridge -->
-        <action application="bridge" data="{bypass_media=true}sofia/external/$1@10.10.22.4:5060"/>
+        <!-- Bridge con codecs forzados para INTEGRATEL (G729, PCMA) -->
+        <!-- absolute_codec_string en bridge fuerza transcoding si es necesario -->
+        <action application="bridge" data="{absolute_codec_string=PCMA,G729,PCMU}sofia/external/$1@10.10.22.4:5060"/>
 
+        <action application="log" data="INFO FS: Bridge terminó - cause=${bridge_hangup_cause}"/>
+
+        <!--
+          IMPORTANTE: el post-bridge NO puede decidirse con <condition> hermanos.
+          FreeSWITCH resuelve TODAS las conditions del extension en una sola pasada,
+          contra el estado PRE-bridge: ${bridge_hangup_cause} aun esta vacio, la
+          condition NORMAL_CLEARING falla y sus actions nunca se incluyen en el plan.
+          Al ejecutarse, el salto va directo al transfer y la llamada exitosa
+          se cuelga con tono de congestion.
+
+          Solucion (patron probato de to-kamailio.xml): un unico transfer INCONDICIONAL
+          a _post_bridge_. El transfer reingresa al dialplan y genera un plan NUEVO,
+          donde ${bridge_hangup_cause} ya esta poblado.
+        -->
+        <action application="transfer" data="_post_bridge_"/>
       </condition>
     </extension>
 

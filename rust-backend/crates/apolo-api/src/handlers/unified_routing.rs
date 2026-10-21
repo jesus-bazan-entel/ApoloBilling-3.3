@@ -13,7 +13,7 @@ use actix_web::{web, HttpResponse};
 use apolo_auth::SuperadminUser;
 use apolo_core::models::AuditLogBuilder;
 use apolo_core::AppError;
-use apolo_services::SipDeviceService;
+use apolo_services::SipEndpointService;
 use serde_json::json;
 use sqlx::mysql::MySqlPool;
 use sqlx::PgPool;
@@ -112,7 +112,7 @@ pub async fn get_trunk(
 pub async fn create_trunk(
     pool: web::Data<PgPool>,
     mysql_pool: Option<web::Data<MySqlPool>>,
-    sip_service: Option<web::Data<Arc<SipDeviceService>>>,
+    sip_service: Option<web::Data<Arc<SipEndpointService>>>,
     req: web::Json<CreateTrunkRequest>,
     admin: SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
@@ -327,7 +327,7 @@ pub async fn create_trunk(
 pub async fn update_trunk(
     pool: web::Data<PgPool>,
     mysql_pool: Option<web::Data<MySqlPool>>,
-    sip_service: Option<web::Data<Arc<SipDeviceService>>>,
+    sip_service: Option<web::Data<Arc<SipEndpointService>>>,
     path: web::Path<Uuid>,
     req: web::Json<UpdateTrunkRequest>,
     admin: SuperadminUser,
@@ -2874,7 +2874,9 @@ async fn sync_trunk_to_kamailio(
         .bind(gwid as u32)
         .execute(mysql_pool)
         .await
-        .map_err(|e| AppError::Database(format!("Failed to set gateway attrs in Kamailio: {}", e)))?;
+        .map_err(|e| {
+            AppError::Database(format!("Failed to set gateway attrs in Kamailio: {}", e))
+        })?;
 
     // Reload Kamailio drouting
     reload_kamailio_drouting().await;
@@ -3016,7 +3018,7 @@ async fn sync_trunk_to_freeswitch(
     _pool: &PgPool,
     trunk: &Trunk,
     gateway_name: &str,
-    sip_service: Option<&Arc<SipDeviceService>>,
+    sip_service: Option<&Arc<SipEndpointService>>,
 ) -> Result<(), AppError> {
     let port = trunk.port.unwrap_or(5060);
     let transport = trunk.transport.as_deref().unwrap_or("udp");
@@ -4098,6 +4100,17 @@ async fn delete_outbound_route_from_kamailio(
 // FreeSWITCH Sync Functions
 // ============================================================================
 
+/// Read a system_settings key with default (missing table/key -> default).
+async fn get_setting(pool: &PgPool, key: &str, default: &str) -> String {
+    sqlx::query_scalar::<_, String>("SELECT value FROM system_settings WHERE key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| default.to_string())
+}
+
 /// Sync all inbound routes to FreeSWITCH XML and reload
 async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError> {
     // Fetch all enabled inbound routes with trunk info if set
@@ -4432,11 +4445,199 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
         xml.push_str(&generate_ims_failure_handlers());
     }
 
-    // Fallback reject extension
+    // ============================================================
+    // CARRIER-CLASS AUTO-ROUTING (L2/L3/L4)
+    // L1 = explicit overrides above (routing_inbound_routes).
+    // L2 = registered local extensions, L3 = connected PBXs hunt,
+    // L4 = configurable fallback. Zero per-DID config required.
+    // Switches via system_settings: inbound.auto_local_extensions,
+    // inbound.auto_pbx_hunt, inbound.local_timeout,
+    // inbound.pbx_hunt_timeout, inbound.default_action (480/404/503).
+    // ============================================================
+    let auto_local = get_setting(pool, "inbound.auto_local_extensions", "true").await;
+    let auto_pbx = get_setting(pool, "inbound.auto_pbx_hunt", "true").await;
+    let local_timeout: i32 = get_setting(pool, "inbound.local_timeout", "30")
+        .await
+        .parse()
+        .unwrap_or(30);
+    let pbx_timeout: i32 = get_setting(pool, "inbound.pbx_hunt_timeout", "55")
+        .await
+        .parse()
+        .unwrap_or(55);
+    let default_action = get_setting(pool, "inbound.default_action", "480").await;
+    let default_strip: i32 = get_setting(pool, "inbound.pbx_strip_digits", "0")
+        .await
+        .parse()
+        .unwrap_or(0);
+    let default_prefix = get_setting(pool, "inbound.pbx_prefix_to_add", "").await;
+
+    // L2: auto local extensions (only if registered via sofia_contact)
+    if auto_local.trim().eq_ignore_ascii_case("true") {
+        xml.push_str(&format!(
+            concat!(
+                "    <!-- L2 AUTO: extensiones locales registradas (cero-config por DID) -->\n",
+                "    <extension name=\"auto-local-extensions\">\n",
+                "      <condition field=\"destination_number\" expression=\"^(\\\\d+)$\" break=\"never\">\n",
+                "        <action application=\"set\" data=\"dialed_extension=$1\"/>\n",
+                "      </condition>\n",
+                "      <condition field=\"${{sofia_contact(user/${{dialed_extension}}@10.10.22.4)}}\" expression=\"^sofia/\">\n",
+                "        <action application=\"log\" data=\"INFO AUTO-L2: extension local registrada ${{dialed_extension}} (${{caller_id_number}} -> ${{destination_number}})\"/>\n",
+                "        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                "        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n",
+                "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+                "        <action application=\"set\" data=\"hangup_after_bridge=true\"/>\n",
+                "        <action application=\"set\" data=\"continue_on_fail=false\"/>\n",
+                "        <action application=\"set\" data=\"effective_caller_id_number=${{caller_id_number}}\"/>\n",
+                "        <action application=\"set\" data=\"effective_caller_id_name=${{caller_id_name}}\"/>\n",
+                "        <action application=\"bridge\" data=\"user/${{dialed_extension}}@10.10.22.4\"/>\n",
+                "      </condition>\n",
+                "    </extension>\n"
+            ),
+            local_timeout
+        ));
+    }
+
+    // L3: auto PBX hunt over connected PBXs (cero-config por DID).
+    // SOLO en modo hunt-all (single-tenant). En modo ranges (default) el
+    // selectivo lo genera el modulo inbound-routing (tabla pbx_did_ranges);
+    // aqui se emite solo un comentario para no hacer broadcast a terceros.
+    // Fuentes hunt-all: routing_trunks privados + sip_endpoints trunk/ip.
+    // En produccion las PBXs viven en (b); (a) suele estar vacio.
+    if auto_pbx.trim().eq_ignore_ascii_case("true") {
+        let hunt_mode = get_setting(pool, "inbound.pbx_hunt_mode", "ranges").await;
+        if !hunt_mode.trim().eq_ignore_ascii_case("hunt-all") {
+            xml.push_str("    <!-- L3: modo ranges (selectivo por pbx_did_ranges, ver modulo inbound-routing) -->\n");
+        } else {
+            let pbx_trunks = sqlx::query!(
+                r#"SELECT freeswitch_gateway_name, strip_digits, prefix_to_add
+                FROM routing_trunks
+                WHERE enabled = true AND trunk_type = 'private'
+                  AND freeswitch_gateway_name IS NOT NULL
+                  AND freeswitch_gateway_name <> ''
+                ORDER BY name"#
+            )
+            .fetch_all(pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            // sip_endpoints puede no existir en instalaciones antiguas -> degradar a vacio.
+            let pbx_ips: Vec<(String, i32)> = sqlx::query_as::<_, (String, i32)>(
+                r#"SELECT host, port FROM sip_endpoints
+                WHERE enabled = true AND endpoint_type = 'trunk' AND auth_mode = 'ip'
+                  AND host IS NOT NULL AND host <> ''
+                ORDER BY name"#,
+            )
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+            if pbx_trunks.is_empty() && pbx_ips.is_empty() {
+                xml.push_str(
+                "    <!-- L3 AUTO: sin PBXs conectadas (sin trunks privados ni sip_endpoints trunk/ip) -->\n",
+            );
+            } else {
+                xml.push_str(
+                    "    <!-- L3 AUTO: hunt sobre PBXs conectadas (cero-config por DID) -->\n",
+                );
+                // Un SOLO bridge con patas en serie (gw1|gw2|...) para failover real.
+                // Cada pata puede llevar su propia transformacion (strip/prefix del trunk).
+                let mut legs: Vec<String> = Vec::new();
+                let mut gw_names: Vec<String> = Vec::new();
+                for trunk in &pbx_trunks {
+                    let gw = trunk.freeswitch_gateway_name.as_deref().unwrap_or("");
+                    let strip = trunk.strip_digits.unwrap_or(default_strip);
+                    let prefix = trunk
+                        .prefix_to_add
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(&default_prefix);
+                    let dial_expr = if strip > 0 && !prefix.is_empty() {
+                        format!("{}${{destination_number:{}}}", escape_xml(prefix), strip)
+                    } else if strip > 0 {
+                        format!("${{destination_number:{}}}", strip)
+                    } else if !prefix.is_empty() {
+                        format!("{}${{destination_number}}", escape_xml(prefix))
+                    } else {
+                        "${destination_number}".to_string()
+                    };
+                    legs.push(format!("sofia/gateway/{}/{}", gw, dial_expr));
+                    gw_names.push(gw.to_string());
+                }
+                // PBXs IP (sip_endpoints trunk/ip): directo sin gateway FS.
+                for (host, port) in &pbx_ips {
+                    let dial_expr = if default_strip > 0 && !default_prefix.is_empty() {
+                        format!(
+                            "{}${{destination_number:{}}}",
+                            escape_xml(&default_prefix),
+                            default_strip
+                        )
+                    } else if default_strip > 0 {
+                        format!("${{destination_number:{}}}", default_strip)
+                    } else if !default_prefix.is_empty() {
+                        format!("{}${{destination_number}}", escape_xml(&default_prefix))
+                    } else {
+                        "${destination_number}".to_string()
+                    };
+                    legs.push(format!("sofia/internal/{}@{}:{}", dial_expr, host, port));
+                    gw_names.push(format!("{}:{}", host, port));
+                }
+                if legs.is_empty() {
+                    xml.push_str(
+                    "    <!-- L3 AUTO: sin PBXs conectadas (sin trunks privados ni sip_endpoints trunk/ip) -->\n",
+                );
+                } else {
+                    let hunt = legs.join("|");
+                    xml.push_str(&format!(
+                concat!(
+                    "    <extension name=\"auto-pbx-hunt\">\n",
+                    "      <condition field=\"destination_number\" expression=\"^(\\\\d+)$\">\n",
+                    "        <action application=\"log\" data=\"INFO AUTO-L3: hunt PBXs [{}]: ${{caller_id_number}} -> ${{destination_number}}\"/>\n",
+                    "        <action application=\"set\" data=\"sip_enable_100rel=true\"/>\n",
+                    "        <action application=\"export\" data=\"sip_enable_100rel=true\"/>\n",
+                    "        <action application=\"set\" data=\"call_timeout={}\"/>\n",
+                    "        <action application=\"set\" data=\"originate_timeout={}\"/>\n",
+                    "        <action application=\"set\" data=\"bypass_media=false\"/>\n",
+                    "        <action application=\"set\" data=\"inherit_codec=true\"/>\n",
+                    "        <action application=\"set\" data=\"hangup_after_bridge=false\"/>\n",
+                    "        <action application=\"set\" data=\"continue_on_fail=true\"/>\n",
+                    "        <action application=\"bridge\" data=\"{}\"/>\n",
+                    "      </condition>\n",
+                    "    </extension>\n"
+                ),
+                escape_xml(&gw_names.join(",")),
+                pbx_timeout,
+                pbx_timeout,
+                hunt
+            ));
+                }
+            }
+        }
+    }
+
+    // L4: configurable fallback (carrier-class: 480/503, never 403 for unknown DID)
+    let (sip_code, cause) = match default_action.trim() {
+        "404" => ("404 Not Found", "UNALLOCATED_NUMBER"),
+        "503" => ("503 Service Unavailable", "NORMAL_TEMPORARY_FAILURE"),
+        _ => ("480 Temporarily Unavailable", "SUBSCRIBER_ABSENT"),
+    };
+    xml.push_str(
+        "    <!-- L4 FALLBACK configurable (system_settings inbound.default_action) -->\n",
+    );
     xml.push_str("    <extension name=\"fallback-reject\">\n");
     xml.push_str("      <condition field=\"destination_number\" expression=\"^(.+)$\">\n");
-    xml.push_str("        <action application=\"log\" data=\"WARNING Rejecting call from unknown source: ${network_addr}\"/>\n");
-    xml.push_str("        <action application=\"respond\" data=\"403 Forbidden\"/>\n");
+    xml.push_str("        <action application=\"log\" data=\"WARNING AUTO-L4: sin destino para ${destination_number} desde ${network_addr} -> responding ");
+    xml.push_str(sip_code);
+    xml.push_str("\"/>\n");
+    xml.push_str(&format!(
+        "        <action application=\"set\" data=\"sip_reason=Q.850;cause={}\"/>\n",
+        match cause {
+            "UNALLOCATED_NUMBER" => "1",
+            "NORMAL_TEMPORARY_FAILURE" => "42",
+            _ => "20",
+        }
+    ));
+    xml.push_str(&format!(
+        "        <action application=\"respond\" data=\"{}\"/>\n",
+        sip_code
+    ));
     xml.push_str("      </condition>\n");
     xml.push_str("    </extension>\n");
 

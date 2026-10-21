@@ -47,23 +47,23 @@ pub struct DailyRevenueStats {
     pub total_minutes: Decimal,
 }
 
-/// Balance trend point
+/// Bucket overage/consumption trend point
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BalanceTrendPoint {
+pub struct BucketTrendPoint {
     /// Date
     pub date: String,
 
     /// Day number (1-30)
     pub day: i32,
 
-    /// Total balance across all active accounts
-    pub total_balance: Decimal,
+    /// Overage cost tariffed on calls that ended this day
+    pub total_overage_cost: Decimal,
 
-    /// Number of active accounts
+    /// Total minutes billed (in-bucket + overage) on calls that ended this day
+    pub total_minutes_consumed: Decimal,
+
+    /// Distinct accounts with bucket activity this day
     pub active_accounts: i64,
-
-    /// Average balance per account
-    pub average_balance: Decimal,
 }
 
 /// Calls by hour response
@@ -80,11 +80,11 @@ pub struct RevenueByDayResponse {
     pub data: Vec<DailyRevenueStats>,
 }
 
-/// Balance trend response
+/// Bucket overage/consumption trend response
 #[derive(Debug, Clone, Serialize)]
-pub struct BalanceTrendResponse {
-    /// Daily balance trend for last 30 days
-    pub data: Vec<BalanceTrendPoint>,
+pub struct BucketTrendResponse {
+    /// Daily bucket overage/consumption trend for last 30 days
+    pub data: Vec<BucketTrendPoint>,
 }
 
 /// Call type statistics

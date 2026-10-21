@@ -4,9 +4,9 @@
 //! FreeSWITCH queries this endpoint during REGISTER to lookup user credentials.
 
 use actix_web::{web, HttpRequest, HttpResponse};
-use apolo_core::traits::{FreeswitchIpRepository, SipDeviceRepository};
+use apolo_core::traits::{FreeswitchIpRepository, SipEndpointRepository};
 use apolo_core::AppError;
-use apolo_db::{PgFreeswitchIpRepository, PgSipDeviceRepository};
+use apolo_db::{PgFreeswitchIpRepository, PgSipEndpointRepository};
 use serde::Deserialize;
 use sqlx::PgPool;
 use tracing::{debug, info, instrument, warn};
@@ -106,40 +106,33 @@ pub async fn directory_lookup(
         "Looking up SIP device"
     );
 
-    // Lookup device
-    let device_repo = PgSipDeviceRepository::new(pool.get_ref().clone());
-    let device = match device_repo
+    // Lookup endpoint (auth_mode=credentials only; the repository method
+    // already filters on that and on enabled=true)
+    let endpoint_repo = PgSipEndpointRepository::new(pool.get_ref().clone());
+    let endpoint = match endpoint_repo
         .find_by_username_domain(&username, &realm)
         .await?
     {
-        Some(d) if d.enabled => d,
-        Some(_) => {
-            debug!(
-                username = %username,
-                realm = %realm,
-                "Device found but disabled"
-            );
-            return Ok(not_found_response());
-        }
+        Some(e) => e,
         None => {
             debug!(
                 username = %username,
                 realm = %realm,
-                "Device not found"
+                "Endpoint not found, disabled, or not credential-authenticated"
             );
             return Ok(not_found_response());
         }
     };
 
     info!(
-        id = device.id,
-        username = %device.sip_username,
-        realm = %device.sip_domain,
+        id = %endpoint.id,
+        username = %username,
+        realm = %realm,
         "FreeSWITCH directory lookup successful"
     );
 
     // Build XML response
-    let xml = build_directory_xml(&device);
+    let xml = build_directory_xml(&endpoint);
 
     Ok(HttpResponse::Ok()
         .content_type("text/xml; charset=utf-8")
@@ -147,19 +140,23 @@ pub async fn directory_lookup(
 }
 
 /// Build FreeSWITCH directory XML response
-fn build_directory_xml(device: &apolo_core::models::SipDevice) -> String {
+fn build_directory_xml(endpoint: &apolo_core::models::SipEndpoint) -> String {
+    let username = endpoint.sip_username.as_deref().unwrap_or_default();
+    let domain = endpoint.sip_domain.as_deref().unwrap_or("apolo.local");
+    let a1_hash = endpoint.a1_hash.as_deref().unwrap_or_default();
+
     // Build effective caller ID
-    let caller_id_name = device
-        .display_name
-        .as_deref()
-        .unwrap_or(&device.sip_username);
+    let caller_id_name = endpoint.display_name.as_deref().unwrap_or(username);
 
     // Build accountcode (prefer explicit, fallback to account_id)
-    let account_id_str = device.account_id.to_string();
-    let accountcode = device.accountcode.as_deref().unwrap_or(&account_id_str);
+    let account_id_str = endpoint
+        .account_id
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    let accountcode = endpoint.accountcode.as_deref().unwrap_or(&account_id_str);
 
     // Build codecs (format for FreeSWITCH variable)
-    let codecs = &device.codecs;
+    let codecs = &endpoint.codecs;
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -197,14 +194,14 @@ fn build_directory_xml(device: &apolo_core::models::SipDevice) -> String {
     </domain>
   </section>
 </document>"#,
-        domain = xml_escape(&device.sip_domain),
-        username = xml_escape(&device.sip_username),
-        a1_hash = xml_escape(&device.a1_hash),
+        domain = xml_escape(domain),
+        username = xml_escape(username),
+        a1_hash = xml_escape(a1_hash),
         accountcode = xml_escape(accountcode),
-        context = xml_escape(&device.context),
+        context = xml_escape(&endpoint.context),
         caller_id_name = xml_escape(caller_id_name),
         codecs = xml_escape(codecs),
-        max_registrations = device.max_registrations,
+        max_registrations = endpoint.max_registrations,
     )
 }
 
@@ -277,16 +274,15 @@ async fn directory_lookup_get() -> HttpResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apolo_core::models::SipDevice;
+    use apolo_core::models::SipEndpoint;
 
     #[test]
     fn test_build_directory_xml() {
-        let device = SipDevice {
-            id: 1,
-            account_id: 100,
-            sip_username: "1001".to_string(),
-            sip_domain: "apolo.local".to_string(),
-            a1_hash: "abc123".to_string(),
+        let endpoint = SipEndpoint {
+            account_id: Some(100),
+            sip_username: Some("1001".to_string()),
+            sip_domain: Some("apolo.local".to_string()),
+            a1_hash: Some("abc123".to_string()),
             display_name: Some("John Doe".to_string()),
             context: "from-pbx".to_string(),
             accountcode: Some("ACC-001".to_string()),
@@ -295,7 +291,7 @@ mod tests {
             ..Default::default()
         };
 
-        let xml = build_directory_xml(&device);
+        let xml = build_directory_xml(&endpoint);
 
         assert!(xml.contains("1001"));
         assert!(xml.contains("apolo.local"));

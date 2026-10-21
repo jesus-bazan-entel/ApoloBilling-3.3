@@ -81,8 +81,20 @@ impl EslEvent {
     }
 
     pub fn callee(&self) -> Option<&String> {
-        self.headers.get("Caller-Destination-Number")
-            .or_else(|| self.headers.get("variable_sip_to_user"))
+        // `variable_original_destination` is set by the dialplan before the bridge and
+        // survives post-bridge `transfer`s. Without it, a transfer (e.g. to a
+        // `_failure_tone_*` extension) overwrites Caller-Destination-Number and the CDR
+        // records that internal token instead of the real dialed number.
+        //
+        // Tokens starting with "_" are dialplan-internal routing markers, never real
+        // destinations, so they are rejected even in the fallback fields. This keeps a
+        // misconfigured transfer loop from writing "_post_bridge_" into a CDR.
+        let usable = |v: &String| !v.trim().is_empty() && !v.trim_start().starts_with('_');
+        self.headers
+            .get("variable_original_destination")
+            .filter(|v| usable(v))
+            .or_else(|| self.headers.get("Caller-Destination-Number").filter(|v| usable(v)))
+            .or_else(|| self.headers.get("variable_sip_to_user").filter(|v| usable(v)))
     }
 
     pub fn duration(&self) -> Option<i32> {
@@ -150,5 +162,15 @@ impl EslEvent {
         self.timestamp_to_datetime("variable_end_epoch")
             // Fall back to current event timestamp
             .or_else(|| self.timestamp_to_datetime("Event-Date-Timestamp"))
+    }
+
+    /// Get source IP address from ESL event
+    /// Used for IP-authenticated trunks to identify the endpoint
+    pub fn source_ip(&self) -> Option<String> {
+        self.headers.get("Network-IP")
+            .or_else(|| self.headers.get("variable_network_ip"))
+            .or_else(|| self.headers.get("variable_sip_network_ip"))
+            .or_else(|| self.headers.get("variable_sip_received_ip"))
+            .cloned()
     }
 }

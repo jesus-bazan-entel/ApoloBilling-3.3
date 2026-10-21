@@ -15,12 +15,12 @@ pub struct DashboardStats {
     pub total_accounts: i64,
     /// Number of active accounts
     pub active_accounts: i64,
-    /// Total balance across all accounts
-    pub total_balance: f64,
+    /// Total overage cost tariffed this month across all bucket accounts
+    pub total_overage_cost_month: f64,
     /// Number of active calls currently in progress
     pub active_calls: i64,
-    /// Number of active reservations
-    pub active_reservations: i64,
+    /// Number of Plan Control accounts currently blocked (bucket exhausted)
+    pub blocked_accounts: i64,
     /// Total CDRs today
     pub cdrs_today: i64,
     /// Revenue today
@@ -37,12 +37,11 @@ pub async fn get_stats(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError
     debug!("Fetching dashboard statistics");
 
     // Get account stats
-    let account_stats: (i64, i64, Option<rust_decimal::Decimal>) = sqlx::query_as(
+    let account_stats: (i64, i64) = sqlx::query_as(
         r#"
         SELECT
             COUNT(*) as total,
-            COUNT(*) FILTER (WHERE status = 'active') as active,
-            COALESCE(SUM(balance), 0) as total_balance
+            COUNT(*) FILTER (WHERE status = 'active') as active
         FROM accounts
         "#,
     )
@@ -56,17 +55,25 @@ pub async fn get_stats(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError
         .await
         .unwrap_or((0,));
 
-    // Get active reservations count
-    let active_reservations: (i64,) = sqlx::query_as(
+    // Total overage cost tariffed this month, and count of Control accounts
+    // currently blocked (bucket exhausted), across all open cycles for the
+    // current calendar month.
+    let bucket_stats: (Option<rust_decimal::Decimal>, i64) = sqlx::query_as(
         r#"
-        SELECT COUNT(*) FROM balance_reservations
-        WHERE status IN ('active', 'partially_consumed')
-        AND expires_at > NOW()
+        SELECT
+            COALESCE(SUM(c.overage_cost), 0),
+            COUNT(*) FILTER (
+                WHERE a.bucket_type = 'control'
+                AND (c.included_minutes + c.additional_minutes - c.consumed_minutes - c.reserved_minutes) <= 0
+            )
+        FROM minute_bucket_cycles c
+        JOIN accounts a ON a.id = c.account_id
+        WHERE c.cycle_start = date_trunc('month', CURRENT_DATE)::date
         "#,
     )
     .fetch_one(pool.get_ref())
     .await
-    .unwrap_or((0,));
+    .unwrap_or((None, 0));
 
     // Get today's CDR stats
     let cdr_stats: (i64, Option<rust_decimal::Decimal>, Option<i64>) = sqlx::query_as(
@@ -86,12 +93,12 @@ pub async fn get_stats(pool: web::Data<PgPool>) -> Result<HttpResponse, AppError
     let stats = DashboardStats {
         total_accounts: account_stats.0,
         active_accounts: account_stats.1,
-        total_balance: account_stats
-            .2
+        total_overage_cost_month: bucket_stats
+            .0
             .map(|d| d.to_string().parse::<f64>().unwrap_or(0.0))
             .unwrap_or(0.0),
         active_calls: active_calls.0,
-        active_reservations: active_reservations.0,
+        blocked_accounts: bucket_stats.1,
         cdrs_today: cdr_stats.0,
         revenue_today: cdr_stats
             .1
@@ -117,9 +124,9 @@ mod tests {
         let stats = DashboardStats {
             total_accounts: 100,
             active_accounts: 85,
-            total_balance: 50000.50,
+            total_overage_cost_month: 1250.50,
             active_calls: 5,
-            active_reservations: 5,
+            blocked_accounts: 5,
             cdrs_today: 1234,
             revenue_today: 567.89,
             minutes_today: 2500.5,

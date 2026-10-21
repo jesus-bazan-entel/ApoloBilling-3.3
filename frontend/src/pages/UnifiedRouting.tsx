@@ -942,7 +942,7 @@ function TrunkModal({ trunk, onClose, onSave, isSaving }: TrunkModalProps) {
             <input
               type="number"
               value={port}
-              onChange={(e) => setPort(parseInt(e.target.value) || 5060)}
+              onChange={(e) => setPort(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
             />
           </FormField>
@@ -1040,7 +1040,7 @@ function TrunkModal({ trunk, onClose, onSave, isSaving }: TrunkModalProps) {
             <input
               type="number"
               value={stripDigits}
-              onChange={(e) => setStripDigits(parseInt(e.target.value) || 0)}
+              onChange={(e) => setStripDigits(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
               min={0}
             />
@@ -1204,7 +1204,7 @@ function GroupModal({ group, trunks, onClose, onSave, isSaving }: GroupModalProp
                     <input
                       type="number"
                       value={member.priority}
-                      onChange={(e) => updateMember(idx, 'priority', parseInt(e.target.value) || 1)}
+                      onChange={(e) => updateMember(idx, 'priority', e.target.value === '' ? 0 : parseInt(e.target.value))}
                       className="w-20 px-3 py-2 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md text-[var(--color-text-primary)] text-sm focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
                       placeholder="Prio"
                       title="Prioridad"
@@ -1215,7 +1215,7 @@ function GroupModal({ group, trunks, onClose, onSave, isSaving }: GroupModalProp
                     <input
                       type="number"
                       value={member.weight}
-                      onChange={(e) => updateMember(idx, 'weight', parseInt(e.target.value) || 100)}
+                      onChange={(e) => updateMember(idx, 'weight', e.target.value === '' ? 0 : parseInt(e.target.value))}
                       className="w-20 px-3 py-2 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md text-[var(--color-text-primary)] text-sm focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
                       placeholder="Peso"
                       title="Peso %"
@@ -1310,7 +1310,7 @@ function OutboundModal({ route, trunks, trunkGroups, onClose, onSave, isSaving }
             <input
               type="number"
               value={priority}
-              onChange={(e) => setPriority(parseInt(e.target.value) || 100)}
+              onChange={(e) => setPriority(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
             />
           </FormField>
@@ -1511,7 +1511,7 @@ function InboundModal({ route, trunks, onClose, onSave, isSaving }: InboundModal
             <input
               type="number"
               value={priority}
-              onChange={(e) => setPriority(parseInt(e.target.value) || 100)}
+              onChange={(e) => setPriority(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
             />
           </FormField>
@@ -1530,7 +1530,7 @@ function InboundModal({ route, trunks, onClose, onSave, isSaving }: InboundModal
             <input
               type="number"
               value={destPort}
-              onChange={(e) => setDestPort(parseInt(e.target.value) || 5060)}
+              onChange={(e) => setDestPort(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
             />
           </FormField>
@@ -1565,7 +1565,7 @@ function InboundModal({ route, trunks, onClose, onSave, isSaving }: InboundModal
             <input
               type="number"
               value={callTimeout}
-              onChange={(e) => setCallTimeout(parseInt(e.target.value) || 120)}
+              onChange={(e) => setCallTimeout(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
             />
           </FormField>
@@ -1575,7 +1575,7 @@ function InboundModal({ route, trunks, onClose, onSave, isSaving }: InboundModal
               type="number"
               min="0"
               value={stripDigits}
-              onChange={(e) => setStripDigits(parseInt(e.target.value) || 0)}
+              onChange={(e) => setStripDigits(e.target.value === '' ? 0 : parseInt(e.target.value))}
               className="w-full px-3 py-2.5 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-lg text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
               placeholder="0"
             />
@@ -1631,7 +1631,7 @@ function InboundModal({ route, trunks, onClose, onSave, isSaving }: InboundModal
                   <input
                     type="number"
                     value={fo.port}
-                    onChange={(e) => updateFailover(idx, 'port', parseInt(e.target.value) || 5060)}
+                    onChange={(e) => updateFailover(idx, 'port', e.target.value === '' ? 0 : parseInt(e.target.value))}
                     className="w-24 px-3 py-2 bg-[var(--color-bg-secondary)] border border-[var(--color-border-primary)] rounded-md text-[var(--color-text-primary)] text-sm focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:outline-none transition-colors"
                     placeholder="Puerto"
                   />

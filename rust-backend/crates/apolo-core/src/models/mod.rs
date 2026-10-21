@@ -11,12 +11,11 @@ pub mod minute_bucket;
 pub mod module;
 pub mod plan;
 pub mod rate;
-pub mod reservation;
-pub mod sip_device;
+pub mod sip_endpoint;
 pub mod user;
 pub mod zone;
 
-pub use account::{Account, AccountStatus, AccountType};
+pub use account::{Account, AccountStatus};
 pub use audit::{AuditLog, AuditLogBuilder, AuditLogData};
 pub use inbound::{DestinationType, InboundRoute, InboundRouteWithGateway};
 // Deprecated type aliases for backward compatibility
@@ -24,15 +23,12 @@ pub use cdr::{ActiveCall, Cdr};
 pub use inbound::{Carrier, CarrierWithGateway, DidOverride, DidOverrideWithCarrier};
 pub use internal_route::{InternalRoute, InternalRouteWithEndpoints, SystemEndpoint};
 pub use minute_bucket::{
-    AccountBucketConfig, BillingModel, BucketConfig, BucketType, MinuteBucketAddition,
-    MinuteBucketAlert, MinuteBucketCycle, MinuteBucketReportRow, PlanBucketConfig, ProrationMode,
+    AccountBucketConfig, BucketConfig, BucketType, MinuteBucketAddition, MinuteBucketAlert,
+    MinuteBucketCycle, MinuteBucketReportRow, PlanBucketConfig, ProrationMode,
 };
 pub use module::{ModuleGrant, SystemModule};
 pub use plan::Plan;
 pub use rate::RateCard;
-pub use reservation::{
-    BalanceReservation, BalanceTransaction, ReservationStatus, ReservationType, TransactionType,
-};
-pub use sip_device::{FreeswitchAllowedIp, SipDevice};
+pub use sip_endpoint::{AuthMode, EndpointType, FreeswitchAllowedIp, SipEndpoint};
 pub use user::{User, UserInfo, UserRole};
 pub use zone::{NetworkType, Prefix, RateZone, Zone, ZoneType};
