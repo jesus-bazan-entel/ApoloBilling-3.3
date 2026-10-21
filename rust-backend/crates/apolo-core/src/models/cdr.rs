@@ -88,6 +88,11 @@ pub struct Cdr {
 
     /// Rate per minute applied to overage minutes (if any)
     pub overage_rate_applied: Option<Decimal>,
+
+    /// Real source IP of the caller/trunk. For calls relayed through
+    /// Kamailio (troncales IP via FLB_SRC_LANEXT), this is the X-Orig-Src-IP
+    /// header value, not the SBC's own address - see PRD_CALL_FLOWS §8.3.
+    pub source_ip: Option<String>,
 }
 
 impl Cdr {
@@ -158,6 +163,7 @@ impl Default for Cdr {
             overage_minutes: None,
             overage_cost: None,
             overage_rate_applied: None,
+            source_ip: None,
         }
     }
 }

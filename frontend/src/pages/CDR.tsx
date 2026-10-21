@@ -86,6 +86,15 @@ export default function CDRPage() {
       ),
     },
     {
+      key: 'source_ip',
+      header: 'IP Origen',
+      render: (cdr: CDR) => (
+        <span className="font-mono text-xs text-[var(--color-text-secondary)]">
+          {cdr.source_ip || '-'}
+        </span>
+      ),
+    },
+    {
       key: 'duration',
       header: 'Duración',
       render: (cdr: CDR) => formatDuration(cdr.duration ?? 0),

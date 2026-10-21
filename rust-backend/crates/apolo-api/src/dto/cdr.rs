@@ -248,6 +248,10 @@ pub struct CdrResponse {
 
     /// Cost of the overage minutes (0 if fully covered by the balance)
     pub overage_cost: Option<Decimal>,
+
+    /// Real source IP of the caller/trunk (not the SBC's own address for
+    /// calls relayed through Kamailio - see PRD_CALL_FLOWS §8.3)
+    pub source_ip: Option<String>,
 }
 
 impl From<apolo_core::models::Cdr> for CdrResponse {
@@ -274,6 +278,7 @@ impl From<apolo_core::models::Cdr> for CdrResponse {
             in_bucket_minutes: cdr.in_bucket_minutes,
             overage_minutes: cdr.overage_minutes,
             overage_cost: cdr.overage_cost,
+            source_ip: cdr.source_ip,
         }
     }
 }
@@ -321,6 +326,8 @@ pub struct CdrExportRow {
     pub overage_cost: String,
     /// Overage rate applied
     pub overage_rate_applied: String,
+    /// Real source IP of the caller/trunk
+    pub source_ip: String,
 }
 
 impl From<apolo_core::models::Cdr> for CdrExportRow {
@@ -358,6 +365,7 @@ impl From<apolo_core::models::Cdr> for CdrExportRow {
             overage_rate_applied: cdr
                 .overage_rate_applied
                 .map_or_else(String::new, |v| v.to_string()),
+            source_ip: cdr.source_ip.unwrap_or_default(),
         }
     }
 }

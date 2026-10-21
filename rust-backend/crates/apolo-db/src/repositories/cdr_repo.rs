@@ -38,7 +38,8 @@ const CDR_SELECT_COLUMNS: &str = r#"
     hangup_cause, direction,
     freeswitch_server_id, reservation_id,
     created_at, processed_at,
-    bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied
+    bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied,
+    source_ip
 "#;
 
 #[async_trait]
@@ -424,6 +425,7 @@ struct CdrRow {
     overage_minutes: Option<Decimal>,
     overage_cost: Option<Decimal>,
     overage_rate_applied: Option<Decimal>,
+    source_ip: Option<String>,
 }
 
 impl From<CdrRow> for Cdr {
@@ -454,6 +456,7 @@ impl From<CdrRow> for Cdr {
             overage_minutes: row.overage_minutes,
             overage_cost: row.overage_cost,
             overage_rate_applied: row.overage_rate_applied,
+            source_ip: row.source_ip,
         }
     }
 }

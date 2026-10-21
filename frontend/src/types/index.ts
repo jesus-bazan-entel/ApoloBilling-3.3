@@ -234,6 +234,7 @@ export interface CDR {
   overage_minutes?: number
   overage_cost?: number
   overage_rate_applied?: number
+  source_ip?: string
 }
 
 // Active Call for real-time monitoring
