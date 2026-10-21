@@ -138,10 +138,11 @@ impl CdrGenerator {
                 "INSERT INTO cdrs
                  (call_uuid, account_id, caller_number, called_number, start_time, answer_time, end_time,
                   duration, billsec, hangup_cause, rate_per_minute, cost, direction, freeswitch_server_id,
-                  bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied)
+                  bucket_cycle_id, in_bucket_minutes, overage_minutes, overage_cost, overage_rate_applied,
+                  source_ip)
                  VALUES ($1, $2, $3, $4, $5, $6, $7,
                          $8, $9, $10, $11, $12, $13, $14,
-                         $15, $16, $17, $18, $19)
+                         $15, $16, $17, $18, $19, $20)
                  RETURNING id",
                 &[
                     &event.uuid,
@@ -163,6 +164,7 @@ impl CdrGenerator {
                     &bucket_overage_minutes,
                     &bucket_overage_cost,
                     &overage_rate_applied,
+                    &event.source_ip,
                 ],
             )
             .await?;

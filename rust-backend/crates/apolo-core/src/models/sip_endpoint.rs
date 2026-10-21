@@ -112,6 +112,9 @@ pub struct SipEndpoint {
     /// Rangos DID propiedad de esta PBX (trunk/ip): prefijos separados por
     /// coma, ej "174020,174021". El L3 selectivo enruta cada prefijo SOLO aqui.
     pub did_ranges: String,
+    /// Numero principal/cabecera (trunk/ip): reemplaza el From cuando la PBX
+    /// manda "Anonymous" o nada. Sincronizado a Kamailio address.tag.
+    pub default_caller_id: Option<String>,
 
     // Derived server-side, never set directly from the API
     pub context: String,
@@ -188,6 +191,7 @@ impl Default for SipEndpoint {
             sync_error: None,
             is_default: false,
             did_ranges: String::new(),
+            default_caller_id: None,
             context: "from-pbx".to_string(),
             fs_profile: "internal".to_string(),
             display_name: None,
@@ -246,6 +250,7 @@ mod tests {
             sync_error: None,
             is_default: false,
             did_ranges: String::new(),
+            default_caller_id: None,
             context: "from-pbx".to_string(),
             fs_profile: "internal".to_string(),
             display_name: None,

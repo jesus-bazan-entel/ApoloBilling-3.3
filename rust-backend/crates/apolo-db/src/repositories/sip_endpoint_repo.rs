@@ -29,7 +29,7 @@ const SELECT_COLUMNS: &str = r#"
     id, name, description, endpoint_type, auth_mode, account_id,
     sip_username, sip_domain, password_encrypted, password_nonce, a1_hash,
     max_registrations, max_concurrent_calls, host, port, transport, kamailio_gwid, sync_status,
-    sync_error, is_default, did_ranges, context, fs_profile, display_name, accountcode,
+    sync_error, is_default, did_ranges, default_caller_id, context, fs_profile, display_name, accountcode,
     codecs, enabled, created_at, updated_at
 "#;
 
@@ -92,9 +92,9 @@ impl Repository<SipEndpoint, Uuid> for PgSipEndpointRepository {
                 name, description, endpoint_type, auth_mode, account_id,
                 sip_username, sip_domain, password_encrypted, password_nonce, a1_hash,
                 max_registrations, max_concurrent_calls, host, port, transport, context, fs_profile,
-                display_name, accountcode, codecs, enabled, is_default, did_ranges
+                display_name, accountcode, codecs, enabled, is_default, did_ranges, default_caller_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
             RETURNING {}
             "#,
             SELECT_COLUMNS
@@ -124,6 +124,7 @@ impl Repository<SipEndpoint, Uuid> for PgSipEndpointRepository {
             .bind(entity.enabled)
             .bind(entity.is_default)
             .bind(&entity.did_ranges)
+            .bind(&entity.default_caller_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| {
@@ -170,6 +171,7 @@ impl Repository<SipEndpoint, Uuid> for PgSipEndpointRepository {
                 enabled = $15,
                 is_default = $16,
                 did_ranges = $17,
+                default_caller_id = $18,
                 updated_at = NOW()
             WHERE id = $1
             RETURNING {}
@@ -195,6 +197,7 @@ impl Repository<SipEndpoint, Uuid> for PgSipEndpointRepository {
             .bind(entity.enabled)
             .bind(entity.is_default)
             .bind(&entity.did_ranges)
+            .bind(&entity.default_caller_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| {
@@ -430,6 +433,7 @@ struct SipEndpointRow {
     sync_error: Option<String>,
     is_default: Option<bool>,
     did_ranges: Option<String>,
+    default_caller_id: Option<String>,
     context: String,
     fs_profile: String,
     display_name: Option<String>,
@@ -464,6 +468,7 @@ impl From<SipEndpointRow> for SipEndpoint {
             sync_error: row.sync_error,
             is_default: row.is_default.unwrap_or(false),
             did_ranges: row.did_ranges.unwrap_or_default(),
+            default_caller_id: row.default_caller_id,
             context: row.context,
             fs_profile: row.fs_profile,
             display_name: row.display_name,

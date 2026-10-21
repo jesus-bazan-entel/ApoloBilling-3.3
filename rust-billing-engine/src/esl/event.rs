@@ -165,9 +165,18 @@ impl EslEvent {
     }
 
     /// Get source IP address from ESL event
-    /// Used for IP-authenticated trunks to identify the endpoint
+    /// Used for IP-authenticated trunks to identify the endpoint.
+    ///
+    /// `X-Orig-Src-IP` wins first: for calls relayed through Kamailio
+    /// (FLB_SRC_LANEXT -> route[RELAY_LANEXT]), the network-layer peer
+    /// FreeSWITCH actually talks to is Kamailio itself, not the real PBX -
+    /// every `Network-IP`/`variable_sip_*_ip` below would show the SBC's own
+    /// address. Kamailio injects this header with the real source before
+    /// relaying (see kamailio.cfg REQINIT, FLT_PBX classification) so
+    /// account lookup and CDRs reflect the actual client, not the SBC.
     pub fn source_ip(&self) -> Option<String> {
-        self.headers.get("Network-IP")
+        self.headers.get("variable_sip_h_X-Orig-Src-IP")
+            .or_else(|| self.headers.get("Network-IP"))
             .or_else(|| self.headers.get("variable_network_ip"))
             .or_else(|| self.headers.get("variable_sip_network_ip"))
             .or_else(|| self.headers.get("variable_sip_received_ip"))

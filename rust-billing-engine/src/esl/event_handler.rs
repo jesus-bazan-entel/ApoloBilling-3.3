@@ -84,6 +84,10 @@ impl EventHandler {
 
         let caller = event.caller().cloned().unwrap_or_default();
         let callee = event.callee().cloned().unwrap_or_default();
+        // Extraido temprano: lo necesitan tanto el chequeo de limite de
+        // concurrencia (troncales IP, matcheadas por host, no por numero)
+        // como los INSERT a active_calls de todas las ramas de abajo.
+        let source_ip = event.source_ip();
 
         // 🔍 Detectar dirección de la llamada (inbound/outbound)
         // Si el contexto es from-pbx, la llamada es OUTBOUND (usuario de PBX llamando hacia afuera)
@@ -125,7 +129,7 @@ impl EventHandler {
             // 🔒 Límite de llamadas simultáneas por endpoint (auth_mode=credentials)
             // también en entrantes: este path no pasa por authorize(), así que
             // el check va explícito aquí. Mismo kill path que los denies de billing.
-            if let Some(reason) = self.auth_service.check_endpoint_concurrent_limit(&caller, &callee).await {
+            if let Some(reason) = self.auth_service.check_endpoint_concurrent_limit(&caller, &callee, source_ip.as_deref()).await {
                 warn!("❌ Inbound call DENIED (endpoint limit): {} - Reason: {}", uuid, reason);
 
                 if let Some(conn) = &self.connection {
@@ -148,10 +152,10 @@ impl EventHandler {
             if let Ok(client) = self.db_pool.get().await {
                 let now = Utc::now();
                 let _ = client.execute(
-                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server, source_ip)
+                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7)
                      ON CONFLICT (call_id) DO NOTHING",
-                    &[&uuid, &caller, &callee, &"inbound".to_string(), &now, &self.server_id]
+                    &[&uuid, &caller, &callee, &"inbound".to_string(), &now, &self.server_id, &source_ip]
                 ).await;
             }
             return;
@@ -176,17 +180,16 @@ impl EventHandler {
             if let Ok(client) = self.db_pool.get().await {
                 let now = Utc::now();
                 let _ = client.execute(
-                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server, source_ip)
+                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7)
                      ON CONFLICT (call_id) DO NOTHING",
-                    &[&uuid, &caller, &callee, &direction, &now, &self.server_id]
+                    &[&uuid, &caller, &callee, &direction, &now, &self.server_id, &source_ip]
                 ).await;
             }
             return;
         }
 
         // Authorize call (only if not already authorized via HTTP)
-        let source_ip = event.source_ip();
         let auth_req = AuthRequest {
             caller: caller.clone(),
             callee: callee.clone(),
@@ -223,10 +226,10 @@ impl EventHandler {
                         let now = Utc::now();
 
                         match client.execute(
-                            "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                             VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+                            "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server, source_ip)
+                             VALUES ($1, $2, $3, $4, $5, 0, 0, $6, $7)
                              ON CONFLICT (call_id) DO NOTHING",
-                            &[&uuid, &caller, &callee, &direction, &now, &self.server_id]
+                            &[&uuid, &caller, &callee, &direction, &now, &self.server_id, &source_ip]
                         ).await {
                             Ok(_) => info!("📊 Added call {} to active_calls [{}]", uuid, direction),
                             Err(e) => error!("❌ Failed to add call {} to active_calls: {}", uuid, e),

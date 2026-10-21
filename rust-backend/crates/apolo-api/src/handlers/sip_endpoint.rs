@@ -156,6 +156,17 @@ pub async fn create_sip_endpoint(
     }
     check_did_range_conflicts(pool.get_ref(), None, &endpoint.did_ranges).await?;
 
+    endpoint.default_caller_id =
+        validate_default_caller_id(req.default_caller_id.as_deref().unwrap_or(""))?;
+    if endpoint.default_caller_id.is_some()
+        && (req.endpoint_type != EndpointType::Trunk || req.auth_mode != AuthMode::Ip)
+    {
+        return Err(AppError::Validation(
+            "default_caller_id solo aplica a troncales IP (endpoint_type=trunk, auth_mode=ip)"
+                .to_string(),
+        ));
+    }
+
     if let Some(ref pwd) = password {
         sip_service.prepare_device_with_password(&mut endpoint, pwd)?;
     }
@@ -308,6 +319,18 @@ pub async fn update_sip_endpoint(
         }
         check_did_range_conflicts(pool.get_ref(), Some(id), &canonical).await?;
         endpoint.did_ranges = canonical;
+    }
+    if let Some(ref default_caller_id) = req.default_caller_id {
+        let validated = validate_default_caller_id(default_caller_id)?;
+        if validated.is_some()
+            && (endpoint.endpoint_type != EndpointType::Trunk || endpoint.auth_mode != AuthMode::Ip)
+        {
+            return Err(AppError::Validation(
+                "default_caller_id solo aplica a troncales IP (endpoint_type=trunk, auth_mode=ip)"
+                    .to_string(),
+            ));
+        }
+        endpoint.default_caller_id = validated;
     }
 
     let updated = repo.update(&endpoint).await?;
@@ -950,6 +973,21 @@ fn normalize_did_ranges(raw: &str) -> Result<String, AppError> {
     Ok(parts.join(","))
 }
 
+/// Validate `default_caller_id` ("cabecera"): 1-20 digits, or empty/None to
+/// clear it. Only meaningful for troncales IP - see call sites.
+fn validate_default_caller_id(raw: &str) -> Result<Option<String>, AppError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.len() > 20 || !trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Err(AppError::Validation(
+            "default_caller_id must be 1-20 digits".to_string(),
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
 /// Pure overlap check: which (owner, owner_prefix) pairs collide with `new`.
 /// Collision = equal, prefix-of, or extension-of (ambiguous ownership).
 fn find_range_conflicts<'a>(
@@ -1116,9 +1154,18 @@ async fn try_sync_trunk_to_kamailio(
     }
 
     // Grant the PBX's IP permission to route outbound (grp 9 = FLT_PBX in kamailio.cfg).
+    // `header:<digits>` (only when default_caller_id is set) is read back by
+    // Kamailio REQINIT when classifying this IP: if the From user is
+    // "anonymous"/empty, it replaces it with this number before relaying to
+    // FreeSWITCH - carriers reject/mishandle Anonymous, and the billing
+    // engine can't resolve an account from it either.
+    let tag = match &endpoint.default_caller_id {
+        Some(cid) => format!("name:{},gwgroup:{},header:{}", endpoint.name, gwid, cid),
+        None => format!("name:{},gwgroup:{}", endpoint.name, gwid),
+    };
     sqlx::query("INSERT INTO address (grp, ip_addr, mask, port, tag) VALUES (9, ?, 32, 0, ?)")
         .bind(host)
-        .bind(format!("name:{},gwgroup:{}", endpoint.name, gwid))
+        .bind(tag)
         .execute(&kamailio_pool)
         .await
         .map_err(|e| AppError::Database(format!("Failed to insert PBX ACL entry: {}", e)))?;

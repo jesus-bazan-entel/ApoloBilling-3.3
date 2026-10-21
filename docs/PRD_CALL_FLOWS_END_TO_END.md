@@ -1,13 +1,16 @@
 # PRD — Flujo End-to-End de Llamadas + Billing (Autorización y CDR)
 
 **Sistema:** ApoloBilling SBC (Kamailio 5.8 + FreeSWITCH 1.10 + RTPEngine + Billing Engine)
-**Versión:** 1.1 — estado verificado en producción (`sbc-core-01`)
-**Fecha:** 2026-10-21 (v1.0: 2026-10-14)
+**Versión:** 1.2 — estado verificado en producción (`sbc-core-01`)
+**Fecha:** 2026-10-21 (v1.1: 2026-10-21 mañana, v1.0: 2026-10-14)
 **Alcance:** una llamada completa en cada dirección, paso a paso, indicando en
 qué pasos hay autorización billing, CDR, **y control de canales/llamadas
-simultáneas por endpoint** (§6-7, nuevo en esta versión). Basado en trazas
-reales (`14228505 → 983434724`, `938391839 → 672217402000`), logs y archivos
-vivos.
+simultáneas por endpoint** (§6-7). Desde v1.2, además: ruteo saliente
+unificado de troncales IP por FreeSWITCH, preservación de la IP real del
+cliente (`X-Orig-Src-IP`), caller ID de cabecera, y el fix de ACQ para fijos
+peruanos (§8). Basado en trazas reales (`14228505 → 983434724`,
+`938391839 → 672217402000`, `14228505/Asterisk Test → 3119898`), logs y
+archivos vivos.
 
 > **Changelog v1.1:** se implementó y verificó en producción el enforcement
 > real de `max_concurrent_calls` para los tres tipos de endpoint
@@ -17,6 +20,18 @@ vivos.
 > (bridge directo FreeSWITCH→PBX, sin pasar por Kamailio) — se agregó
 > enforcement nativo de FreeSWITCH (`mod_hash`/`limit`) en el punto real.
 > Detalle completo en §6.
+>
+> **Changelog v1.2 (mismo día, sesión de tarde):** se descubrió que las
+> troncales IP **salientes** (PBX llamando hacia afuera, no solo recibiendo
+> DIDs) bypasseaban Kamailio→carrier directo, sin tocar FreeSWITCH en
+> absoluto — cero CDR, cero cuenta, cero límite de concurrencia, caller ID
+> "Anonymous" sin filtrar. Se unificó el ruteo saliente de troncales IP por
+> el mismo camino que las extensiones (FreeSWITCH), se agregó el header
+> `X-Orig-Src-IP` (sin él, FreeSWITCH/billing engine ven la IP del SBC, no
+> la de la troncal), un campo de "número principal/cabecera" por troncal, y
+> se cerró el hueco de concurrencia resultante para troncales IP. Además, se
+> arregló ACQ para números fijos peruanos (7-8 dígitos), que hasta ahora
+> solo reconocía MSISDN móviles de 9. Detalle completo en §8.
 
 > Convención: los fragmentos `kamailio.cfg` / `from-pbx.xml` /
 > `to-kamailio.xml` son copias literales de producción. Los diagramas están en
@@ -338,7 +353,7 @@ importante descubierta en el camino (§6.2).
 
 | Capa | Mecanismo | Cubre | Motor / proceso | Estado |
 |---|---|---|---|---|
-| **Billing Engine** | Cuenta filas vivas en `active_calls` (como `calling_number` o `called_number`) vs `sip_endpoints.max_concurrent_calls`, filtrado por `auth_mode='credentials'` | Extensiones **y** troncales que registran por usuario/contraseña | Proceso Rust `apolo-billing-engine`, sobre evento ESL `CHANNEL_CREATE` | ✅ Implementado y desplegado hoy. Código verificado en ambos *call sites* (saliente vía `authorize()`, entrante vía chequeo explícito). Pendiente: observar un rechazo real (hoy ningún endpoint credentials está en su límite). |
+| **Billing Engine** | Cuenta filas vivas en `active_calls` vs `sip_endpoints.max_concurrent_calls`. `credentials`: por `calling_number`/`called_number` = `sip_username`. `ip`: por `active_calls.source_ip` = `sip_endpoints.host` (ver §8.4 — las troncales IP no tienen `sip_username`) | Extensiones, troncales credentials **y troncales IP salientes** (desde v1.2) | Proceso Rust `apolo-billing-engine`, sobre evento ESL `CHANNEL_CREATE` | ✅ Implementado y desplegado. Verificado con rechazo real: 5 llamadas simultáneas ocupando el límite de una troncal IP (max=5) → las siguientes 5 `CALL_REJECTED` (§8.5). |
 | **FreeSWITCH `mod_hash`** (app `limit`) | Contador nativo en memoria, resource = `sip_endpoints.id`, límite = `max_concurrent_calls` | Troncales IP (`auth_mode=ip`), en el bridge directo FreeSWITCH→PBX | Proceso FreeSWITCH, dialplan `to-kamailio.xml` (contexto `national-routing`, bloques `pbx-range-*`) | ✅ Implementado hoy — **este es el fix real**, ver §6.2-6.3. Verificado en producción: XML válido, `reloadxml` OK, 57 acciones `limit` generadas, valores coinciden con la DB. |
 | **Kamailio `CHECK_CALL_LIMIT`** | htable `concurrent_calls` vs `dsip_call_settings.limit` por `gwgroupid` **destino** | Carriers (`type=8`), ruteados por `drouting(8000)` | Kamailio, saliente hacia carrier | ✅ Funciona (sin cambios) para carriers. ❌ Sigue sincronizado pero **inerte** para las 52 troncales PBX `type=9` — nunca son elegidas como `dst_gwgroupid` por Kamailio (§6.2). |
 
@@ -440,7 +455,9 @@ Es decir: cambiar el límite desde la web lo publica solo, sin pasos manuales.
 
 Para `auth_mode=credentials` (extensiones y troncales que registran), el
 enforcement vive en Rust, no en FreeSWITCH ni Kamailio — porque ese tráfico
-bypassea el routing de ambos (`RELAY_LANEXT`):
+bypassea el routing de ambos (`RELAY_LANEXT`). **Actualizado en v1.2** para
+cubrir también troncales IP salientes (ver §8.4 para la query completa y por
+qué hizo falta un mecanismo de matching distinto para ellas):
 
 ```sql
 SELECT se.sip_username, se.max_concurrent_calls,
@@ -573,3 +590,234 @@ destino".
 | **FreeSWITCH (dialplan)** | XML interpretado + `mod_hash` (módulo nativo en memoria) | **Único punto de corte real para las 52 PBX**: acción `limit` justo antes del `bridge` directo. |
 | **FreeSWITCH (ESL)** | Emisor de eventos hacia el billing engine | No decide nada — solo notifica `CHANNEL_CREATE`/`CHANNEL_HANGUP_COMPLETE`. |
 | **Billing Engine** | Rust, proceso separado, conectado por ESL/HTTP | Corte para extensiones y troncales `credentials`, vía `active_calls` + `uuid_kill` — asíncrono respecto a la señalización SIP. |
+
+---
+
+## 8. Troncales IP salientes: ruteo unificado por FreeSWITCH, IP real, cabecera y ACQ para fijos (2026-10-21, sesión de tarde)
+
+Todo lo de esta sección partió de una prueba real: se armó un Asterisk de
+prueba en `10.10.22.8` (troncal "Asterisk Test", `auth_mode=ip`) y se hizo
+una llamada saliente real hacia `3119898`. El trace SIP mostró algo que
+nadie había notado: **`From: "Anonymous" <sip:anonymous@anonymous.invalid>`**
+y la llamada nunca aparecía ni en CDR ni en "Llamadas activas" del frontend.
+
+### 8.1 El hallazgo: troncales IP salientes bypasseaban TODO
+
+El trace mostró el camino real: `Asterisk (10.10.22.8) → Kamailio
+(10.10.22.4:5060) → INTEGRATEL (10.35.13.100) directo` — **sin tocar
+FreeSWITCH en ningún momento**. Confirmado en `kamailio.cfg` REQINIT: la
+misma clasificación ACL (`allow_source_address(FLT_PBX)`, grupo `address`
+grp=9) que usan las 52 troncales para ser *reconocidas* por Kamailio también
+las deja salir directo a carrier vía `route(NEXTHOP)` → "To Carrier" →
+`ACQ_LOOKUP`/`OUTBOUND_DROUTING` — el mismo camino que usan los carriers
+`type=8`, sin pasar jamás por `authorize()`.
+
+Consecuencia: **cualquier troncal IP podía generar tráfico real hacia
+INTEGRATEL sin CDR, sin cuenta que pague, sin límite de concurrencia, y con
+cualquier caller ID (incluido "Anonymous")**. Verificado con logs reales de
+producción: `PBX Fibertel` (10.30.0.26) y `PBX Cetemin` (10.30.0.50) tenían
+tráfico saliente real de esta forma, ninguna con cuenta vinculada.
+
+### 8.2 El fix: troncales IP salientes ahora pasan por FreeSWITCH
+
+Una sola reclasificación en `REQINIT` (`kamailio.cfg`): cuando
+`allow_source_address(FLT_PBX)` matchea una troncal IP real (no FreeSWITCH
+mismo — eso lo captura `is_myself()` antes, con su propio flag), en vez de
+`FLB_SRC_PBX` (directo a carrier) se marca `FLB_SRC_LANEXT` — el mismo
+camino que ya usan las extensiones (`route[RELAY_LANEXT]` → FreeSWITCH
+`from-pbx:5081`). FreeSWITCH emite `CHANNEL_CREATE`, el billing engine corre
+`authorize()` (resuelve cuenta, bucket, límite de concurrencia — ver §8.4),
+y si autoriza, FreeSWITCH bridgea de vuelta a Kamailio, que esta vez sí
+lo ve como `FLB_SRC_PBX` (`is_myself`, viene de 10.10.22.4) y sigue el
+camino normal de ACQ/drouting ya facturado.
+
+```mermaid
+flowchart LR
+    PBX["Troncal IP<br/>ej. Asterisk 10.10.22.8"] -->|INVITE| K1["Kamailio<br/>REQINIT: FLT_PBX match"]
+    K1 -->|"⚡ FLB_SRC_LANEXT<br/>(antes: FLB_SRC_PBX directo)"| F["FreeSWITCH :5081<br/>from-pbx"]
+    F -->|"CHANNEL_CREATE (ESL)"| E["Billing Engine<br/>authorize(): cuenta + limite"]
+    E -->|autorizado| F
+    F -->|"bridge sofia/external"| K2["Kamailio<br/>(is_myself) FLB_SRC_PBX"]
+    K2 -->|"ACQ + drouting(8000)"| C[("Carrier<br/>INTEGRATEL")]
+    style K1 fill:#eef,stroke:#339
+```
+
+**Riesgo evaluado antes de desplegar:** ninguna de las 52 troncales tenía
+cuenta vinculada (`account_id`); `require_account_for_outbound` está en
+`false` por defecto (no rechaza sin cuenta, solo queda sin facturar) — así
+que desplegar esto no cortó servicio a nadie, pero las 2 troncales con
+tráfico real detectado (Fibertel, Cetemin) se vincularon a cuentas nuevas
+(`17402000`, `17026040` — su propio caller ID real, 1000 min/mes `control`)
+para que pasen a facturarse de verdad en vez de quedar gratis.
+
+### 8.3 `X-Orig-Src-IP`: preservar la IP real del cliente
+
+Al mover las troncales por FreeSWITCH, apareció un efecto secundario: para
+FreeSWITCH, el peer de red ya no es la troncal — es Kamailio (que relayó la
+llamada). `Network-IP`/`variable_sip_*_ip` quedan con `10.10.22.4` (el SBC),
+no con la IP real del cliente. Esto rompía silenciosamente la resolución de
+cuenta por IP (`find_account_by_ani_and_ip`, paso 3) y falseaba cualquier
+IP guardada en CDR.
+
+Fix: Kamailio inyecta `append_hf("X-Orig-Src-IP: $si\r\n")` justo antes de
+relayar (mismo bloque de REQINIT que la reclasificación). FreeSWITCH expone
+headers custom entrantes como `variable_sip_h_X-Orig-Src-IP` en sus eventos
+ESL; `EslEvent::source_ip()` ahora lo prioriza por sobre los
+`Network-IP`/`variable_sip_*_ip` de siempre:
+
+```rust
+pub fn source_ip(&self) -> Option<String> {
+    self.headers.get("variable_sip_h_X-Orig-Src-IP")   // <- nuevo, prioridad
+        .or_else(|| self.headers.get("Network-IP"))
+        .or_else(|| self.headers.get("variable_network_ip"))
+        // ... (resto sin cambios)
+}
+```
+
+Persistido en dos columnas nuevas (antes no se guardaba en ningún lado,
+solo se usaba transitoriamente para el lookup de cuenta):
+- `cdrs.source_ip` (migración 034)
+- `active_calls.source_ip` (migración 036, necesaria para §8.4)
+
+**Validado:** llamada real desde el anexo "1001" en Asterisk Test →
+`source_ip=Some("10.10.22.8")` en los logs del billing engine, CDR con
+`source_ip=10.10.22.8` — antes de este fix mostraba `10.10.22.4` (el SBC).
+
+### 8.4 Límite de concurrencia: cerrando el hueco para troncales IP
+
+`check_endpoint_concurrent_limit` (§6.4) filtraba `auth_mode='credentials'`
+únicamente — las troncales IP, que ahora SÍ pasan por `authorize()` gracias
+a §8.2, nunca entraban en ese chequeo. Encontrado con una prueba real: más
+de 10 llamadas simultáneas desde Asterisk Test (límite configurado: 5)
+progresaron todas, sin corte.
+
+El problema de fondo: las troncales IP no tienen `sip_username` (no
+registran), así que no se pueden matchear por número como las extensiones
+—su identidad estable es el `host`. La query ahora cubre ambos casos, cada
+uno con su propia forma de matchear filas de `active_calls`:
+
+```sql
+SELECT se.name, se.max_concurrent_calls,
+       (SELECT COUNT(*) FROM active_calls ac
+        WHERE (se.auth_mode = 'credentials'
+               AND (ac.calling_number = se.sip_username
+                    OR ac.called_number = se.sip_username))
+           OR (se.auth_mode = 'ip' AND ac.source_ip = se.host))
+FROM sip_endpoints se
+WHERE (se.auth_mode = 'credentials'
+       AND se.sip_username IN ($caller, $callee))
+   OR (se.auth_mode = 'ip' AND se.host = $source_ip)
+```
+
+`source_ip` (ya confiable gracias a §8.3) se suma como tercer parámetro en
+ambos *call sites* (`authorize()` saliente, chequeo explícito entrante).
+
+### 8.5 Caller ID "cabecera": `default_caller_id`
+
+Requisito explícito: **si una troncal tiene un número principal/cabecera
+configurado, TODAS sus llamadas salen con ese número como origen** — sin
+importar qué mande el From real (anexo interno, "Anonymous", lo que sea).
+Si no hay cabecera configurada, el From pasa sin modificar (y si es
+"Anonymous"/vacío, el billing engine sigue rechazándolo como ya hacía antes
+— sin cabecera no hay nada que lo arregle).
+
+- **Columna nueva:** `sip_endpoints.default_caller_id` (migración 035,
+  `CHECK` 1-20 dígitos, solo aplica a `endpoint_type=trunk, auth_mode=ip`).
+- **Sync a Kamailio:** se agrega a `address.tag` junto al resto
+  (`name:X,gwgroup:Y,header:NNNN`) — reutiliza el mismo mecanismo de ACL que
+  ya existía, sin tablas nuevas en MySQL.
+- **Kamailio (REQINIT, mismo bloque de §8.2-8.3):** por cada troncal
+  clasificada `FLB_SRC_LANEXT`, consulta el `tag` por `ip_addr` y, si hay un
+  número válido, reemplaza `$fU` incondicionalmente:
+
+```kamailio
+sql_query("kam", "SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(tag, 'header:', -1), ',', 1)
+                   FROM address WHERE grp=9 AND ip_addr='$si'", "ra");
+if ($dbr(ra=>rows) > 0) { $var(header_number) = $dbr(ra=>[0,0]); }
+sql_result_free("ra");
+if ($var(header_number) =~ "^[0-9]+$") {
+    $fU = $var(header_number);   // reemplazo incondicional, no solo si es Anonymous
+}
+```
+
+**Efecto colateral deseado:** con la cabecera siempre aplicada, el ANI que
+ve el billing engine es siempre el mismo número — así que la cuenta se
+resuelve por **match directo de `account_number`** (paso 1 de
+`find_account_by_ani_and_ip`), no por el fallback de IP. Verificado: extensión
+"1001" detrás de Asterisk Test → sale como `17402000` → cuenta resuelta por
+ANI directo, bucket descontando.
+
+**UI:** campo "Número principal / cabecera" en Dispositivos SIP → editar
+troncal (solo visible para `auth_mode=ip`).
+
+### 8.6 ACQ para fijos peruanos (7-8 dígitos)
+
+Hallazgo independiente durante las pruebas: `route[ACQ_LOOKUP]` solo
+procesaba números de exactamente 9 dígitos (formato MSISDN móvil) — un fijo
+de Lima discado local (`3119898`, 7 dígitos) nunca llegaba a consultar
+Portax, nunca se transformaba con su RN, y `dr_rules` (que sí tiene una
+regla para fijos, `prefix=3267`) nunca lo veía. Resultado:
+`NO_ROUTE_DESTINATION` instantáneo.
+
+Probado contra la API real de Portax:
+
+| Consulta | Resultado |
+|---|---|
+| `3119898` (7 dígitos crudo) | `encontrado:false` |
+| `013119898` (troncal "0" + área "1" + local) | `rn:32, encontrado:true, tipo_servicio:2` |
+
+Fix en dos partes, porque el formato de **consulta** y el formato **final
+al carrier** son distintos:
+
+1. **Normalizar antes de consultar:** un fijo de 7 dígitos (Lima, sin área)
+   se consulta como `"01" + numero` (9 dígitos, formato que Portax
+   reconoce). Un fijo de 8 dígitos (provincia, ya con área de 2) se
+   consulta como `"0" + numero`.
+2. **El número final al carrier NO lleva el troncal "0":** es
+   `RN_destino + RN_origen + numero_nacional_de_8_digitos` (sin el "0").
+   Ejemplo real: `32`(INTEGRATEL fijos) + `67`(FIBERTEL) + `13119898`
+   (área 1 + local 7) = `326713119898`. La primera versión del fix incluía
+   el "0" por error (`3267013119898`, 13 dígitos) y el carrier la cancelaba
+   en 2-3s sin progresar — confirmado comparando contra un intento manual
+   previo con el mismo formato erróneo, mismo resultado.
+
+**Validado:** llamada real `326713119898` → INTEGRATEL → `200 OK` →
+conversación de 3s → `BYE` → `NORMAL_CLEARING`.
+
+### 8.7 Validación end-to-end (2026-10-21, tarde)
+
+- `cargo build --release` limpio en `rust-backend` y `rust-billing-engine`
+  tras cada cambio.
+- Kamailio: `kamailio -c -f kamailio.cfg` (exit 0) antes de cada restart;
+  0 llamadas activas verificado antes de cada restart de Kamailio/billing
+  engine/backend.
+- Llamada real fijo Lima (`3119898`) → `326713119898` → INTEGRATEL →
+  `NORMAL_CLEARING`, 3s de conversación.
+- Llamada real desde extensión "1001" tras Asterisk Test → `source_ip`
+  correcto, cuenta `17402000` resuelta, bucket descontando, CDR con
+  `source_ip=10.10.22.8`.
+- Prueba de concurrencia real: 5 llamadas simultáneas ocupando el límite de
+  una troncal IP (`max_concurrent_calls=5`) → siguientes 5 intentos
+  `CALL_REJECTED` — confirmado contra `active_calls` (5 filas, ~50s de
+  antigüedad, aún activas) justo antes de los rechazos.
+
+### 8.8 Riesgos y deuda nueva (se suma a §5)
+
+1. **`default_caller_id` es todo o nada:** no hay forma de "preservar el
+   From si es válido, reemplazar solo si es Anonymous" — fue decisión
+   explícita (toda troncal con cabecera sale siempre con ese número), pero
+   vale dejarlo anotado si el requisito cambia.
+2. **ACQ para fijos de provincia (6 dígitos + área de 2) sigue sin probar
+   contra tráfico real** — la lógica está implementada (§8.6) y es
+   simétrica a la de Lima, pero solo Lima (7 dígitos) tiene una llamada real
+   verificada end-to-end.
+3. **`sql_query`/`$dbr` en Kamailio es código nuevo sin precedente de
+   lectura en este `kamailio.cfg`** (los usos previos eran solo
+   INSERT/UPDATE/DELETE) — vigilar logs de Kamailio (`L_WARN`/`L_INFO` de
+   "Caller ID cabecera") las primeras semanas.
+4. **`cdrs` y `active_calls` son propiedad de `postgres`, no de
+   `apolo_user`:** las migraciones 034 y 036 necesitaron correrse como
+   `postgres` (`sudo -u postgres psql`) porque `apolo_user` no tiene
+   permiso de `ALTER TABLE`/`COMMENT` sobre esas dos tablas específicas
+   (inconsistencia de ownership heredada, no introducida hoy) — futuras
+   migraciones sobre esas tablas van a pegar el mismo error.

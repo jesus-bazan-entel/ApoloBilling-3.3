@@ -70,6 +70,10 @@ pub struct SipEndpointCreateRequest {
     /// Rangos DID propiedad de la PBX (trunk/ip): prefijos separados por
     /// coma, ej "174020,174021". El L3 selectivo enruta cada prefijo SOLO aqui.
     pub did_ranges: Option<String>,
+    /// Numero principal/cabecera (trunk/ip): reemplaza el From cuando la PBX
+    /// manda "Anonymous" o nada (ver sync a Kamailio address.tag). Validado
+    /// en el handler (solo digitos, 1-20) - ver validate_default_caller_id.
+    pub default_caller_id: Option<String>,
 
     #[validate(length(max = 100, message = "Display name max 100 characters"))]
     pub display_name: Option<String>,
@@ -110,6 +114,7 @@ impl SipEndpointCreateRequest {
             sync_error: None,
             is_default: self.is_default.unwrap_or(false),
             did_ranges: self.did_ranges.clone().unwrap_or_default(),
+            default_caller_id: self.default_caller_id.clone(),
             context: context.to_string(),
             fs_profile: fs_profile.to_string(),
             display_name: self.display_name.clone(),
@@ -147,6 +152,8 @@ pub struct SipEndpointUpdateRequest {
     pub is_default: Option<bool>,
     /// Rangos DID propiedad de la PBX (trunk/ip): prefijos separados por coma.
     pub did_ranges: Option<String>,
+    /// Numero principal/cabecera (trunk/ip). Ver nota en Create.
+    pub default_caller_id: Option<String>,
 
     #[validate(length(max = 100, message = "Display name max 100 characters"))]
     pub display_name: Option<String>,
@@ -180,6 +187,7 @@ pub struct SipEndpointResponse {
     pub sync_error: Option<String>,
     pub is_default: bool,
     pub did_ranges: String,
+    pub default_caller_id: Option<String>,
 
     pub display_name: Option<String>,
     pub accountcode: Option<String>,
@@ -212,6 +220,7 @@ impl From<SipEndpoint> for SipEndpointResponse {
             sync_error: e.sync_error,
             is_default: e.is_default,
             did_ranges: e.did_ranges,
+            default_caller_id: e.default_caller_id,
             display_name: e.display_name,
             accountcode: e.accountcode,
             codecs: e.codecs,
@@ -342,6 +351,7 @@ mod tests {
             transport: None,
             is_default: None,
             did_ranges: None,
+            default_caller_id: None,
             display_name: Some("Test User".to_string()),
             accountcode: Some("ACC001".to_string()),
             codecs: "PCMU,PCMA".to_string(),
@@ -375,6 +385,7 @@ mod tests {
             transport: Some(Transport::Udp),
             is_default: Some(true),
             did_ranges: Some("174020,174021".to_string()),
+            default_caller_id: Some("17402000".to_string()),
             display_name: None,
             accountcode: None,
             codecs: default_codecs(),
@@ -385,6 +396,7 @@ mod tests {
 
         assert_eq!(endpoint.host, Some("10.0.0.5".to_string()));
         assert_eq!(endpoint.did_ranges, "174020,174021");
+        assert_eq!(endpoint.default_caller_id, Some("17402000".to_string()));
         assert_eq!(endpoint.sip_username, None);
     }
 }

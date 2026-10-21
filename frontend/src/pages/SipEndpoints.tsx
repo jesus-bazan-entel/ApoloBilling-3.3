@@ -313,6 +313,11 @@ export default function SipEndpointsPage() {
                 DIDs: {endpoint.did_ranges}
               </span>
             )}
+            {endpoint.default_caller_id && (
+              <span className="block text-xs text-[var(--color-text-secondary)]">
+                Cabecera: {endpoint.default_caller_id}
+              </span>
+            )}
           </span>
         ),
     },
@@ -707,6 +712,7 @@ function EndpointModal({
     transport: endpoint?.transport || ('udp' as TransportProtocol),
     is_default: endpoint?.is_default || false,
     did_ranges: endpoint?.did_ranges || '',
+    default_caller_id: endpoint?.default_caller_id || '',
     display_name: endpoint?.display_name || '',
     accountcode: endpoint?.accountcode || '',
     codecs: endpoint?.codecs || 'PCMU,PCMA,G729,opus',
@@ -751,6 +757,7 @@ function EndpointModal({
       transport: authMode === 'ip' ? formData.transport : undefined,
       is_default: authMode === 'ip' ? formData.is_default : undefined,
       did_ranges: authMode === 'ip' ? formData.did_ranges : undefined,
+      default_caller_id: authMode === 'ip' ? formData.default_caller_id : undefined,
       display_name: formData.display_name || undefined,
       accountcode: formData.accountcode || undefined,
       codecs: formData.codecs,
@@ -999,6 +1006,24 @@ function EndpointModal({
                 />
                 <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                   Prefijos separados por coma. El L3 selectivo enruta cada prefijo SOLO a esta PBX. Vacío = sin rangos.
+                </p>
+              </div>
+              <div className="col-span-3">
+                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                  Número principal / cabecera
+                </label>
+                <input
+                  type="text"
+                  value={formData.default_caller_id}
+                  onChange={(e) =>
+                    setFormData({ ...formData, default_caller_id: e.target.value })
+                  }
+                  placeholder="17402000"
+                  className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  Si la PBX manda caller ID "Anonymous" o vacío en sus salientes, Kamailio lo
+                  reemplaza por este número antes de enviarlo al carrier. Vacío = no reemplazar.
                 </p>
               </div>
               <div className="col-span-3 flex items-center">

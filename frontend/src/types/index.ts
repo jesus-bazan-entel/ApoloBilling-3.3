@@ -385,6 +385,7 @@ export interface SipEndpoint {
   sync_error?: string
   is_default: boolean
   did_ranges: string
+  default_caller_id?: string
 
   display_name?: string
   accountcode?: string
@@ -416,6 +417,7 @@ export interface SipEndpointCreateRequest {
   transport?: TransportProtocol
   is_default?: boolean
   did_ranges?: string
+  default_caller_id?: string
 
   display_name?: string
   accountcode?: string
@@ -436,6 +438,7 @@ export interface SipEndpointUpdateRequest {
   transport?: TransportProtocol
   is_default?: boolean
   did_ranges?: string
+  default_caller_id?: string
   display_name?: string
   accountcode?: string
   codecs?: string

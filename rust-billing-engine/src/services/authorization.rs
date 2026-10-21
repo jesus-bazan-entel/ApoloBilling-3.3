@@ -41,17 +41,20 @@ impl AuthorizationService {
             call_uuid, req.caller, req.callee, direction, source_ip
         );
 
-        // 🔒 Límite de llamadas simultáneas por endpoint con auth_mode=credentials
-        // (extensiones y troncales que se registran por usuario/contraseña).
-        // Bypassean el routing de Kamailio (RELAY_LANEXT), así que
-        // CHECK_CALL_LIMIT nunca las ve: su límite
-        // (sip_endpoints.max_concurrent_calls) se enforcea aquí contando
-        // active_calls. Las troncales IP (auth_mode=ip) se enforcean en
-        // Kamailio (ver sync_trunk_call_settings), no acá. Corre antes que el
-        // billing porque es control de capacidad, no de saldo. Fail-open ante
-        // errores de DB.
+        // 🔒 Límite de llamadas simultáneas por endpoint. Cubre dos casos que
+        // bypassean el CHECK_CALL_LIMIT de Kamailio y por eso necesitan
+        // contarse acá contra active_calls:
+        // - auth_mode=credentials (extensiones y troncales que registran):
+        //   matcheadas por sip_username (RELAY_LANEXT las bypassea del todo).
+        // - auth_mode=ip (troncales IP) cuyas salientes pasan por FreeSWITCH
+        //   (RELAY_LANEXT + bridge de vuelta a carrier, ver incidente
+        //   2026-10-21): CHECK_CALL_LIMIT nunca las ve porque para cuando
+        //   vuelven a Kamailio ya son FLB_SRC_PBX (is_myself), no la troncal
+        //   original - matcheadas por source_ip = sip_endpoints.host.
+        // Corre antes que el billing porque es control de capacidad, no de
+        // saldo. Fail-open ante errores de DB.
         if let Some(reason) = self
-            .check_endpoint_concurrent_limit(&req.caller, &req.callee)
+            .check_endpoint_concurrent_limit(&req.caller, &req.callee, source_ip)
             .await
         {
             warn!(
@@ -285,8 +288,9 @@ impl AuthorizationService {
         &self,
         caller: &str,
         callee: &str,
+        source_ip: Option<&str>,
     ) -> Option<String> {
-        if caller.is_empty() && callee.is_empty() {
+        if caller.is_empty() && callee.is_empty() && source_ip.is_none() {
             return None;
         }
         let client = match self.db_pool.get().await {
@@ -299,17 +303,27 @@ impl AuthorizationService {
                 return None;
             }
         };
+        // auth_mode=credentials: matcheadas por sip_username (active_calls
+        // no tiene otra identidad para ellas). auth_mode=ip: matcheadas por
+        // source_ip = sip_endpoints.host (no tienen sip_username; su
+        // caller/callee puede ser cualquier cosa - un anexo interno, el
+        // numero de cabecera, lo que mande la PBX).
         let rows = match client
             .query(
-                "SELECT se.sip_username, se.max_concurrent_calls,
+                "SELECT se.name, se.max_concurrent_calls,
                         (SELECT COUNT(*) FROM active_calls ac
-                         WHERE ac.calling_number = se.sip_username
-                            OR ac.called_number = se.sip_username)
+                         WHERE (se.auth_mode = 'credentials'
+                                AND (ac.calling_number = se.sip_username
+                                     OR ac.called_number = se.sip_username))
+                            OR (se.auth_mode = 'ip' AND ac.source_ip = se.host))
                  FROM sip_endpoints se
-                 WHERE se.auth_mode = 'credentials'
-                   AND se.sip_username IS NOT NULL
-                   AND se.sip_username IN ($1, $2)",
-                &[&caller, &callee],
+                 WHERE (se.auth_mode = 'credentials'
+                        AND se.sip_username IS NOT NULL
+                        AND se.sip_username IN ($1, $2))
+                    OR (se.auth_mode = 'ip'
+                        AND se.host IS NOT NULL
+                        AND se.host = $3)",
+                &[&caller, &callee, &source_ip],
             )
             .await
         {
@@ -321,8 +335,8 @@ impl AuthorizationService {
         };
         let mut seen = HashSet::new();
         for r in rows {
-            let username: String = r.get(0);
-            if !seen.insert(username.clone()) {
+            let name: String = r.get(0);
+            if !seen.insert(name.clone()) {
                 continue;
             }
             let max: i32 = r.get(1);
@@ -330,7 +344,7 @@ impl AuthorizationService {
             if active >= max as i64 {
                 info!(
                     "🚫 Endpoint {} at concurrent limit ({}/{} active), rejecting new call",
-                    username, active, max
+                    name, active, max
                 );
                 return Some("endpoint_concurrent_limit_exceeded".to_string());
             }
