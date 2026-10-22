@@ -188,10 +188,9 @@ pub async fn create_sip_endpoint(
         // build_bridge/L3 SELECTIVO en inbound_routing.rs): CHECK_CALL_LIMIT
         // de Kamailio no está en ese camino. Hay que regenerar el dialplan
         // para que el `limit` nativo (mod_hash) tome host/puerto/limite.
-        if let Err(e) = crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(
-            pool.get_ref(),
-        )
-        .await
+        if let Err(e) =
+            crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(pool.get_ref())
+                .await
         {
             warn!(error = %e, "Failed to regenerate inbound dialplan after create");
         }
@@ -344,10 +343,9 @@ pub async fn update_sip_endpoint(
         // Idem create: el `limit` nativo embebido en el dialplan entrante
         // necesita regenerarse para reflejar host/puerto/max_concurrent_calls
         // nuevos (ver nota en create_sip_endpoint).
-        if let Err(e) = crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(
-            pool.get_ref(),
-        )
-        .await
+        if let Err(e) =
+            crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(pool.get_ref())
+                .await
         {
             warn!(error = %e, "Failed to regenerate inbound dialplan after update");
         }
@@ -411,10 +409,9 @@ pub async fn delete_sip_endpoint(
         // Sin esto, el dialplan generado conserva el bloque pbx-range-* del
         // endpoint borrado (bridge directo a un host que ya no es una
         // troncal valida).
-        if let Err(e) = crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(
-            pool.get_ref(),
-        )
-        .await
+        if let Err(e) =
+            crate::handlers::inbound_routing::sync_inbound_routes_to_freeswitch(pool.get_ref())
+                .await
         {
             warn!(error = %e, "Failed to regenerate inbound dialplan after delete");
         }
@@ -943,8 +940,121 @@ fn validate_call_limit(
     Ok(())
 }
 
-/// Normalize + validate DID ranges ("174020,174021"): digits and commas only.
-/// Returns canonical "a,b,c" (trimmed, no empties, no self-overlap) or "".
+/// Decompose the inclusive numeric range [start, end] (both `width` digits
+/// wide) into the minimal set of digit-prefixes that covers exactly those
+/// numbers and nothing else — e.g. (17402010, 17402099, 8) ->
+/// ["1740201", "1740202", ..., "1740209"]. Same idea as CIDR summarization
+/// for IP ranges, in base 10: greedily take the largest 10^k-aligned block
+/// at the current position that still fits inside the range.
+fn decimal_range_to_prefixes(start: u64, end: u64, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = start;
+    while cur <= end {
+        let mut k: u32 = 0;
+        loop {
+            let next_k = k + 1;
+            if (next_k as usize) >= width {
+                break; // never collapse down to an empty "match everything" prefix
+            }
+            let step = 10u64.pow(next_k);
+            if cur % step == 0 {
+                if let Some(block_end) = cur.checked_add(step - 1) {
+                    if block_end <= end {
+                        k = next_k;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        let block_size = 10u64.pow(k);
+        let prefix_len = width - k as usize;
+        let prefix_num = cur / block_size;
+        out.push(format!("{:0w$}", prefix_num, w = prefix_len));
+        match cur.checked_add(block_size) {
+            Some(v) => cur = v,
+            None => break,
+        }
+    }
+    out
+}
+
+/// Parse one did_ranges entry into the set of digit-prefixes it represents.
+/// Accepts: a bare digit string ("174020", a 10^k block, or a full-length
+/// single DID), or an inclusive numeric range "174020010-174020099" (equal-
+/// length numeric bounds, start <= end), expanded via
+/// [`decimal_range_to_prefixes`].
+fn parse_did_entry(entry: &str) -> Result<Vec<String>, AppError> {
+    if let Some((a, b)) = entry.split_once('-') {
+        let (a, b) = (a.trim(), b.trim());
+        let valid_bounds = !a.is_empty()
+            && !b.is_empty()
+            && a.len() == b.len()
+            && a.chars().all(|c| c.is_ascii_digit())
+            && b.chars().all(|c| c.is_ascii_digit());
+        if !valid_bounds {
+            return Err(AppError::Validation(format!(
+                "did_ranges range '{}' must be 'START-END' with equal-length numeric bounds",
+                entry
+            )));
+        }
+        let width = a.len();
+        let start: u64 = a.parse().map_err(|_| {
+            AppError::Validation(format!("did_ranges range '{}' is not numeric", entry))
+        })?;
+        let end: u64 = b.parse().map_err(|_| {
+            AppError::Validation(format!("did_ranges range '{}' is not numeric", entry))
+        })?;
+        if start > end {
+            return Err(AppError::Validation(format!(
+                "did_ranges range '{}' has start > end",
+                entry
+            )));
+        }
+        Ok(decimal_range_to_prefixes(start, end, width))
+    } else if !entry.is_empty() && entry.chars().all(|c| c.is_ascii_digit()) {
+        Ok(vec![entry.to_string()])
+    } else {
+        Err(AppError::Validation(format!(
+            "did_ranges must be digit prefixes, single DIDs, or 'START-END' ranges separated by commas (bad: '{}')",
+            entry
+        )))
+    }
+}
+
+/// Expand a full did_ranges value ("174020,17402001,17402010-17402099")
+/// into its flat list of digit-prefixes, propagating the first parse error.
+/// Used for conflict-checking a value that has already passed
+/// [`normalize_did_ranges`] (so entries are known well-formed).
+pub(crate) fn expand_did_ranges_strict(raw: &str) -> Result<Vec<String>, AppError> {
+    let mut out = Vec::new();
+    for part in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        out.extend(parse_did_entry(part)?);
+    }
+    Ok(out)
+}
+
+/// Same as [`expand_did_ranges_strict`] but silently skips malformed entries
+/// instead of erroring. Used defensively when reading already-stored values
+/// (own data, legacy rows, or dialplan generation) where failing outright
+/// would be worse than ignoring garbage.
+pub(crate) fn expand_did_ranges_lenient(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for part in raw.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        if let Ok(prefixes) = parse_did_entry(part) {
+            out.extend(prefixes);
+        }
+    }
+    out
+}
+
+/// Normalize + validate DID ranges: digits-only prefixes, single full-length
+/// DIDs, or "START-END" numeric ranges, separated by commas. Returns
+/// canonical "a,b,c" (trimmed, no empties, no exact duplicates) or "".
+/// Nesting between entries (e.g. "174020" and "17402001") is allowed on
+/// purpose — it's how a block gets subdivided into individually-owned DIDs
+/// plus a remainder range; longest-prefix-match at dialplan-generation time
+/// resolves which entry wins deterministically.
 fn normalize_did_ranges(raw: &str) -> Result<String, AppError> {
     let parts: Vec<&str> = raw
         .split(',')
@@ -952,20 +1062,14 @@ fn normalize_did_ranges(raw: &str) -> Result<String, AppError> {
         .filter(|p| !p.is_empty())
         .collect();
     for p in &parts {
-        if !p.chars().all(|c| c.is_ascii_digit()) {
-            return Err(AppError::Validation(format!(
-                "did_ranges must be digit prefixes separated by commas (bad: '{}')",
-                p
-            )));
-        }
+        parse_did_entry(p)?;
     }
-    // Self-overlap within the same value (e.g. "1740,174020" is ambiguous)
     for (i, a) in parts.iter().enumerate() {
         for b in parts.iter().skip(i + 1) {
-            if a == b || a.starts_with(b) || b.starts_with(a) {
+            if a == b {
                 return Err(AppError::Validation(format!(
-                    "did_ranges '{}' and '{}' overlap each other",
-                    a, b
+                    "did_ranges '{}' is duplicated",
+                    a
                 )));
             }
         }
@@ -989,7 +1093,15 @@ fn validate_default_caller_id(raw: &str) -> Result<Option<String>, AppError> {
 }
 
 /// Pure overlap check: which (owner, owner_prefix) pairs collide with `new`.
-/// Collision = equal, prefix-of, or extension-of (ambiguous ownership).
+/// `new` and each `existing` prefix list must already be expanded (see
+/// [`expand_did_ranges_strict`]/[`expand_did_ranges_lenient`]) down to flat
+/// digit-prefixes, so an exact match here means a genuine identical-block
+/// collision between two different owners — true ambiguity, since there's
+/// no length difference for longest-prefix-match to break the tie on.
+/// Nested entries of different lengths are NOT conflicts: that's the
+/// intended way to carve a single DID (or sub-range) out of a wider block
+/// owned by someone else; dialplan generation resolves it deterministically
+/// by matching the longest prefix first.
 fn find_range_conflicts<'a>(
     new: &[String],
     existing: &'a [(String, Vec<String>)],
@@ -998,7 +1110,7 @@ fn find_range_conflicts<'a>(
     for p in new {
         for (owner, prefixes) in existing {
             for q in prefixes {
-                if p == q || p.starts_with(q.as_str()) || q.starts_with(p.as_str()) {
+                if p == q {
                     out.push((p.clone(), owner.clone(), q.clone()));
                 }
             }
@@ -1014,11 +1126,14 @@ async fn check_did_range_conflicts(
     self_id: Option<Uuid>,
     canonical: &str,
 ) -> Result<(), AppError> {
-    let new: Vec<String> = if canonical.is_empty() {
+    if canonical.is_empty() {
         return Ok(());
-    } else {
-        canonical.split(',').map(|s| s.to_string()).collect()
-    };
+    }
+    // `canonical` already passed normalize_did_ranges, so every entry is
+    // well-formed and this can't fail — expand_did_ranges_strict is used
+    // (rather than the lenient variant) purely so a future bug here surfaces
+    // as an error instead of silently dropping entries from the check.
+    let new: Vec<String> = expand_did_ranges_strict(canonical)?;
     let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
         r#"SELECT id, name, did_ranges FROM sip_endpoints WHERE COALESCE(did_ranges,'') <> ''
            -- del mismo grupo = mismo dueno: el solape interno es legitimo (failover)
@@ -1034,13 +1149,8 @@ async fn check_did_range_conflicts(
         .into_iter()
         .filter(|(id, _, _)| Some(*id) != self_id)
         .map(|(_, name, ranges)| {
-            let prefixes = ranges
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .map(|p| p.to_string())
-                .collect();
+            // Lenient: a legacy/malformed row shouldn't block an unrelated save.
+            let prefixes = expand_did_ranges_lenient(&ranges.unwrap_or_default());
             (name, prefixes)
         })
         .collect();
@@ -1050,10 +1160,11 @@ async fn check_did_range_conflicts(
     }
     let detail: Vec<String> = conflicts
         .iter()
-        .map(|(p, owner, q)| format!("'{}' se solapa con '{}' de '{}'", p, q, owner))
+        .map(|(p, owner, q)| format!("'{}' coincide exactamente con '{}' de '{}'", p, q, owner))
         .collect();
     Err(AppError::Validation(format!(
-        "Rango DID ya asignado: {}. Cada prefijo debe pertenecer a una sola PBX.",
+        "Rango DID ya asignado: {}. Un mismo número/prefijo no puede pertenecer a dos PBX distintas \
+         (subdividir un bloque en DIDs mas especificos de otra PBX SI esta permitido).",
         detail.join("; ")
     )))
 }
@@ -1393,16 +1504,18 @@ mod tests {
     }
 
     #[test]
-    fn narrower_prefix_over_owned_range_conflicts() {
-        // "1740205" vive dentro de "174020" -> ambiguo aunque longest-match lo resolveria
+    fn narrower_prefix_nested_in_owned_range_is_allowed() {
+        // "1740205" vive dentro de "174020" -> ya no es conflicto: es la forma
+        // intencional de subdividir un bloque en un DID mas especifico de otra
+        // PBX. Longest-prefix-match en el dialplan resuelve el ganador.
         let c = find_range_conflicts(&["1740205".to_string()], &existing());
-        assert_eq!(c.len(), 1);
+        assert!(c.is_empty());
     }
 
     #[test]
-    fn wider_prefix_covering_owned_range_conflicts() {
+    fn wider_prefix_covering_owned_range_is_allowed() {
         let c = find_range_conflicts(&["1740".to_string()], &existing());
-        assert_eq!(c.len(), 1);
+        assert!(c.is_empty());
     }
 
     #[test]
@@ -1412,13 +1525,87 @@ mod tests {
     }
 
     #[test]
-    fn self_overlap_is_rejected() {
-        assert!(normalize_did_ranges("1740,174020").is_err());
+    fn nesting_is_allowed_but_exact_duplicates_are_rejected() {
+        // "1740" y "174020" ya no son auto-conflicto: nido intencional.
+        assert_eq!(normalize_did_ranges("1740,174020").unwrap(), "1740,174020");
         assert!(normalize_did_ranges("174020,174020").is_err());
         assert_eq!(
             normalize_did_ranges(" 174020 , 163751 ").unwrap(),
             "174020,163751"
         );
+    }
+
+    #[test]
+    fn single_did_entry_round_trips_as_its_own_full_length_prefix() {
+        assert_eq!(normalize_did_ranges("17402001").unwrap(), "17402001");
+        assert_eq!(
+            expand_did_ranges_strict("17402001").unwrap(),
+            vec!["17402001".to_string()]
+        );
+    }
+
+    #[test]
+    fn explicit_range_expands_to_minimal_decade_prefixes() {
+        assert_eq!(
+            normalize_did_ranges("17402010-17402099").unwrap(),
+            "17402010-17402099"
+        );
+        let expanded = expand_did_ranges_strict("17402010-17402099").unwrap();
+        assert_eq!(
+            expanded,
+            vec![
+                "1740201", "1740202", "1740203", "1740204", "1740205", "1740206", "1740207",
+                "1740208", "1740209",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn explicit_range_rejects_bad_bounds() {
+        assert!(parse_did_entry("17402099-17402010").is_err()); // start > end
+        assert!(parse_did_entry("1740201-174020").is_err()); // unequal length
+        assert!(parse_did_entry("174020a-174020b").is_err()); // non numeric
+    }
+
+    #[test]
+    fn carrier_subdivision_example_has_no_cross_owner_conflicts() {
+        // 17402000 -> cliente A, 17402001 -> B, 17402002 -> C,
+        // 17402010-17402099 -> D. Ninguno se solapa entre si.
+        let owned = vec![
+            (
+                "Cliente A".to_string(),
+                expand_did_ranges_strict("17402000").unwrap(),
+            ),
+            (
+                "Cliente B".to_string(),
+                expand_did_ranges_strict("17402001").unwrap(),
+            ),
+            (
+                "Cliente C".to_string(),
+                expand_did_ranges_strict("17402002").unwrap(),
+            ),
+            (
+                "Cliente D".to_string(),
+                expand_did_ranges_strict("17402010-17402099").unwrap(),
+            ),
+        ];
+        for i in 0..owned.len() {
+            for j in 0..owned.len() {
+                if i == j {
+                    continue;
+                }
+                let c = find_range_conflicts(&owned[i].1, &[owned[j].clone()]);
+                assert!(
+                    c.is_empty(),
+                    "{} vs {} should not conflict",
+                    owned[i].0,
+                    owned[j].0
+                );
+            }
+        }
     }
 
     #[test]

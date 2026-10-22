@@ -601,19 +601,17 @@ fn legs_for(
 
 /// Parse (prefijo, pbx, host, port) desde did_ranges de las PBXs,
 /// ordenado longest-match (prefijo mas largo primero, luego alfabetico).
+/// Cada entrada de did_ranges puede ser un prefijo/bloque, un DID
+/// individual de largo completo, o un rango numerico explicito
+/// "START-END" — expand_did_ranges_lenient() las reduce todas a prefijos
+/// planos (ignorando silenciosamente cualquier entrada mal formada).
 fn collect_range_prefixes(
     pbxs: &[(String, String, i32, String)],
 ) -> Vec<(String, String, String, i32)> {
     let mut ranges: Vec<(String, String, String, i32)> = Vec::new();
     for (name, host, port, did_ranges) in pbxs {
-        for p in did_ranges
-            .split(',')
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-        {
-            if p.chars().all(|c| c.is_ascii_digit()) {
-                ranges.push((p.to_string(), name.clone(), host.clone(), *port));
-            }
+        for p in crate::handlers::sip_endpoint::expand_did_ranges_lenient(did_ranges) {
+            ranges.push((p, name.clone(), host.clone(), *port));
         }
     }
     ranges.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(&b.0)));
@@ -1128,18 +1126,15 @@ pub(crate) async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(
             .await
             .unwrap_or_default();
             // (prefijo, legs[(host,port,nombre)], dueña, max_concurrent_calls) ordenado longest-match
+            // did_ranges puede traer prefijos/bloques, DIDs individuales de
+            // largo completo, o rangos "START-END" — se expanden todos a
+            // prefijos planos antes de ordenar por longest-match.
             let mut ranges: Vec<(String, Vec<(String, i32, String)>, Uuid, i32)> = Vec::new();
             for (eid, name, host, port, did_ranges, max_calls) in &pbxs {
-                for p in did_ranges
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|p| !p.is_empty())
-                {
-                    if p.chars().all(|c| c.is_ascii_digit()) {
-                        // legs: miembros del grupo (prioridad) o la duena sola
-                        let legs = legs_for(eid, host, *port, name, &owner_groups, &mates);
-                        ranges.push((p.to_string(), legs, *eid, *max_calls));
-                    }
+                for p in crate::handlers::sip_endpoint::expand_did_ranges_lenient(did_ranges) {
+                    // legs: miembros del grupo (prioridad) o la duena sola
+                    let legs = legs_for(eid, host, *port, name, &owner_groups, &mates);
+                    ranges.push((p, legs, *eid, *max_calls));
                 }
             }
             ranges.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then(a.0.cmp(&b.0)));
@@ -1173,8 +1168,12 @@ pub(crate) async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(
                         "    <extension name=\"pbx-range-{}\">\n",
                         escape_xml(prefix)
                     ));
+                    // ".*" (no ".+"): si `prefix` ya es un DID de largo
+                    // completo (rango de un solo numero), debe matchear
+                    // exactamente ese numero y no solo numeros mas largos
+                    // que lo extienden.
                     xml.push_str(&format!(
-                        "      <condition field=\"destination_number\" expression=\"^({}.+)$\">\n",
+                        "      <condition field=\"destination_number\" expression=\"^({}.*)$\">\n",
                         escape_xml(prefix)
                     ));
                     xml.push_str(&format!("        <action application=\"log\" data=\"INFO AUTO-L3: rango {} -> [{}] (${{caller_id_number}} -> ${{destination_number}})\"/>\n", escape_xml(prefix), escape_xml(&names.join(","))));
@@ -1244,8 +1243,12 @@ pub(crate) async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(
                 xml.push_str("      <condition field=\"destination_number\" expression=\"^_pbx_limit_exceeded_$\">\n");
                 xml.push_str("        <action application=\"log\" data=\"WARNING AUTO-L3: límite de canales excedido, PBX ${limit_id} (max=${limit_max})\"/>\n");
                 xml.push_str("        <action application=\"playback\" data=\"tone_stream://%(500,500,480,620);loops=3\"/>\n");
-                xml.push_str("        <action application=\"set\" data=\"sip_reason=Q.850;cause=42\"/>\n");
-                xml.push_str("        <action application=\"respond\" data=\"503 Service Unavailable\"/>\n");
+                xml.push_str(
+                    "        <action application=\"set\" data=\"sip_reason=Q.850;cause=42\"/>\n",
+                );
+                xml.push_str(
+                    "        <action application=\"respond\" data=\"503 Service Unavailable\"/>\n",
+                );
                 xml.push_str("      </condition>\n");
                 xml.push_str("    </extension>\n\n");
             }

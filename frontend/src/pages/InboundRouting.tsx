@@ -37,6 +37,55 @@ import {
   Network,
 } from 'lucide-react'
 
+// Decompose the inclusive numeric range [start, end] (both `width` digits
+// wide) into the minimal set of digit-prefixes that cover exactly those
+// numbers — mirrors decimal_range_to_prefixes() in the Rust backend
+// (rust-backend/crates/apolo-api/src/handlers/sip_endpoint.rs) so this
+// preview matches the dialplan the backend actually generates.
+function decimalRangeToPrefixes(start: number, end: number, width: number): string[] {
+  const out: string[] = []
+  let cur = start
+  while (cur <= end) {
+    let k = 0
+    for (;;) {
+      const nextK = k + 1
+      if (nextK >= width) break
+      const step = 10 ** nextK
+      if (cur % step === 0 && cur + step - 1 <= end) {
+        k = nextK
+        continue
+      }
+      break
+    }
+    const blockSize = 10 ** k
+    const prefixLen = width - k
+    const prefixNum = Math.floor(cur / blockSize)
+    out.push(String(prefixNum).padStart(prefixLen, '0'))
+    cur += blockSize
+  }
+  return out
+}
+
+// One did_ranges entry -> flat digit-prefixes. Accepts a bare prefix/DID, or
+// a "START-END" numeric range (equal-length bounds); malformed entries are
+// dropped silently (defensive preview, same as expand_did_ranges_lenient()).
+function expandDidEntry(entry: string): string[] {
+  const dash = entry.indexOf('-')
+  if (dash > 0) {
+    const a = entry.slice(0, dash).trim()
+    const b = entry.slice(dash + 1).trim()
+    if (a.length > 0 && a.length === b.length && /^\d+$/.test(a) && /^\d+$/.test(b)) {
+      const start = Number(a)
+      const end = Number(b)
+      if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && start <= end) {
+        return decimalRangeToPrefixes(start, end, a.length)
+      }
+    }
+    return []
+  }
+  return /^\d+$/.test(entry) ? [entry] : []
+}
+
 export default function InboundRoutingPage() {
   const queryClient = useQueryClient()
 
@@ -84,8 +133,10 @@ export default function InboundRoutingPage() {
     const out: { pbx: string; host: string; port: number; prefix: string }[] = []
     for (const ep of endpoints as SipEndpoint[]) {
       if (ep.endpoint_type !== 'trunk' || ep.auth_mode !== 'ip' || !ep.enabled) continue
-      for (const p of (ep.did_ranges || '').split(',').map((s) => s.trim()).filter(Boolean)) {
-        out.push({ pbx: ep.name, host: ep.host || '', port: ep.port, prefix: p })
+      for (const entry of (ep.did_ranges || '').split(',').map((s) => s.trim()).filter(Boolean)) {
+        for (const p of expandDidEntry(entry)) {
+          out.push({ pbx: ep.name, host: ep.host || '', port: ep.port, prefix: p })
+        }
       }
     }
     out.sort((a, b) => b.prefix.length - a.prefix.length || a.prefix.localeCompare(b.prefix))

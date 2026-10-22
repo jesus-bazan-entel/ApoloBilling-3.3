@@ -15,6 +15,7 @@ import {
 } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
+import Tooltip from '../components/Tooltip'
 import {
   Phone,
   Plus,
@@ -39,6 +40,7 @@ import {
   ChevronUp,
   Filter,
   Search,
+  Info,
 } from 'lucide-react'
 import type {
   SipEndpoint,
@@ -994,18 +996,54 @@ function EndpointModal({
                 </select>
               </div>
               <div className="col-span-3">
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                <label className="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] mb-1">
                   Rangos DID propios
+                  <Tooltip
+                    content={
+                      <div className="space-y-2">
+                        <p className="font-semibold">Qué números de esta PBX enrutar automáticamente</p>
+                        <p>Separá las entradas con coma. Admite 3 formatos, combinables en el mismo campo:</p>
+                        <ul className="space-y-1">
+                          <li>
+                            <code className="bg-black/10 px-1 rounded">174020</code> → bloque completo
+                            (equivale a 17402000-17402099, 100 números)
+                          </li>
+                          <li>
+                            <code className="bg-black/10 px-1 rounded">17402001</code> → un solo DID
+                            individual
+                          </li>
+                          <li>
+                            <code className="bg-black/10 px-1 rounded">17402010-17402099</code> → rango
+                            explícito (cualquier cantidad de números, no solo decenas/centenas)
+                          </li>
+                        </ul>
+                        <p className="font-semibold">Ejemplo real: subdividir un bloque entre 4 clientes</p>
+                        <p className="font-mono bg-black/10 rounded px-2 py-1">
+                          17402000,17402001,17402002,17402010-17402099
+                        </p>
+                        <p>
+                          → <code>17402000</code>, <code>17402001</code> y <code>17402002</code> van cada
+                          uno a su propia PBX; el resto del bloque (<code>17402010</code> a{' '}
+                          <code>17402099</code>) va a una cuarta. Si dos PBX distintas tienen entradas que se
+                          superponen, gana la más específica (más dígitos) — así se reparte un bloque sin
+                          pisarse. Vacío = esta PBX no recibe DIDs por este mecanismo.
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Info className="w-3.5 h-3.5 text-[var(--color-text-tertiary)]" />
+                  </Tooltip>
                 </label>
                 <input
                   type="text"
                   value={formData.did_ranges}
                   onChange={(e) => setFormData({ ...formData, did_ranges: e.target.value })}
-                  placeholder="174020,174021"
+                  placeholder="174020, 17402001, 17402010-17402099"
                   className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Prefijos separados por coma. El L3 selectivo enruta cada prefijo SOLO a esta PBX. Vacío = sin rangos.
+                  Prefijo (bloque), DID individual, o rango "inicio-fin" — separados por coma. Pasá el
+                  mouse sobre <Info className="inline w-3 h-3" /> para ver ejemplos. Vacío = sin rangos.
                 </p>
               </div>
               <div className="col-span-3">
