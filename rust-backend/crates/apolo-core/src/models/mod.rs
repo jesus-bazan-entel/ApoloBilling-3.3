@@ -13,7 +13,7 @@ pub mod sip_device;
 pub mod user;
 pub mod zone;
 
-pub use account::{Account, AccountStatus, AccountType};
+pub use account::{Account, AccountStats, AccountStatus, AccountType};
 pub use audit::{AuditLog, AuditLogBuilder, AuditLogData};
 pub use cdr::{ActiveCall, Cdr};
 pub use internal_route::{InternalRoute, InternalRouteWithEndpoints, SystemEndpoint};

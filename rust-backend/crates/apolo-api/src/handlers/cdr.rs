@@ -17,6 +17,7 @@ use apolo_core::{
     traits::{CdrRepository, PaginatedResponse, Repository},
     AppResult,
 };
+use apolo_auth::AuthenticatedUser;
 use apolo_db::repositories::cdr_repo::PgCdrRepository;
 use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use futures::{stream, StreamExt};
@@ -39,6 +40,7 @@ use validator::Validate;
 /// ```
 #[instrument(skip(db, query))]
 pub async fn list_cdrs(
+    _user: AuthenticatedUser,
     query: Query<CdrFilterParams>,
     db: Data<PgPool>,
 ) -> Result<Json<PaginatedResponse<CdrResponse>>> {
@@ -116,7 +118,11 @@ pub async fn list_cdrs(
 /// GET /api/cdrs/12345
 /// ```
 #[instrument(skip(db))]
-pub async fn get_cdr(path: Path<i64>, db: Data<PgPool>) -> Result<Json<ApiResponse<CdrResponse>>> {
+pub async fn get_cdr(
+    _user: AuthenticatedUser,
+    path: Path<i64>,
+    db: Data<PgPool>,
+) -> Result<Json<ApiResponse<CdrResponse>>> {
     let cdr_id = path.into_inner();
     debug!("Fetching CDR with id: {}", cdr_id);
 
@@ -148,7 +154,11 @@ pub async fn get_cdr(path: Path<i64>, db: Data<PgPool>) -> Result<Json<ApiRespon
 /// ```
 #[allow(clippy::too_many_lines)]
 #[instrument(skip(db, query))]
-pub async fn export_cdrs(query: Query<CdrExportParams>, db: Data<PgPool>) -> Result<HttpResponse> {
+pub async fn export_cdrs(
+    _user: AuthenticatedUser,
+    query: Query<CdrExportParams>,
+    db: Data<PgPool>,
+) -> Result<HttpResponse> {
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid export parameters: {}", e);
@@ -206,6 +216,7 @@ pub async fn export_cdrs(query: Query<CdrExportParams>, db: Data<PgPool>) -> Res
 /// ```
 #[instrument(skip(db, query))]
 pub async fn get_cdr_stats(
+    _user: AuthenticatedUser,
     query: Query<StatsParams>,
     db: Data<PgPool>,
 ) -> Result<Json<ApiResponse<CdrStats>>> {
@@ -283,8 +294,8 @@ async fn create_csv_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    params.start_date,
-                    params.end_date,
+                    parse_start_date(&params.start_date),
+                    parse_end_date(&params.end_date),
                     BATCH_SIZE,
                     offset,
                 )
@@ -382,8 +393,8 @@ async fn create_json_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    params.start_date,
-                    params.end_date,
+                    parse_start_date(&params.start_date),
+                    parse_end_date(&params.end_date),
                     BATCH_SIZE,
                     offset,
                 )
@@ -458,8 +469,8 @@ async fn create_jsonl_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    params.start_date,
-                    params.end_date,
+                    parse_start_date(&params.start_date),
+                    parse_end_date(&params.end_date),
                     BATCH_SIZE,
                     offset,
                 )

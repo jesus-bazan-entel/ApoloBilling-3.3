@@ -41,7 +41,11 @@ CREATE TABLE public.accounts (
     created_by character varying(100) DEFAULT 'system'::character varying,
     updated_by character varying(100) DEFAULT 'system'::character varying,
     plan_id integer,
-    customer_phone character varying(50)
+    customer_phone character varying(50),
+    cod_ped character varying(50),
+    departamento character varying(100),
+    provincia character varying(100),
+    distrito character varying(100)
 );
 
 
@@ -1525,13 +1529,6 @@ CREATE INDEX idx_audit_logs_username ON public.audit_logs USING btree (username)
 
 
 --
--- Name: idx_cdr_account; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_cdr_account ON public.cdrs USING btree (account_id);
-
-
---
 -- Name: idx_cdr_account_start; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1546,32 +1543,17 @@ CREATE INDEX idx_cdr_callee ON public.cdrs USING btree (called_number);
 
 
 --
--- Name: idx_cdr_caller; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_cdr_caller ON public.cdrs USING btree (caller_number);
-
-
---
 -- Name: idx_cdr_reservation; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_cdr_reservation ON public.cdrs USING btree (reservation_id);
 
 
---
--- Name: idx_cdr_start_time; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_cdr_start_time ON public.cdrs USING btree (start_time);
-
-
---
--- Name: idx_cdr_uuid; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_cdr_uuid ON public.cdrs USING btree (call_uuid);
-
+-- Apolo: idx_cdr_account / idx_cdr_caller / idx_cdr_start_time / idx_cdr_uuid
+-- removed — exact duplicates of idx_cdrs_account_id / idx_cdrs_caller /
+-- idx_cdrs_start_time / idx_cdrs_uuid below (same columns, same table).
+-- Each pair doubled write-time index maintenance on cdrs with zero query
+-- benefit. See migration 015_drop_duplicate_cdr_indexes.sql for existing DBs.
 
 --
 -- Name: idx_cdrs_account_id; Type: INDEX; Schema: public; Owner: -

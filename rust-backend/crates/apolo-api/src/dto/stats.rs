@@ -176,3 +176,102 @@ pub struct TrafficByDirectionResponse {
     /// Outbound traffic stats
     pub outbound: TrafficStats,
 }
+
+// ============================================================================
+// NOC overview (carrier-class dashboard)
+// ============================================================================
+
+/// Call counters for one time window. Ratios (ASR, ACD, NER) are derived by
+/// the client from these raw counts so every view computes them the same way.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NocTotals {
+    /// Call attempts (every CDR)
+    pub attempts: i64,
+    /// Calls with an answer_time
+    pub answered: i64,
+    /// Billed seconds of answered calls
+    pub billsec: i64,
+    /// Unanswered calls whose hangup cause is a network failure (for NER)
+    pub network_failures: i64,
+    /// Billed amount
+    pub revenue: Decimal,
+}
+
+/// Headline counters: today so far, the comparison day up to the same time of
+/// day (the fair comparison), and the whole comparison day.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocKpis {
+    pub today: NocTotals,
+    pub compare_same_time: NocTotals,
+    pub compare_full_day: NocTotals,
+}
+
+/// Values of one 15-minute slot
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NocSlotValues {
+    pub attempts: i64,
+    pub answered: i64,
+    /// Calls in progress at the middle of the slot
+    pub concurrent: i64,
+}
+
+/// One 15-minute slot of the day (local time)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocSlot {
+    /// Slot index 0..95
+    pub slot: i32,
+    /// "HH:MM" local start time
+    pub label: String,
+    /// None for slots that have not finished yet today
+    pub today: Option<NocSlotValues>,
+    pub compare: NocSlotValues,
+}
+
+/// Unanswered calls by hangup cause
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocCause {
+    pub cause: String,
+    /// "network" (counts against NER), "user", "cancel" or "other"
+    pub category: String,
+    pub today: i64,
+    /// Comparison day up to the same time of day
+    pub compare: i64,
+}
+
+/// Traffic of one called-number prefix through one path
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocRange {
+    /// First 4 digits of the called number
+    pub prefix: String,
+    /// "freeswitch" or "direct" (Kamailio straight to the trunk)
+    pub route: String,
+    pub attempts: i64,
+    pub answered: i64,
+    pub billsec: i64,
+    /// Attempts on the comparison day up to the same time of day
+    pub compare_attempts: i64,
+}
+
+/// GET /api/v1/stats/noc
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocOverviewResponse {
+    pub timezone: String,
+    /// "yesterday" or "week" (same weekday last week)
+    pub compare: String,
+    pub day_start: DateTime<Utc>,
+    pub compare_day_start: DateTime<Utc>,
+    pub generated_at: DateTime<Utc>,
+    /// Slot in progress now (not yet in `today`)
+    pub current_slot: i32,
+    pub slot_minutes: i32,
+    pub kpis: NocKpis,
+    pub series: Vec<NocSlot>,
+    pub causes: Vec<NocCause>,
+    pub ranges: Vec<NocRange>,
+}
+
+/// Query string of GET /api/v1/stats/noc
+#[derive(Debug, Clone, Deserialize)]
+pub struct NocOverviewQuery {
+    pub compare: Option<String>,
+}

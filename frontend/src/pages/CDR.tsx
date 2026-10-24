@@ -14,6 +14,9 @@ export default function CDRPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['cdrs', page, filters],
     queryFn: () => fetchCDRs(filters, page, 50),
+    // Refresca automáticamente para mostrar CDRs nuevos sin recargar la página
+    // (mismo patrón que ActiveCalls.tsx). Antes esta query solo corría una vez.
+    refetchInterval: 3000,
   })
 
   const handleExport = async () => {
@@ -158,14 +161,14 @@ export default function CDRPage() {
             onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center px-4 py-2 rounded-lg border transition-colors ${
               showFilters || hasActiveFilters
-                ? 'bg-blue-50 border-blue-300 text-blue-700'
+                ? 'bg-[#fff3ed] border-[#ffbb9a] text-[#d8450b]'
                 : 'border-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
             }`}
           >
             <Filter className="w-4 h-4 mr-2" />
             Filtros
             {hasActiveFilters && (
-              <span className="ml-2 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+              <span className="ml-2 bg-[#ff5a0a] text-white text-xs px-2 py-0.5 rounded-full">
                 {Object.values(filters).filter((v) => v !== undefined && v !== '').length}
               </span>
             )}
@@ -206,7 +209,7 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, start_date: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
             <div>
@@ -219,7 +222,7 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, end_date: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
             <div>
@@ -235,7 +238,7 @@ export default function CDRPage() {
                     setFilters({ ...filters, caller: e.target.value })
                   }
                   placeholder="Ej: 1001"
-                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
                 />
               </div>
             </div>
@@ -252,7 +255,7 @@ export default function CDRPage() {
                     setFilters({ ...filters, callee: e.target.value })
                   }
                   placeholder="Ej: 51987654321"
-                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
                 />
               </div>
             </div>
@@ -265,7 +268,7 @@ export default function CDRPage() {
                 onChange={(e) =>
                   setFilters({ ...filters, direction: e.target.value || undefined })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               >
                 <option value="">Todas</option>
                 <option value="outbound">Saliente</option>
@@ -288,7 +291,7 @@ export default function CDRPage() {
                   })
                 }
                 placeholder="S/0.00"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
             <div>
@@ -306,7 +309,7 @@ export default function CDRPage() {
                   })
                 }
                 placeholder="S/100.00"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
           </div>

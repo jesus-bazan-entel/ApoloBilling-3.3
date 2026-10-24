@@ -126,7 +126,7 @@ export default function DialplanPage() {
       key: 'sip_profile',
       header: 'Perfil SIP',
       render: (route: DialplanRoute) => (
-        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+        <span className="px-2 py-1 text-xs rounded-full bg-[#ffede3] text-[#d8450b]">
           {route.sip_profile}
         </span>
       ),
@@ -149,7 +149,7 @@ export default function DialplanPage() {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setEditingRoute(route)}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-1.5 text-[#ff5a0a] hover:bg-[#fff3ed] rounded-lg transition-colors"
             title="Editar"
           >
             <Pencil className="w-4 h-4" />
@@ -202,7 +202,7 @@ export default function DialplanPage() {
               onClick={() => setActiveTab('from_pbx')}
               className={`px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'from_pbx'
-                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  ? 'border-b-2 border-[#ff5a0a] text-[#ff5a0a]'
                   : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
               }`}
             >
@@ -212,7 +212,7 @@ export default function DialplanPage() {
               onClick={() => setActiveTab('to_kamailio')}
               className={`px-6 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'to_kamailio'
-                  ? 'border-b-2 border-blue-500 text-blue-600'
+                  ? 'border-b-2 border-[#ff5a0a] text-[#ff5a0a]'
                   : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
               }`}
             >
@@ -224,7 +224,7 @@ export default function DialplanPage() {
         <div className="p-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
-              <Network className="w-8 h-8 text-blue-500 mr-4" />
+              <Network className="w-8 h-8 text-[#ff5a0a] mr-4" />
               <div>
                 <p className="text-sm text-[var(--color-text-tertiary)]">Total de Rutas</p>
                 <p className="text-3xl font-bold text-[var(--color-text-primary)]">{routes.length}</p>
@@ -235,7 +235,7 @@ export default function DialplanPage() {
                 setShowCreateModal(true)
                 setError(null)
               }}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
             >
               <Plus className="w-5 h-5 mr-2" />
               Nueva Ruta
@@ -386,7 +386,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                 setFormData({ ...formData, name: e.target.value })
               }
               placeholder="Ej: Ruta Principal, Backup Carrier"
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
             />
           </div>
 
@@ -403,7 +403,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, priority: parseInt(e.target.value) || 100 })
                 }
                 placeholder="100"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
 
@@ -419,7 +419,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, prefix_pattern: e.target.value })
                 }
                 placeholder="^(.+)$"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono text-sm"
               />
             </div>
           </div>
@@ -437,7 +437,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, destination_ip: e.target.value })
                 }
                 placeholder="192.168.1.100"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono text-sm"
               />
             </div>
 
@@ -453,7 +453,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, destination_port: parseInt(e.target.value) || 5060 })
                 }
                 placeholder="5060"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
           </div>
@@ -484,7 +484,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                       value={fo.ip}
                       onChange={(e) => updateFailover(idx, 'ip', e.target.value)}
                       placeholder="IP destino failover"
-                      className="flex-1 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                      className="flex-1 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono text-sm"
                     />
                     <input
                       type="number"
@@ -492,7 +492,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                       value={fo.port}
                       onChange={(e) => updateFailover(idx, 'port', parseInt(e.target.value) || 5060)}
                       placeholder="5060"
-                      className="w-24 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                      className="w-24 px-2 py-1.5 border border-[var(--color-border-primary)] rounded focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] text-sm"
                     />
                     <button
                       type="button"
@@ -519,7 +519,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
               onChange={(e) =>
                 setFormData({ ...formData, sip_profile: e.target.value })
               }
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
             >
               <option value="internal">internal</option>
               <option value="external">external</option>
@@ -535,7 +535,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, bypass_media: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
                 />
                 <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Bypass Media</span>
               </label>
@@ -547,7 +547,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, inherit_codec: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
                 />
                 <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Heredar Codec</span>
               </label>
@@ -561,7 +561,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, enable_100rel: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
                 />
                 <span className="ml-2 text-sm text-[var(--color-text-secondary)]">100rel</span>
               </label>
@@ -573,7 +573,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   onChange={(e) =>
                     setFormData({ ...formData, ignore_early_media: e.target.checked })
                   }
-                  className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+                  className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
                 />
                 <span className="ml-2 text-sm text-[var(--color-text-secondary)]">Ignorar Early Media</span>
               </label>
@@ -592,7 +592,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                   setFormData({ ...formData, call_timeout: e.target.value ? parseInt(e.target.value) : undefined })
                 }
                 placeholder="120"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
 
@@ -608,7 +608,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
                     setFormData({ ...formData, source_ip_filter: e.target.value })
                   }
                   placeholder="^10\.10\.22\.18$"
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono text-sm"
                 />
               </div>
             )}
@@ -622,7 +622,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+              className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
             />
             <label htmlFor="enabled" className="ml-2 text-sm text-[var(--color-text-secondary)]">
               Ruta habilitada
@@ -640,7 +640,7 @@ function RouteFormModal({ title, route, context, onClose, onSubmit, isLoading, e
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
             >
               {isLoading ? 'Guardando...' : 'Guardar'}
             </button>

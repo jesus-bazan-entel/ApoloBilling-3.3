@@ -11,7 +11,7 @@ const variantClasses = {
   success: 'bg-green-100 text-green-800 ring-1 ring-green-600/20',
   warning: 'bg-yellow-100 text-yellow-800 ring-1 ring-yellow-600/20',
   error: 'bg-red-100 text-red-800 ring-1 ring-red-600/20',
-  info: 'bg-blue-100 text-blue-800 ring-1 ring-blue-600/20',
+  info: 'bg-[#fff3ed] text-[#d8450b] ring-1 ring-[#ff5a0a]/20',
   default: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] ring-1 ring-slate-600/20',
 }
 

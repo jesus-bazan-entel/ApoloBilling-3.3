@@ -10,6 +10,8 @@ pub struct Config {
     pub database_url: String,
     pub redis_url: String,
     pub freeswitch_servers: Vec<FreeSwitchServer>,
+    /// Kamailio MySQL DB; when set, direct-routed inbound CDRs are imported from acc_cdrs
+    pub kamailio_database_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +40,9 @@ impl Config {
             database_url: env::var("DATABASE_URL")?,
             redis_url: env::var("REDIS_URL")?,
             freeswitch_servers,
+            kamailio_database_url: env::var("KAMAILIO_DATABASE_URL")
+                .ok()
+                .filter(|s| !s.trim().is_empty()),
         })
     }
 

@@ -235,6 +235,58 @@ export interface ApiResponse<T> {
   error?: string
 }
 
+// Global account statistics (matches backend AccountStats)
+export interface AccountStats {
+  total_accounts: number
+  active_accounts: number
+  prepaid_accounts: number
+  postpaid_accounts: number
+  total_balance: number | string
+}
+
+// Provisioning (account + SIP device, individual & bulk)
+export interface ProvisionRequest {
+  customer_name?: string
+  username: string
+  password?: string
+  domain?: string
+  plan_id: number
+  cod_ped?: string
+  departamento?: string
+  provincia?: string
+  distrito?: string
+}
+
+export interface ProvisionResult {
+  account_id: number
+  account_number: string
+  sip_device_id: number
+  sip_username: string
+  sip_domain: string
+  password: string
+  plan_id: number
+}
+
+export type BulkRowStatus = 'created' | 'skipped' | 'error'
+
+export interface BulkRowResult {
+  row: number
+  username: string
+  status: BulkRowStatus
+  message?: string
+  account_id?: number
+  sip_device_id?: number
+  password?: string
+}
+
+export interface BulkProvisionResponse {
+  total: number
+  created: number
+  skipped: number
+  errors: number
+  results: BulkRowResult[]
+}
+
 // Pagination - matches Rust backend PaginatedResponse
 export interface PaginatedResponse<T> {
   data: T[]
@@ -435,6 +487,8 @@ export interface RoutingOutboundRoute {
   trunk_name?: string
   time_schedule?: string
   time_schedule_enabled: boolean
+  strip_digits: number
+  prefix_to_add: string
   enabled: boolean
   kamailio_ruleid?: number
   sync_status: string
@@ -469,6 +523,10 @@ export interface RoutingInboundRoute {
   destination_trunk_id?: string
   destination_trunk_name?: string
   send_early_media?: boolean
+  parallel_trunk_id?: string
+  parallel_trunk_name?: string
+  direct_routing?: boolean
+  fs_numbers?: string[]
   failover_destinations: FailoverDestination[]
   enabled: boolean
   freeswitch_extension_id?: string
@@ -584,6 +642,8 @@ export interface CreateOutboundRouteRequest {
   trunk_id?: string
   time_schedule?: string
   time_schedule_enabled?: boolean
+  strip_digits?: number
+  prefix_to_add?: string
   enabled?: boolean
 }
 
@@ -596,6 +656,8 @@ export interface UpdateOutboundRouteRequest {
   trunk_id?: string
   time_schedule?: string
   time_schedule_enabled?: boolean
+  strip_digits?: number
+  prefix_to_add?: string
   enabled?: boolean
 }
 
@@ -616,6 +678,9 @@ export interface CreateInboundRouteRequest {
   prefix_to_add?: string
   destination_trunk_id?: string
   send_early_media?: boolean
+  parallel_trunk_id?: string
+  direct_routing?: boolean
+  fs_numbers?: string[]
   failover_destinations?: FailoverDestination[]
   enabled?: boolean
 }
@@ -637,6 +702,9 @@ export interface UpdateInboundRouteRequest {
   prefix_to_add?: string
   destination_trunk_id?: string | null
   send_early_media?: boolean
+  parallel_trunk_id?: string
+  direct_routing?: boolean
+  fs_numbers?: string[]
   failover_destinations?: FailoverDestination[]
   enabled?: boolean
 }
@@ -712,4 +780,65 @@ export interface SipStatusLogEntry {
   error_message?: string
   peer_user_agent?: string
   peer_allow_methods?: string
+}
+
+// ============================================================================
+// NOC overview (GET /stats/noc)
+// ============================================================================
+
+export type NocCompare = 'yesterday' | 'week'
+
+export interface NocTotals {
+  attempts: number
+  answered: number
+  billsec: number
+  network_failures: number
+  revenue: string | number
+}
+
+export interface NocSlotValues {
+  attempts: number
+  answered: number
+  concurrent: number
+}
+
+export interface NocSlot {
+  slot: number
+  label: string
+  today: NocSlotValues | null
+  compare: NocSlotValues
+}
+
+export interface NocCause {
+  cause: string
+  category: 'network' | 'user' | 'cancel' | 'other'
+  today: number
+  compare: number
+}
+
+export interface NocRange {
+  prefix: string
+  route: 'freeswitch' | 'direct'
+  attempts: number
+  answered: number
+  billsec: number
+  compare_attempts: number
+}
+
+export interface NocOverview {
+  timezone: string
+  compare: NocCompare
+  day_start: string
+  compare_day_start: string
+  generated_at: string
+  current_slot: number
+  slot_minutes: number
+  kpis: {
+    today: NocTotals
+    compare_same_time: NocTotals
+    compare_full_day: NocTotals
+  }
+  series: NocSlot[]
+  causes: NocCause[]
+  ranges: NocRange[]
 }

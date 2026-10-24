@@ -1,6 +1,12 @@
 import axios from 'axios'
 import type {
+  NocCompare,
+  NocOverview,
   Account,
+  AccountStats,
+  ProvisionRequest,
+  ProvisionResult,
+  BulkProvisionResponse,
   Plan,
   Zone,
   RateCard,
@@ -57,9 +63,53 @@ export const fetchStats = async (): Promise<DashboardStats> => {
 
 // ============== ACCOUNTS ==============
 
+// Returns a flat list of ALL accounts (used by dropdowns/selectors).
+// Fetches every page so accounts with high IDs are never missing.
 export const fetchAccounts = async (): Promise<Account[]> => {
-  const { data } = await api.get('/accounts')
-  // Handle paginated response from Rust backend
+  const first = await api.get('/accounts?page=1&per_page=1000')
+  // Backend returns: { data: [...], pagination: { total, page, per_page, total_pages } }
+  const firstData: Account[] = first.data.data ?? first.data ?? []
+  const totalPages = first.data.pagination?.total_pages ?? 1
+  if (totalPages <= 1) return firstData
+
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, i) =>
+      api.get(`/accounts?page=${i + 2}&per_page=1000`).then(r => r.data.data ?? [])
+    )
+  )
+  return firstData.concat(...rest)
+}
+
+// Server-side paginated account list (used by the Accounts management table).
+export const fetchAccountsPaginated = async (
+  page = 1,
+  perPage = 25,
+  search?: string
+): Promise<PaginatedResponse<Account>> => {
+  const params = new URLSearchParams()
+  params.append('page', page.toString())
+  params.append('per_page', perPage.toString())
+  if (search && search.trim() !== '') {
+    params.append('search', search.trim())
+  }
+
+  const { data } = await api.get(`/accounts?${params.toString()}`)
+
+  if (data.pagination) {
+    return {
+      data: data.data,
+      total: data.pagination.total,
+      page: data.pagination.page,
+      per_page: data.pagination.per_page,
+      total_pages: data.pagination.total_pages,
+    }
+  }
+  return data
+}
+
+// Global account statistics (totals across all accounts, not page-scoped).
+export const fetchAccountStats = async (): Promise<AccountStats> => {
+  const { data } = await api.get('/accounts/stats')
   return data.data || data
 }
 
@@ -224,10 +274,20 @@ export const exportCDRs = async (filters?: CDRFilters, format: 'csv' | 'json' = 
   const params = new URLSearchParams()
   params.append('format', format)
 
+  // The export endpoint reads a bare YYYY-MM-DD as 00:00 UTC for both ends,
+  // so a single-day filter returned nothing. Send the full Lima day (UTC-5,
+  // no DST) explicitly, matching what the CDR list shows.
+  const limaDayBound = (key: string, value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+    if (key === 'start_date') return `${value}T00:00:00-05:00`
+    if (key === 'end_date') return `${value}T23:59:59-05:00`
+    return value
+  }
+
   if (filters) {
     Object.entries(filters).forEach(([key, value]) => {
       if (value !== undefined && value !== '') {
-        params.append(key, value.toString())
+        params.append(key, limaDayBound(key, value.toString()))
       }
     })
   }
@@ -235,7 +295,46 @@ export const exportCDRs = async (filters?: CDRFilters, format: 'csv' | 'json' = 
   const { data } = await api.get(`/cdrs/export?${params.toString()}`, {
     responseType: 'blob',
   })
-  return data
+  if (format !== 'csv') return data
+  return new Blob([adjustCdrCsv(await data.text(), filters)], { type: 'text/csv;charset=utf-8' })
+}
+
+// The export endpoint returns times in UTC and ignores the direction and
+// cost filters; apply both here so the file matches the CDR screen.
+const CSV_TIME_COLUMNS = ['start_time', 'answer_time', 'end_time']
+const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000 // Peru: UTC-5 all year
+
+const toLimaTime = (value: string): string => {
+  if (!value) return value
+  const ms = Date.parse(value)
+  if (Number.isNaN(ms)) return value
+  return new Date(ms + LIMA_OFFSET_MS).toISOString().slice(0, 19).replace('T', ' ')
+}
+
+export const adjustCdrCsv = (csv: string, filters?: CDRFilters): string => {
+  const lines = csv.split('\n').filter((line) => line !== '')
+  if (lines.length === 0) return csv
+  const header = lines[0].split(',')
+  const col = (name: string) => header.indexOf(name)
+  const timeCols = CSV_TIME_COLUMNS.map(col).filter((i) => i >= 0)
+  const dirCol = col('direction')
+  const costCol = col('cost')
+  const direction = filters?.direction?.toLowerCase()
+  const minCost = filters?.min_cost
+  const maxCost = filters?.max_cost
+
+  const rows = lines.slice(1).flatMap((line) => {
+    const cells = line.split(',')
+    if (direction && dirCol >= 0 && cells[dirCol]?.toLowerCase() !== direction) return []
+    const cost = costCol >= 0 && cells[costCol] ? parseFloat(cells[costCol]) : 0
+    if (minCost !== undefined && cost < minCost) return []
+    if (maxCost !== undefined && cost > maxCost) return []
+    timeCols.forEach((i) => {
+      cells[i] = toLimaTime(cells[i])
+    })
+    return [cells.join(',')]
+  })
+  return [header.join(','), ...rows].join('\n') + '\n'
 }
 
 export const fetchCDRStats = async (filters?: CDRFilters): Promise<{
@@ -424,6 +523,11 @@ export interface BalanceTrendPoint {
   total_balance: number
   active_accounts: number
   average_balance: number
+}
+
+export const fetchNocOverview = async (compare: NocCompare): Promise<NocOverview> => {
+  const { data } = await api.get('/stats/noc', { params: { compare } })
+  return data.data
 }
 
 export const fetchCallsByHour = async (): Promise<HourlyCallStats[]> => {
@@ -756,9 +860,36 @@ import type {
 } from '../types'
 
 export const fetchSipDevices = async (accountId?: number): Promise<SipDevice[]> => {
-  const params = accountId ? `?account_id=${accountId}` : ''
+  const params = accountId ? `?account_id=${accountId}&per_page=1000` : '?per_page=1000'
   const { data } = await api.get(`/sip-devices${params}`)
   return data.data || data
+}
+
+// Server-side paginated SIP device list (used by the management table).
+export const fetchSipDevicesPaginated = async (
+  page = 1,
+  perPage = 25,
+  search?: string,
+  accountId?: number
+): Promise<PaginatedResponse<SipDevice>> => {
+  const params = new URLSearchParams()
+  params.append('page', page.toString())
+  params.append('per_page', perPage.toString())
+  if (search && search.trim() !== '') params.append('search', search.trim())
+  if (accountId) params.append('account_id', accountId.toString())
+
+  const { data } = await api.get(`/sip-devices?${params.toString()}`)
+
+  if (data.pagination) {
+    return {
+      data: data.data,
+      total: data.pagination.total,
+      page: data.pagination.page,
+      per_page: data.pagination.per_page,
+      total_pages: data.pagination.total_pages,
+    }
+  }
+  return data
 }
 
 export const fetchSipDevice = async (id: number): Promise<SipDevice> => {
@@ -785,13 +916,22 @@ export const getSipDevicePassword = async (id: number): Promise<SipDeviceWithPas
   return data.data || data
 }
 
-export const regenerateSipDevicePassword = async (id: number): Promise<{
+export const regenerateSipDevicePassword = async (
+  id: number,
+  newPassword?: string,
+): Promise<{
   id: number
   sip_username: string
   sip_domain: string
   new_password: string
 }> => {
-  const { data } = await api.post(`/sip-devices/${id}/regenerate-password`)
+  // When the caller supplies a password, forward it in the JSON body; the
+  // backend uses it as-is. Otherwise send an empty body — the server then
+  // generates a random password (legacy behavior preserved).
+  const body = newPassword && newPassword.trim().length > 0
+    ? { new_password: newPassword.trim() }
+    : {}
+  const { data } = await api.post(`/sip-devices/${id}/regenerate-password`, body)
   return data.data || data
 }
 
@@ -1003,6 +1143,18 @@ export const getTrunkSipHistory = async (
   limit = 20
 ): Promise<SipStatusLogEntry[]> => {
   const { data } = await api.get(`/routing/sip-status/${id}/history?limit=${limit}`)
+  return data.data || data
+}
+
+// ============== PROVISIONING ==============
+
+export const provisionAccount = async (req: ProvisionRequest): Promise<ProvisionResult> => {
+  const { data } = await api.post('/provisioning', req)
+  return data.data || data
+}
+
+export const provisionBulk = async (rows: ProvisionRequest[]): Promise<BulkProvisionResponse> => {
+  const { data } = await api.post('/provisioning/bulk', { rows })
   return data.data || data
 }
 

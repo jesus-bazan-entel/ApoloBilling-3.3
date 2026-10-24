@@ -137,7 +137,7 @@ export default function Users() {
       case 'superadmin':
         return 'bg-red-100 text-red-800 border-red-200'
       case 'admin':
-        return 'bg-blue-100 text-blue-800 border-blue-200'
+        return 'bg-[#ffede3] text-[#d8450b] border-[#ffbb9a]'
       case 'operator':
         return 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] border-[var(--color-border-primary)]'
       default:
@@ -208,7 +208,7 @@ export default function Users() {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => handleEdit(user)}
-            className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded"
+            className="p-1 text-[#ff5a0a] hover:text-[#d8450b] hover:bg-[#fff3ed] rounded"
             title="Editar"
           >
             <Pencil className="w-4 h-4" />
@@ -236,7 +236,7 @@ export default function Users() {
         </div>
         <button
           onClick={handleCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
         >
           <Plus className="w-4 h-4" />
           Nuevo Usuario
@@ -306,7 +306,7 @@ export default function Users() {
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   disabled={!!editingUser}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-[var(--color-bg-secondary)]"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent disabled:bg-[var(--color-bg-secondary)]"
                   required={!editingUser}
                 />
               </div>
@@ -320,7 +320,7 @@ export default function Users() {
                     type="password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
                     required
                     minLength={6}
                   />
@@ -334,7 +334,7 @@ export default function Users() {
                   type="text"
                   value={formData.nombre}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
                 />
               </div>
 
@@ -344,7 +344,7 @@ export default function Users() {
                   type="text"
                   value={formData.apellido}
                   onChange={(e) => setFormData({ ...formData, apellido: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
                 />
               </div>
 
@@ -354,7 +354,7 @@ export default function Users() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
                 />
               </div>
 
@@ -363,7 +363,7 @@ export default function Users() {
                 <select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
                   required
                 >
                   <option value="operator">Operador</option>
@@ -387,7 +387,7 @@ export default function Users() {
                 <button
                   type="submit"
                   disabled={createMutation.isPending || updateMutation.isPending}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {createMutation.isPending || updateMutation.isPending
                     ? 'Guardando...'

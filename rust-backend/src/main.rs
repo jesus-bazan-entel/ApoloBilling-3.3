@@ -9,8 +9,9 @@ use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
     configure_dashboard, configure_dialplan, configure_freeswitch_directory,
     configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
-    configure_management, configure_plans, configure_rate_cards, configure_rates,
-    configure_reservations, configure_settings, configure_sip_devices, configure_stats,
+    configure_management, configure_plans, configure_provisioning, configure_rate_cards,
+    configure_rates, configure_reservations, configure_settings, configure_sip_devices,
+    configure_stats,
     configure_unified_routing, configure_users, create_cdr, ws_handler,
 };
 use apolo_auth::{JwtService, PasswordService};
@@ -69,6 +70,8 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_settings)
             // SIP Device management
             .configure(configure_sip_devices)
+            // Provisioning (account + SIP device, individual & bulk)
+            .configure(configure_provisioning)
             // Unified Routing management (superadmin only)
             .configure(configure_unified_routing)
             // Internal routing (FreeSWITCH <-> Kamailio)

@@ -10,9 +10,9 @@ use crate::dto::{ApiResponse, PaginationParams};
 use actix_web::{web, HttpResponse};
 use apolo_auth::AuthenticatedUser;
 use apolo_core::models::{AccountStatus, AccountType, AuditLogBuilder};
-use apolo_core::traits::{AccountRepository, Repository};
+use apolo_core::traits::{AccountRepository, Repository, SipDeviceRepository};
 use apolo_core::AppError;
-use apolo_db::{PgAccountRepository, PgPlanRepository};
+use apolo_db::{PgAccountRepository, PgPlanRepository, PgSipDeviceRepository};
 use chrono::Utc;
 use sqlx::PgPool;
 use tracing::{debug, info, instrument, warn};
@@ -44,15 +44,29 @@ pub async fn list_accounts(
     // Pass filter parameters as string references
     let status = filters.status.as_deref();
     let account_type = filters.account_type.as_deref();
+    let search = filters.search.as_deref();
 
     // Get accounts with filters
     let (accounts, total) = repo
-        .list_filtered(status, account_type, query.limit(), query.offset())
+        .list_filtered(status, account_type, search, query.limit(), query.offset())
         .await?;
 
     let response_data: Vec<AccountResponse> = accounts.into_iter().map(|a| a.into()).collect();
 
     Ok(HttpResponse::Ok().json(query.paginate(response_data, total)))
+}
+
+/// Global account statistics (totals across all accounts, not page-scoped)
+///
+/// GET /api/v1/accounts/stats
+#[instrument(skip(pool, _user))]
+pub async fn account_stats(
+    pool: web::Data<PgPool>,
+    _user: AuthenticatedUser,
+) -> Result<HttpResponse, AppError> {
+    let repo = PgAccountRepository::new(pool.get_ref().clone());
+    let stats = repo.stats().await?;
+    Ok(HttpResponse::Ok().json(ApiResponse::success(stats)))
 }
 
 /// Create a new account
@@ -245,6 +259,11 @@ pub async fn update_account(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Account {} not found", account_id)))?;
 
+    // Remember the status before applying updates so we can detect a transition
+    // out of "active" (suspended/closed) and force-deregister the account's SIP
+    // devices from FreeSWITCH.
+    let previous_status = account.status;
+
     // Build details for audit log
     let mut changes = serde_json::json!({});
 
@@ -299,6 +318,14 @@ pub async fn update_account(
         "Account updated successfully"
     );
 
+    // If the account just left "active" (suspended or closed), force-deregister
+    // its SIP devices so the change takes effect immediately instead of waiting
+    // for the current registration to expire. New REGISTERs are already blocked
+    // by the directory lookup (INNER JOIN accounts WHERE status = 'active').
+    if previous_status.can_make_calls() && !updated.status.can_make_calls() {
+        flush_account_registrations(pool.get_ref(), updated.id).await;
+    }
+
     // Audit log with changes
     let audit_details = serde_json::json!({
         "account_number": updated.account_number,
@@ -321,6 +348,53 @@ pub async fn update_account(
         response,
         "Account updated successfully",
     )))
+}
+
+/// Force-deregister all SIP devices belonging to an account from FreeSWITCH.
+///
+/// Called when an account transitions out of `active` (suspended/closed) so the
+/// device drops its registration immediately rather than lingering until the
+/// current `Expires` window elapses. Uses `fs_cli` (same idiom as the dialplan
+/// and routing handlers); failures are logged but never fail the account update,
+/// since the directory lookup already blocks any re-REGISTER.
+async fn flush_account_registrations(pool: &PgPool, account_id: i32) {
+    use std::process::Command;
+
+    let repo = PgSipDeviceRepository::new(pool.clone());
+    let devices = match repo.find_by_account(account_id).await {
+        Ok(devices) => devices,
+        Err(e) => {
+            warn!(
+                account_id,
+                error = %e,
+                "Could not load SIP devices to flush registrations after suspension"
+            );
+            return;
+        }
+    };
+
+    for device in devices {
+        let aor = format!("{}@{}", device.sip_username, device.sip_domain);
+        let cmd = format!("sofia profile internal flush_inbound_reg {}", aor);
+        match Command::new("fs_cli").args(["-x", &cmd]).output() {
+            Ok(output) => {
+                info!(
+                    account_id,
+                    aor = %aor,
+                    stdout = %String::from_utf8_lossy(&output.stdout).trim(),
+                    "Flushed SIP registration after account suspension"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    account_id,
+                    aor = %aor,
+                    error = %e,
+                    "Failed to run fs_cli to flush SIP registration"
+                );
+            }
+        }
+    }
 }
 
 /// Top up account balance
@@ -449,6 +523,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         web::scope("/accounts")
             .route("", web::get().to(list_accounts))
             .route("", web::post().to(create_account))
+            .route("/stats", web::get().to(account_stats))
             .route("/{id}", web::get().to(get_account))
             .route("/{id}", web::put().to(update_account))
             .route("/{id}", web::delete().to(delete_account))

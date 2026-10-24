@@ -89,7 +89,7 @@ export default function DataTable<T extends { id?: number | string }>({
     return (
       <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] p-8">
         <div className="flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#ff5a0a]" />
           <span className="ml-3 text-[var(--color-text-tertiary)]">Cargando...</span>
         </div>
       </div>
@@ -107,7 +107,7 @@ export default function DataTable<T extends { id?: number | string }>({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors placeholder:text-[var(--color-text-muted)]"
+              className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] transition-colors placeholder:text-[var(--color-text-muted)]"
             />
           </div>
         </div>

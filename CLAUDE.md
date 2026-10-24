@@ -252,6 +252,70 @@ max_duration = (total / rate_per_minute) × 60 seconds
 - **Inbound normal** (context `to-kamailio`): Skip authorization, no charge
 - **Inbound toll-free** (0800/0801/1800): Account looked up by CALLEE (0800 owner pays)
 
+### Outbound Call Flow (authorization + billing)
+
+An authorized extension dials a PSTN number. The billing engine gates the call on
+**balance reservation** before media, meters it while it runs, and settles the real cost at
+hangup. Authorization has **two triggers** that share one `AuthorizationService.authorize()`
+and are mutually de-duplicated via the `balance_reservations` row keyed by `call_uuid`:
+- **Synchronous (dialplan):** the `from-pbx` dialplan curls the billing engine
+  (`GET /freeswitch/authorize` or `POST /authorize`, :9000) *before* bridging — can refuse
+  the call up front.
+- **Event-driven (ESL):** on `CHANNEL_CREATE` the engine authorizes too; if the dialplan
+  already reserved, it skips, and if the call is denied it sends `uuid_kill … CALL_REJECTED`.
+
+```
+ Extension        FreeSWITCH (from-pbx)    Billing Engine (:9000)         PostgreSQL        Kamailio→Carrier→PSTN
+    │                    │                        │                          │                      │
+    │  INVITE (dialed)   │                        │                          │                      │
+    │───────────────────▶│                        │                          │                      │
+    │                    │  authorize(caller,     │                          │                      │
+    │                    │  callee, uuid)         │                          │                      │
+    │                    │───────────────────────▶│                          │                      │
+    │                    │                        │ outbound_auth_enabled?    │                      │
+    │                    │                        │ account by CALLER ANI ───▶│                      │
+    │                    │                        │ rate via LPM(callee) ────▶│                      │
+    │                    │                        │ reserve = clamp(rate×5m   │                      │
+    │                    │                        │   +8%, $0.30, $30)        │                      │
+    │                    │                        │ create balance_reservation│                      │
+    │                    │                        │ + concurrent-call check ─▶│                      │
+    │   ── DENIED path ──┤   authorized=false     │ (insufficient balance or  │                      │
+    │   486 / hangup     │◀───────────────────────│  max_concurrent reached)  │                      │
+    │◀───────────────────┤   (ESL: uuid_kill)     │                          │                      │
+    │                    │                        │                          │                      │
+    │   ── ALLOWED path ─┤   authorized=true,     │                          │                      │
+    │                    │   max_duration_seconds │  active_calls INSERT ────▶│                      │
+    │                    │   bridge to gateway ───┼──────────────────────────┼─────────────────────▶│
+    │                    │                        │                          │   INVITE → PSTN      │
+    │  ◀═══════ 200 OK / RTP (media) ═════════════╪══════════════════════════╪══════════════════════│
+    │                    │  CHANNEL_ANSWER (ESL)  │                          │                      │
+    │                    │───────────────────────▶│ RealtimeBiller starts;    │                      │
+    │                    │                        │ every 180s extend reserv. │                      │
+    │                    │                        │ if balance left, else hang│                      │
+    │   ── hangup ───────┤                        │                          │                      │
+    │───────────────────▶│  CHANNEL_HANGUP_       │                          │                      │
+    │                    │  COMPLETE (ESL)        │                          │                      │
+    │                    │───────────────────────▶│ stop billing;             │                      │
+    │                    │                        │ CdrGenerator: cost =      │                      │
+    │                    │                        │ billsec×rate; write CDR; ─▶│                      │
+    │                    │                        │ commit consumption,       │                      │
+    │                    │                        │ release excess reservation│                      │
+```
+
+**Key points**
+- **Account = CALLER** for outbound (by ANI); for 0800/0801/1800 toll-free it's the **CALLEE**.
+- **Rate** is Longest-Prefix-Match on the dialed number (see *Rate Matching (LPM)*).
+- **Reservation** holds an estimate (`clamp(rate×5min + 8%, $0.30, $30)`); `max_duration_seconds`
+  caps the call if balance would run out. `RealtimeBiller` extends it every 180s.
+- **Settlement** at `CHANNEL_HANGUP_COMPLETE`: actual cost = `billsec × rate`, CDR written,
+  consumption committed, the unused part of the reservation released.
+- **Fail-open cases** (engine returns `authorized=true`): auth disabled
+  (`outbound_auth_enabled=false`), no account for the ANI, or no rate for the destination —
+  the call proceeds **un-reserved/un-billed**. Only a *failed reservation* (insufficient
+  balance / concurrency cap) actually denies.
+- **Two-leg note:** the engine acts on the a-leg only; b-leg hangups are skipped
+  (`handle_channel_hangup` returns early for the b-leg).
+
 ## API Endpoints (Port 8000)
 
 All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
@@ -429,6 +493,17 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 007_inbound_route_transformation.sql | destination_transform field |
 | 008_inbound_route_trunk_destination.sql | trunk_destination_id field |
 | 009_inbound_early_media.sql | early_media field for inbound routes |
+| 010_inbound_route_kamailio_ruleid.sql | kamailio_ruleid field for inbound routes |
+| 011_outbound_route_prefix.sql | strip_digits / prefix_to_add for outbound routes (per-route number transformation) |
+| 012_inbound_route_parallel_ring.sql | ring_registered_parallel boolean (superseded by 013, column left orphaned) |
+| 013_inbound_route_parallel_trunk.sql | parallel_trunk_id — ring a second trunk in parallel with the inbound destination (simultaneous fork, first answer wins) |
+| 014_account_provisioning_fields.sql | cod_ped / departamento / provincia / distrito on accounts + activates the previously-unused account_name (CLIENTE); used by the Provisioning module |
+| 015_drop_duplicate_cdr_indexes.sql | Drops idx_cdr_account/caller/start_time/uuid — exact duplicates of idx_cdrs_account_id/caller/start_time/uuid on the same table/columns |
+| 016_partition_cdrs.sql | Monthly range partitioning of cdrs on start_time |
+| 017_inbound_direct_routing.sql | `direct_routing` / `fs_numbers` / `kamailio_fs_ruleid` on inbound routes + `kamailio_cdr_sync_state` cursor (Kamailio → trunk without FreeSWITCH; see *Direct inbound routing*) |
+| 018_monitoring_trunk_health.sql | `trunks_online` / `trunks_total` on `monitoring_kamailio_metrics` for the *Trunk Health* card (SIP OPTIONS via Kamailio) |
+
+Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 
 Run migrations:
 ```bash
@@ -645,6 +720,41 @@ VALUES (
 - `.` = any number of digits
 - `[abc]` = any of a, b, c
 
+**Number transformation (outbound + inbound):** `strip_digits` removes N leading digits and
+`prefix_to_add` prepends a string. On inbound routes these are applied in the generated
+`from-kamailio.xml` (`${transformed_number}`); on outbound routes they map to a dedicated
+Kamailio gateway's `dr_gateways.strip`/`pri_prefix` (so they take effect AFTER drouting).
+
+**Direct inbound routing (`direct_routing`, migration 017):** by default every inbound DID goes
+Carrier → Kamailio → FreeSWITCH-SBC → trunk. With `direct_routing=true` the route's `dr_rules` row
+points at a dedicated type=9 gateway on `destination_trunk_id` carrying the route's
+`strip_digits`/`prefix_to_add` and tagged `direct` in `dr_gateways.attrs` field 6, so Kamailio
+delivers straight to the trunk (e.g. FS Legado). Numbers listed in `fs_numbers` (post-transform,
+e.g. Fonowin app users) are diverted in `kamailio.cfg` NEXTHOP via htable `inbound_fs_numbers`
+(table `kamailio.apolo_inbound_fs_numbers`, reloaded every 30s) back to FreeSWITCH through dr group
+**9100** (`kamailio_fs_ruleid`), keeping the parallel ring. Calls that skip FreeSWITCH have no ESL
+events: their CDRs come from Kamailio dialog CDRs (`acc` `cdr_enable`, table `acc_cdrs`, `via=direct`)
+imported by `rust-billing-engine/src/services/kamailio_cdr_sync.rs` (needs `KAMAILIO_DATABASE_URL`).
+`via=fs` rows are kept only for `scripts/validate_kamailio_cdrs.sh`.
+
+**Trunk health (migration 018):** the monitoring collector (`backend/app/monitoring/service.py`,
+`KamailioCollector._probe_trunks`) sends SIP OPTIONS every 60s to each enabled `routing_trunks` row
+through Kamailio's own sockets (`kamcmd tm.t_uac_wait_block`: public trunks from the carrier-facing
+listener, private from the LAN one), updates `routing_trunks.sip_status`/`last_options_*`, logs to
+`routing_sip_status_log` (7-day retention) and stores `trunks_online/total` for the dashboard's
+*Trunk Health* card, which replaced *Dispatcher Health* (the dispatcher table is empty since 2026-10-24).
+
+**Parallel ring (`parallel_trunk_id`):** an inbound route can ring a second destination at the
+same time as the primary (first to answer wins). Selecting a trunk (e.g. an SBC Push) makes the
+generated dialplan `bridge <primary>,${sofia_contact(<num>@${local_ip_v4})}` — the parallel leg
+targets the number's **registered contact** (which reaches a mobile app via the push SBC's
+path/FCM), NOT a raw INVITE to the SBC IP (that loops → 482). **The bridge MUST set
+`ignore_early_media=true`**, otherwise the first leg's 183-with-SDP makes FreeSWITCH cancel the
+slower (push) leg before the app rings. Inbound routing also requires Kamailio to send the call
+to FreeSWITCH first (not straight to the destination trunk) so FS can transform + fork — see
+`resolve_inbound_target_gwid` (internal-profile routes ignore `destination_trunk_id` as the
+Kamailio next-hop).
+
 ### SIP OPTIONS Monitoring
 
 The system can monitor trunk health via SIP OPTIONS:
@@ -683,14 +793,80 @@ Use `POST /api/v1/routing/sync-kamailio` to trigger manual sync.
 
 SIP devices are managed in PostgreSQL and authenticated dynamically via mod_xml_curl.
 
+### Accounts ↔ SIP Devices relationship
+
+`sip_devices.account_id` → `accounts.id` (many-to-one, **NOT NULL**): a device always
+belongs to one billing account; an account may have several devices. In Fonowin
+provisioning the convention is **1:1**, with `accounts.account_number = sip_devices.sip_username`.
+
+```
+        accounts (pays)                       sip_devices (registers)
+        ┌────────────────┐   account_id FK    ┌─────────────────────────┐
+        │ id ◄───────────┼────────────────────┤ account_id (NOT NULL)   │
+        │ account_number │   1            N    │ sip_username            │
+        │ status         │                     │ a1_hash, sip_domain     │
+        │ balance / plan │                     │ enabled                 │
+        └────────────────┘                     └─────────────────────────┘
+```
+
+- **`sip_devices` authenticates** the REGISTER (sip_username + a1_hash + `enabled`).
+- **`accounts` authorizes** it (the linked account must be `status = 'active'`) and is what
+  gets billed (via `accountcode`, or `account_id` when `accountcode` is empty).
+
 ### Device Registration Flow
 
-1. Device sends REGISTER to FreeSWITCH (:5080)
-2. FreeSWITCH calls `POST /api/v1/freeswitch/directory`
-3. Backend validates IP whitelist
-4. Backend looks up device in `sip_devices` table
-5. Backend returns XML with A1 hash and configuration
-6. FreeSWITCH completes authentication
+The softphone registers against FreeSWITCH's internal profile (:5080). FreeSWITCH has no
+static user files — it resolves users dynamically through `mod_xml_curl`, which queries the
+backend. The backend answers from the `sip_devices` + `accounts` tables.
+
+```
+ Softphone            FreeSWITCH (:5080)        Backend /freeswitch/directory      PostgreSQL
+    │                       │                              │                            │
+    │  REGISTER (no auth)   │                              │                            │
+    │──────────────────────▶│                              │                            │
+    │   401 + nonce         │                              │                            │
+    │◀──────────────────────│                              │                            │
+    │  REGISTER + digest    │                              │                            │
+    │  (user, realm, resp)  │                              │                            │
+    │──────────────────────▶│                              │                            │
+    │                       │  mod_xml_curl POST           │                            │
+    │                       │  (sip_auth_username, realm)  │                            │
+    │                       │─────────────────────────────▶│                            │
+    │                       │                              │ 1. IP in freeswitch_       │
+    │                       │                              │    allowed_ips? (no JWT)   │
+    │                       │                              │ 2. find_by_username_domain │
+    │                       │                              │    INNER JOIN accounts     │
+    │                       │                              │    ON status='active'      │
+    │                       │                              │───────────────────────────▶│
+    │                       │                              │   device row (or none)     │
+    │                       │                              │◀───────────────────────────│
+    │                       │                              │ 3. enabled? account active?│
+    │                       │   directory XML              │                            │
+    │                       │   <param a1-hash=...>        │                            │
+    │                       │   <variable accountcode=...> │                            │
+    │                       │◀─────────────────────────────│                            │
+    │                       │ 4. validate digest response  │                            │
+    │                       │    against a1-hash (MD5)      │                            │
+    │   200 OK / 403        │                              │                            │
+    │◀──────────────────────│                              │                            │
+```
+
+**Steps & validations** (`handlers/freeswitch_directory.rs`):
+
+1. **IP whitelist** — the endpoint uses no JWT; it only trusts source IPs listed in
+   `freeswitch_allowed_ips`.
+2. **Device lookup** — `find_by_username_domain(sip_username, realm)`. The repo query
+   **INNER JOINs `accounts` with `status = 'active'`**, so a device whose account is
+   suspended/closed simply isn't found.
+3. **Three blockers** (any one returns `<result status="not found"/>` ⇒ REGISTER fails):
+   device does not exist · device `enabled = false` · linked account not `active`.
+4. **Success XML** returns `a1-hash` (= `sip_devices.a1_hash`) and `accountcode`
+   (explicit, or `account_id` as fallback — this is what links the CDR to the billed
+   account). FreeSWITCH then validates the REGISTER digest against that `a1-hash`.
+
+> ⚠️ Never set `force-register-domain` in `internal.xml`: it rewrites the REGISTER realm
+> before `mod_xml_curl` runs, so the recomputed digest no longer matches the `a1_hash`
+> (which was generated with the device's real domain) → silent 403 on every device.
 
 ### Device Model
 
@@ -736,3 +912,40 @@ fn calculate_a1_hash(username: &str, realm: &str, password: &str) -> String {
 | 3306 | MySQL | TCP | Kamailio database |
 | 6379 | Redis | TCP | Cache |
 | 10000-20000 | RTPEngine | UDP | Media relay |
+
+## Session Memory
+
+### Frontend
+- Puerto 3000 (dev en Vite), 80/443 (prod con Nginx)
+- **Reinicio**: `sudo systemctl restart apolo-frontend`
+- Nginx config: `deploy/nginx/apolo-frontend.conf` (único que se usa)
+- La API devuelve paginación anidada: `{ data: [...], pagination: { total_pages, page, per_page, total } }`
+- `fetchAccounts` debe iterar todas las páginas para tener la lista completa de cuentas
+- Columna "Cuenta" en SIP Devices: muestra `account.account_number`, fallback `ID: {account_id}` si no se encuentra la cuenta
+
+### Base de Datos
+- **MySQL** (`KAMAILIO_DATABASE_URL`): solo para integración con Kamailio (tablas `dr_gateways`, `dr_rules`, `dr_gw_lists`, `address`, `dsip_*`). Opcional.
+- PostgreSQL: 3165 cuentas totales en el entorno actual
+
+### Trunks (3 en producción)
+| ID | Nombre | Tipo | Host:Puerto |
+|----|--------|------|-------------|
+| `642dfd41-...` | SBC Push | private | 10.118.0.5:5060 |
+| `ba4d355d-...` | Freeswitch Legado | private | 10.118.0.4:5060 |
+| `ca36716b-...` | Integratel | public | 10.35.12.68:5060 |
+
+### Enrutamiento Saliente (`dr_rules` groupid=8000)
+- **Integratel** maneja prefijos: `2031` (Entel), `2131` (Claro), `2231` (Movistar), `2431` (Bitel), `3231` (TDP Fijo), `4631` (GTD), `5731` (ON)
+- **Freeswitch Legado** maneja prefijos: `0800`, `0801`, `04`, `05`, `06`, `07`, `08`, `2`, `3`, `4`, `5`, `6`, `7`, `9` (con transformaciones de prefijo)
+- **Prefijo `1`**: gwid=953 (type=9, FS external `app.fonowin.pe:5062`) — rango DID Fonowin
+
+### Números Cortos (ej: "123")
+- No hay manejo especial para números cortos
+- `123` matchea prefijo `1` → gwid=953 → FreeSWITCH external profile → NO va a Integratel
+- No existen rutas con prefijo `123` ni `12` en `dr_rules`
+- Si no existe el DID en FreeSWITCH, la llamada termina en 404
+
+### Provisioning
+- Endpoints: `POST /api/v1/provisioning` (individual), `POST /api/v1/provisioning/bulk` (masivo)
+- Crea cuenta + dispositivo SIP atómicamente (rollback si falla el device)
+- Bulk: acepta `.xlsx` y `.csv`, parseo sin librerías externas, máx 5000 filas

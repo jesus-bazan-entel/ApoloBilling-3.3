@@ -8,8 +8,12 @@ import json
 from app.db.session import SessionLocal
 from app.models.cdr import ActiveCall, CDR
 from app.services.rating import determinar_zona_y_tarifa
+from app.api.routers import monitoring
 
 router = APIRouter()
+
+# Include monitoring router
+router.include_router(monitoring.router)
 
 def get_db():
     db = SessionLocal()

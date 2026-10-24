@@ -71,6 +71,10 @@ impl AccountCreateRequest {
             status: AccountStatus::Active,
             max_concurrent_calls: self.max_concurrent_calls,
             plan_id: self.plan_id,
+            cod_ped: None,
+            departamento: None,
+            provincia: None,
+            distrito: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -113,6 +117,9 @@ pub struct AccountResponse {
     /// Account number
     pub account_number: String,
 
+    /// Customer name (CLIENTE)
+    pub account_name: Option<String>,
+
     /// Customer phone
     pub customer_phone: Option<String>,
 
@@ -139,6 +146,18 @@ pub struct AccountResponse {
 
     /// Plan ID (if account was created from a plan)
     pub plan_id: Option<i32>,
+
+    /// Order code (COD_PED)
+    pub cod_ped: Option<String>,
+
+    /// Customer location: department/region
+    pub departamento: Option<String>,
+
+    /// Customer location: province
+    pub provincia: Option<String>,
+
+    /// Customer location: district
+    pub distrito: Option<String>,
 
     /// Consumed credit (only for postpaid accounts with negative balance)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -184,6 +203,7 @@ impl From<Account> for AccountResponse {
         Self {
             id: account.id,
             account_number: account.account_number,
+            account_name: account.account_name,
             customer_phone: account.customer_phone,
             account_type: account.account_type.to_string(),
             balance: account.balance,
@@ -193,6 +213,10 @@ impl From<Account> for AccountResponse {
             max_concurrent_calls: account.max_concurrent_calls,
             available_balance: available,
             plan_id: account.plan_id,
+            cod_ped: account.cod_ped,
+            departamento: account.departamento,
+            provincia: account.provincia,
+            distrito: account.distrito,
             consumed_credit: consumed,
             utilization_percent: utilization,
             created_at: account.created_at,
@@ -228,6 +252,7 @@ impl From<&Account> for AccountResponse {
         Self {
             id: account.id,
             account_number: account.account_number.clone(),
+            account_name: account.account_name.clone(),
             customer_phone: account.customer_phone.clone(),
             account_type: account.account_type.to_string(),
             balance: account.balance,
@@ -237,6 +262,10 @@ impl From<&Account> for AccountResponse {
             max_concurrent_calls: account.max_concurrent_calls,
             available_balance: available,
             plan_id: account.plan_id,
+            cod_ped: account.cod_ped.clone(),
+            departamento: account.departamento.clone(),
+            provincia: account.provincia.clone(),
+            distrito: account.distrito.clone(),
             consumed_credit: consumed,
             utilization_percent: utilization,
             created_at: account.created_at,
@@ -324,6 +353,10 @@ mod tests {
             status: AccountStatus::Active,
             max_concurrent_calls: 1,
             plan_id: None,
+            cod_ped: None,
+            departamento: None,
+            provincia: None,
+            distrito: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

@@ -325,6 +325,10 @@ pub struct OutboundRoute {
     pub time_schedule: Option<String>,
     pub time_schedule_enabled: Option<bool>,
     pub enabled: Option<bool>,
+    /// Digits to strip from the start of the dialed number before sending to the gateway
+    pub strip_digits: Option<i32>,
+    /// Prefix to prepend after stripping (applied via the route's gateway pri_prefix)
+    pub prefix_to_add: Option<String>,
     pub kamailio_ruleid: Option<i32>,
     pub sync_status: Option<String>,
     pub sync_error: Option<String>,
@@ -345,6 +349,10 @@ pub struct CreateOutboundRouteRequest {
     pub time_schedule: Option<String>,
     #[serde(default)]
     pub time_schedule_enabled: bool,
+    #[serde(default)]
+    pub strip_digits: i32,
+    #[serde(default)]
+    pub prefix_to_add: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -360,6 +368,8 @@ pub struct UpdateOutboundRouteRequest {
     pub trunk_id: Option<Uuid>,
     pub time_schedule: Option<String>,
     pub time_schedule_enabled: Option<bool>,
+    pub strip_digits: Option<i32>,
+    pub prefix_to_add: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -397,6 +407,13 @@ pub struct InboundRoute {
     pub destination_trunk_name: Option<String>,
     /// Send 183 Session Progress with ringback tone before bridging
     pub send_early_media: Option<bool>,
+    /// Optional trunk to ring in parallel with the destination (e.g. SBC Push). First answer wins.
+    pub parallel_trunk_id: Option<Uuid>,
+    pub parallel_trunk_name: Option<String>,
+    /// Kamailio routes the DID straight to destination_trunk_id (no FreeSWITCH hop)
+    pub direct_routing: bool,
+    /// Post-transform numbers that still go through FreeSWITCH (Fonowin app users)
+    pub fs_numbers: Vec<String>,
     pub failover_destinations: Vec<FailoverDestination>,
     pub enabled: Option<bool>,
     pub freeswitch_extension_id: Option<String>,
@@ -437,6 +454,14 @@ pub struct CreateInboundRouteRequest {
     /// Send 183 Session Progress with ringback tone before bridging
     #[serde(default)]
     pub send_early_media: bool,
+    /// Optional trunk to ring in parallel with the destination (e.g. SBC Push). First answer wins.
+    pub parallel_trunk_id: Option<Uuid>,
+    /// Kamailio routes the DID straight to destination_trunk_id (no FreeSWITCH hop)
+    #[serde(default)]
+    pub direct_routing: bool,
+    /// Post-transform numbers that still go through FreeSWITCH (Fonowin app users)
+    #[serde(default)]
+    pub fs_numbers: Vec<String>,
     #[serde(default)]
     pub failover_destinations: Vec<FailoverDestination>,
     #[serde(default = "default_true")]
@@ -464,6 +489,12 @@ pub struct UpdateInboundRouteRequest {
     pub destination_trunk_id: Option<Uuid>,
     /// Send 183 Session Progress with ringback tone before bridging
     pub send_early_media: Option<bool>,
+    /// Optional trunk to ring in parallel with the destination (e.g. SBC Push). First answer wins.
+    pub parallel_trunk_id: Option<Uuid>,
+    /// Kamailio routes the DID straight to destination_trunk_id (no FreeSWITCH hop)
+    pub direct_routing: Option<bool>,
+    /// Post-transform numbers that still go through FreeSWITCH (Fonowin app users)
+    pub fs_numbers: Option<Vec<String>>,
     pub failover_destinations: Option<Vec<FailoverDestination>>,
     pub enabled: Option<bool>,
 }

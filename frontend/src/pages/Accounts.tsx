@@ -1,22 +1,47 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchAccounts, createAccount, updateAccount, deleteAccount, fetchPlans, fetchSettings, updateSetting } from '../api/client'
+import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { fetchAccountsPaginated, fetchAccountStats, createAccount, updateAccount, deleteAccount, fetchPlans, fetchSettings, updateSetting } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import CreditUtilizationBar from '../components/CreditUtilizationBar'
-import { Users, Plus, Edit, X, DollarSign, Trash2, Power, AlertTriangle, Shield, ShieldOff } from 'lucide-react'
+import { Users, Plus, Edit, X, DollarSign, Trash2, Power, AlertTriangle, Shield, ShieldOff, Search } from 'lucide-react'
 import type { Account, AccountType, AccountStatus, Plan } from '../types'
 import { getAccountDisplayInfo } from '../lib/accountHelpers'
+
+const PER_PAGE = 25
 
 export default function AccountsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<Account | null>(null)
+  const [page, setPage] = useState(1)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
   const queryClient = useQueryClient()
 
-  const { data: accounts = [], isLoading } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: fetchAccounts,
+  // Debounce the search box, and reset to page 1 whenever the term changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const { data: accountsPage, isLoading } = useQuery({
+    queryKey: ['accounts', page, search],
+    queryFn: () => fetchAccountsPaginated(page, PER_PAGE, search),
+    refetchInterval: 10000,
+    placeholderData: keepPreviousData,
+  })
+
+  const accounts = accountsPage?.data ?? []
+  const totalPages = accountsPage?.total_pages ?? 1
+
+  // Global aggregates for the summary cards (across all accounts, not just this page).
+  const { data: stats } = useQuery({
+    queryKey: ['accountStats'],
+    queryFn: fetchAccountStats,
     refetchInterval: 10000,
   })
 
@@ -52,6 +77,7 @@ export default function AccountsPage() {
     mutationFn: createAccount,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
       setShowModal(false)
       setEditingAccount(null)
     },
@@ -62,6 +88,7 @@ export default function AccountsPage() {
       updateAccount(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
       setShowModal(false)
       setEditingAccount(null)
     },
@@ -71,6 +98,7 @@ export default function AccountsPage() {
     mutationFn: deleteAccount,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
       setDeleteConfirm(null)
     },
   })
@@ -82,6 +110,7 @@ export default function AccountsPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
     },
   })
 
@@ -208,7 +237,7 @@ export default function AccountsPage() {
             {/* Editar */}
             <button
               onClick={() => handleEdit(acc)}
-              className="p-1.5 text-[var(--color-text-tertiary)] hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+              className="p-1.5 text-[var(--color-text-tertiary)] hover:text-[#ff5a0a] hover:bg-[#fff3ed] rounded transition-colors"
               title="Editar cuenta"
             >
               <Edit className="w-4 h-4" />
@@ -242,11 +271,12 @@ export default function AccountsPage() {
     },
   ]
 
-  // Summary stats
-  const totalBalance = accounts.reduce((sum, acc) => sum + (Number(acc.balance) || 0), 0)
-  const activeAccounts = accounts.filter((acc) => acc.status?.toLowerCase() === 'active').length
-  const prepaidAccounts = accounts.filter((acc) => acc.account_type?.toLowerCase() === 'prepaid').length
-  const postpaidAccounts = accounts.filter((acc) => acc.account_type?.toLowerCase() === 'postpaid').length
+  // Summary stats — global totals from the backend (not page-scoped)
+  const totalAccounts = stats?.total_accounts ?? 0
+  const activeAccounts = stats?.active_accounts ?? 0
+  const prepaidAccounts = stats?.prepaid_accounts ?? 0
+  const postpaidAccounts = stats?.postpaid_accounts ?? 0
+  const totalBalance = Number(stats?.total_balance ?? 0)
 
   return (
     <div className="space-y-6">
@@ -261,7 +291,7 @@ export default function AccountsPage() {
         </div>
         <button
           onClick={handleCreate}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
         >
           <Plus className="w-5 h-5 mr-2" />
           Nueva Cuenta
@@ -271,22 +301,22 @@ export default function AccountsPage() {
       {/* Authorization Setting Banner */}
       <div className={`rounded-lg border p-4 flex items-center justify-between ${
         authRequired
-          ? 'bg-blue-50 border-blue-200'
+          ? 'bg-[#fff3ed] border-[#ffbb9a]'
           : 'bg-amber-50 border-amber-200'
       }`}>
         <div className="flex items-center gap-3">
           {authRequired ? (
-            <Shield className="w-5 h-5 text-blue-600" />
+            <Shield className="w-5 h-5 text-[#ff5a0a]" />
           ) : (
             <ShieldOff className="w-5 h-5 text-amber-600" />
           )}
           <div>
-            <p className={`text-sm font-medium ${authRequired ? 'text-blue-900' : 'text-amber-900'}`}>
+            <p className={`text-sm font-medium ${authRequired ? 'text-[#301d19]' : 'text-amber-900'}`}>
               {authRequired
                 ? 'Control de autorización activo'
                 : 'Control de autorización desactivado'}
             </p>
-            <p className={`text-xs ${authRequired ? 'text-blue-700' : 'text-amber-700'}`}>
+            <p className={`text-xs ${authRequired ? 'text-[#d8450b]' : 'text-amber-700'}`}>
               {authRequired
                 ? 'Las llamadas salientes requieren cuenta activa con saldo para ser autorizadas'
                 : 'Todas las llamadas salientes se permiten sin verificación de cuenta ni saldo'}
@@ -302,7 +332,7 @@ export default function AccountsPage() {
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             authRequired
               ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
-              : 'bg-blue-100 text-blue-800 hover:bg-blue-200 border border-blue-300'
+              : 'bg-[#ffede3] text-[#d8450b] hover:bg-[#ffdac8] border border-[#ffbb9a]'
           } disabled:opacity-50`}
         >
           {updateSettingMutation.isPending
@@ -319,9 +349,9 @@ export default function AccountsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
-              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{accounts.length}</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{totalAccounts}</p>
             </div>
-            <Users className="w-8 h-8 text-blue-500" />
+            <Users className="w-8 h-8 text-[#ff5a0a]" />
           </div>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
@@ -357,14 +387,31 @@ export default function AccountsPage() {
         </div>
       </div>
 
+      {/* Search box (server-side, searches across all pages) */}
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)] p-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[var(--color-text-tertiary)]" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Buscar por número de cuenta o teléfono..."
+            className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] transition-colors placeholder:text-[var(--color-text-muted)]"
+          />
+        </div>
+      </div>
+
       {/* Accounts Table */}
       <DataTable
         columns={columns}
         data={accounts}
         loading={isLoading}
         emptyMessage="No hay cuentas registradas"
-        searchable={true}
-        searchPlaceholder="Buscar por número de cuenta..."
+        pagination={{
+          page,
+          totalPages,
+          onPageChange: setPage,
+        }}
       />
 
       {/* Create/Edit Modal */}
@@ -543,14 +590,14 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {!isEditing && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-              <label className="block text-sm font-medium text-blue-900 mb-2">
+            <div className="bg-[#fff3ed] border border-[#ffbb9a] rounded-lg p-4 mb-4">
+              <label className="block text-sm font-medium text-[#301d19] mb-2">
                 Seleccionar Plan (Opcional)
               </label>
               <select
                 value={selectedPlan?.id || ''}
                 onChange={(e) => handlePlanChange(e.target.value)}
-                className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-[var(--color-bg-card)]"
+                className="w-full px-3 py-2 border border-[#ffbb9a] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] bg-[var(--color-bg-card)]"
               >
                 <option value="">Sin plan (configuración manual)</option>
                 {plans
@@ -562,7 +609,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   ))}
               </select>
               {selectedPlan && (
-                <p className="text-xs text-blue-700 mt-2">
+                <p className="text-xs text-[#d8450b] mt-2">
                   ℹ️ Los valores del plan se han aplicado automáticamente y están bloqueados
                 </p>
               )}
@@ -582,7 +629,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   setFormData({ ...formData, account_number: e.target.value })
                 }
                 disabled={!!account}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
 
@@ -599,7 +646,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={!!account || !!selectedPlan}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               >
                 <option value="prepaid">Prepago</option>
                 <option value="postpaid">Postpago</option>
@@ -627,7 +674,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                     })
                   }
                   disabled={!!selectedPlan}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
                 />
                 {selectedPlan && (
                   <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
@@ -669,7 +716,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={formData.account_type?.toLowerCase() === 'prepaid' || !!selectedPlan}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
               {selectedPlan && formData.account_type === 'postpaid' && (
                 <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
@@ -693,7 +740,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                     status: e.target.value as AccountStatus,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               >
                 <option value="active">Activa</option>
                 <option value="suspended">Suspendida</option>
@@ -718,7 +765,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
                   })
                 }
                 disabled={!!selectedPlan && !isEditing}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
               {selectedPlan && !isEditing && (
                 <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
@@ -737,7 +784,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
             >
               {isLoading ? 'Guardando...' : account ? 'Actualizar' : 'Crear'}
             </button>

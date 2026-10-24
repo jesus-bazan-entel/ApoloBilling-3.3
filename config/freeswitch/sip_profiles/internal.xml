@@ -1,32 +1,61 @@
 <include>
+  <!--
+    Internal SIP profile: serves customer SIP devices (softphones, IP phones).
+    Port 5060 on the LAN interface. Clients REGISTER here; dialplan is
+    'from-pbx'. Authentication is driven by mod_xml_curl hitting the Apolo
+    backend's /freeswitch/directory endpoint (see autoload_configs/xml_curl).
+    IP is rewritten at install time by deploy_apolo_configs().
+  -->
   <profile name="internal">
     <settings>
-      <param name="sip-ip" value="10.10.22.4"/>
-      <param name="sip-port" value="5080"/>
-      <param name="rtp-ip" value="10.10.22.4"/>
+      <param name="sip-ip" value="10.118.0.6"/>
+      <param name="sip-port" value="5060"/>
+      <param name="rtp-ip" value="10.118.0.6"/>
 
       <param name="context" value="from-pbx"/>
       <param name="dialplan" value="XML"/>
 
-      <!-- Habilitar registro para softphones -->
       <param name="disable-register" value="false"/>
       <param name="auth-calls" value="true"/>
       <param name="auth-all-packets" value="false"/>
-      <!-- bypass-media deshabilitado: RTPEngine (via Kamailio) es el media relay autoritativo.
-           Con bypass-media=true, FS generaba re-INVITEs post-bridge que desincronizaban los
-           legs de RTPEngine causando one-way streams y entrecorte de llamadas. -->
+      <!-- Sources matching pbx-acl get sip_authorized=true, so auth-calls
+           is skipped for IP-authenticated trunks (e.g. customer PBXes). -->
+      <param name="apply-inbound-acl" value="pbx-acl"/>
+
+      <!-- No force-*-domain here on purpose. Each sip_device carries its
+           own sip_domain (FQDN like app.fonowin.pe or a bare IP); the
+           mod_xml_curl directory handler keys lookups on (username, realm)
+           with realm == domain from the REGISTER. Forcing a single realm
+           here breaks multi-tenant registrations because the A1 hash stored
+           in the DB was computed against the device's own sip_domain. -->
+      <param name="accept-blind-reg" value="false"/>
+
+      <!-- NAT keepalive: softphones behind home-grade NAT have a UDP
+           pinhole that closes after 30-120s of silence. Without
+           keepalives, FS expires the registration (even though Expires:
+           3600 was negotiated) while the client still thinks it's
+           registered, and inbound calls fail 480 USER_NOT_REGISTERED.
+           - all-reg-options-ping: FS sends SIP OPTIONS to every
+             registered UA every ~30s (keeps pinhole open + detects dead
+             peers quickly so the registrar row is correct).
+           - NDLB-received-in-nat-reg-contact: trust `received`/`rport`
+             from the REGISTER to address the UA through NAT.
+           - force-register-minimum-expire: floor below which the
+             negotiated lifetime cannot go. Together with the OPTIONS
+             ping this keeps refreshes frequent enough to survive NAT. -->
+      <param name="all-reg-options-ping" value="true"/>
+      <param name="NDLB-received-in-nat-reg-contact" value="true"/>
+      <param name="force-register-minimum-expire" value="3600"/>
+
+      <!-- RTPEngine (via Kamailio) is the media relay; never bypass. -->
       <param name="inbound-bypass-media" value="false"/>
       <param name="bypass-media-after-bridge" value="false"/>
 
-      <!-- 100rel/PRACK -->
       <param name="enable-100rel" value="false"/>
 
-      <!-- Session Timers -->
       <param name="enable-timer" value="true"/>
       <param name="session-timeout" value="1800"/>
       <param name="minimum-session-expires" value="120"/>
-
-      <!-- <param name="apply-inbound-acl" value="pbx-acl"/> -->
 
       <param name="local-network-acl" value="localnet.auto"/>
       <param name="manage-presence" value="false"/>

@@ -185,7 +185,7 @@ export default function ActiveCalls() {
               </>
             )}
           </div>
-          <div className="flex items-center bg-blue-100 text-blue-800 px-4 py-2 rounded-lg">
+          <div className="flex items-center bg-[#ffede3] text-[#d8450b] px-4 py-2 rounded-lg">
             <Phone className="w-5 h-5 mr-2" />
             <span className="font-bold text-lg">{calls.length}</span>
             <span className="ml-1">activas</span>
@@ -197,7 +197,7 @@ export default function ActiveCalls() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <p className="text-sm text-[var(--color-text-tertiary)]">Salientes</p>
-          <p className="text-2xl font-bold text-blue-600">
+          <p className="text-2xl font-bold text-[#ff5a0a]">
             {calls.filter((c) => c.direction === 'outbound').length}
           </p>
         </div>

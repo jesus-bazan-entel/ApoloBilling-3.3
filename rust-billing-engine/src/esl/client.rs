@@ -102,6 +102,24 @@ impl FreeSwitchClient {
         }
     }
 
+    async fn reconcile_active_calls(db_pool: &DbPool, server_id: &str, live_uuids: &[String]) {
+        let client = match db_pool.get().await {
+            Ok(client) => client,
+            Err(e) => {
+                error!("active_calls reconcile: no DB connection: {}", e);
+                return;
+            }
+        };
+        match client.execute(
+            "DELETE FROM active_calls WHERE server = $1 AND NOT (call_id = ANY($2))",
+            &[&server_id, &live_uuids],
+        ).await {
+            Ok(0) => info!("active_calls reconcile [{}]: no orphan rows", server_id),
+            Ok(n) => warn!("🧹 active_calls reconcile [{}]: removed {} orphan rows", server_id, n),
+            Err(e) => error!("active_calls reconcile [{}] failed: {}", server_id, e),
+        }
+    }
+
     async fn connect_and_listen(
         server: &FreeSwitchServer,
         server_id: &str,
@@ -119,6 +137,12 @@ impl FreeSwitchClient {
         ).await?);
 
         info!("✅ Connected and authenticated to FreeSWITCH: {}", server_id);
+
+        // Hangups missed while disconnected (engine restart, ESL drop, reboot)
+        // leave orphan rows; drop the ones FreeSWITCH no longer knows about.
+        if let Some(live_uuids) = connection.initial_channel_uuids() {
+            Self::reconcile_active_calls(&db_pool, server_id, live_uuids).await;
+        }
 
         // Event handler with shared connection
         let event_handler = EventHandler::new(

@@ -164,7 +164,7 @@ export default function RatesPage() {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => handleEdit(rate)}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-1.5 text-[#ff5a0a] hover:bg-[#fff3ed] rounded-lg transition-colors"
             title="Editar"
           >
             <Edit className="w-4 h-4" />
@@ -202,7 +202,7 @@ export default function RatesPage() {
           </button>
           <button
             onClick={handleCreate}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
           >
             <Plus className="w-5 h-5 mr-2" />
             Nueva Tarifa
@@ -218,7 +218,7 @@ export default function RatesPage() {
               <p className="text-sm text-[var(--color-text-tertiary)]">Total Tarifas</p>
               <p className="text-2xl font-bold text-[var(--color-text-primary)]">{rates.length}</p>
             </div>
-            <Settings className="w-8 h-8 text-blue-500" />
+            <Settings className="w-8 h-8 text-[#ff5a0a]" />
           </div>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
@@ -242,7 +242,7 @@ export default function RatesPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-[var(--color-text-tertiary)]">Vigentes</p>
-              <p className="text-2xl font-bold text-blue-600">
+              <p className="text-2xl font-bold text-[#ff5a0a]">
                 {rates.filter((r) => !r.effective_end).length}
               </p>
             </div>
@@ -252,8 +252,8 @@ export default function RatesPage() {
       </div>
 
       {/* Info Box */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <p className="text-blue-800 text-sm">
+      <div className="bg-[#fff3ed] border border-[#ffbb9a] rounded-lg p-4">
+        <p className="text-[#d8450b] text-sm">
           <strong>Algoritmo LPM (Longest Prefix Match):</strong> El sistema
           selecciona automáticamente la tarifa con el prefijo más largo que
           coincida con el número de destino. Por ejemplo, para marcar a
@@ -427,7 +427,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                   setFormData({ ...formData, destination_prefix: e.target.value })
                 }
                 placeholder="Ej: 51, 519, 51987"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 Solo números, sin símbolos
@@ -442,7 +442,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                 required
                 value={formData.zone_id || ''}
                 onChange={(e) => handleZoneChange(e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               >
                 <option value="">Seleccionar zona...</option>
                 {zones.map((zone) => (
@@ -474,7 +474,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     rate_per_minute: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono"
               />
             </div>
 
@@ -493,7 +493,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     billing_increment: parseInt(e.target.value) || 60,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 Típico: 60 seg (1 min) o 6 seg
@@ -515,7 +515,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     connection_fee: parseFloat(e.target.value) || 0,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono"
               />
             </div>
 
@@ -534,7 +534,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     priority: parseInt(e.target.value) || 1,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">1 = más alta</p>
             </div>
@@ -550,7 +550,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                 onChange={(e) =>
                   setFormData({ ...formData, effective_start: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
 
@@ -567,7 +567,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
                     effective_end: e.target.value || null,
                   })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
           </div>
@@ -583,7 +583,7 @@ function RateModal({ rate, zones, onClose, onSubmit, isLoading, error }: RateMod
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
             >
               {isLoading ? 'Guardando...' : rate ? 'Actualizar' : 'Crear'}
             </button>
@@ -696,12 +696,12 @@ function LookupModal({ onClose }: LookupModalProps) {
                 value={destination}
                 onChange={(e) => setDestination(e.target.value)}
                 placeholder="Ej: 51987654321"
-                className="flex-1 px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono"
+                className="flex-1 px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] font-mono"
               />
               <button
                 onClick={handleLookup}
                 disabled={loading || !destination}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
               >
                 {loading ? 'Buscando...' : 'Buscar'}
               </button>

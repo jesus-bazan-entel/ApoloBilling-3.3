@@ -572,6 +572,10 @@ impl From<AccountRow> for Account {
             status: AccountStatus::from_str(&row.status).unwrap_or(AccountStatus::Active),
             max_concurrent_calls: row.max_concurrent_calls,
             plan_id: row.plan_id,
+            cod_ped: None,
+            departamento: None,
+            provincia: None,
+            distrito: None,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

@@ -15,7 +15,9 @@ import AuditLogs from './pages/AuditLogs'
 import UnifiedRouting from './pages/UnifiedRouting'
 import InternalRouting from './pages/InternalRouting'
 import SipDevices from './pages/SipDevices'
+import Provisioning from './pages/Provisioning'
 import Login from './pages/Login'
+import MonitoringDashboard from './pages/Monitoring/MonitoringDashboard'
 import { getCurrentUser } from './api/client'
 import type { UserRole } from './types'
 
@@ -46,10 +48,10 @@ function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+      <div className="min-h-screen bg-[#160d0a] flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-slate-500 text-sm">Cargando...</span>
+          <div className="w-8 h-8 border-2 border-[#ff5a0a] border-t-transparent rounded-full animate-spin" />
+          <span className="text-[#b49a8b] text-sm">Cargando...</span>
         </div>
       </div>
     )
@@ -62,13 +64,13 @@ function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
   // Check role permission if required
   if (requiredRole && user.role !== requiredRole) {
     return (
-      <div className="min-h-screen bg-[#0a0f1a] flex items-center justify-center">
+      <div className="min-h-screen bg-[#160d0a] flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-xl font-bold text-red-400 mb-2">Acceso Denegado</h2>
-          <p className="text-slate-500 mb-4">No tienes permisos para acceder a esta sección.</p>
+          <p className="text-[#b49a8b] mb-4">No tienes permisos para acceder a esta sección.</p>
           <button
             onClick={() => window.history.back()}
-            className="px-4 py-2 bg-cyan-500 text-white rounded hover:bg-cyan-600"
+            className="px-4 py-2 bg-[#ff5a0a] text-white rounded hover:bg-[#d8450b]"
           >
             Volver
           </button>
@@ -94,6 +96,7 @@ function AppRoutes() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/monitoring" element={<MonitoringDashboard />} />
                 <Route path="/calls" element={<ActiveCalls />} />
                 <Route path="/cdr" element={<CDR />} />
                 <Route path="/accounts" element={<Accounts />} />
@@ -139,6 +142,14 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute requiredRole="superadmin">
                       <SipDevices />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/provisioning"
+                  element={
+                    <ProtectedRoute requiredRole="superadmin">
+                      <Provisioning />
                     </ProtectedRoute>
                   }
                 />

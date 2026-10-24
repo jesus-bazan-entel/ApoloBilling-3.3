@@ -3,7 +3,9 @@
 //! Defines abstractions for database access and business logic.
 
 use crate::error::AppError;
-use crate::models::{Account, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User};
+use crate::models::{
+    Account, AccountStats, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User,
+};
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::{de::DeserializeOwned, Serialize};
@@ -48,9 +50,13 @@ pub trait AccountRepository: Repository<Account, i32> {
         &self,
         status: Option<&str>,
         account_type: Option<&str>,
+        search: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<Account>, i64), AppError>;
+
+    /// Aggregate statistics across all accounts (global, not page-scoped)
+    async fn stats(&self) -> Result<AccountStats, AppError>;
 }
 
 /// Rate card repository trait with specialized methods
@@ -212,6 +218,7 @@ pub trait SipDeviceRepository: Repository<SipDevice, i32> {
         &self,
         account_id: Option<i32>,
         enabled: Option<bool>,
+        search: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<SipDevice>, i64), AppError>;

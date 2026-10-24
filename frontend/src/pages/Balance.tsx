@@ -109,7 +109,7 @@ export default function BalancePage() {
       render: (account: Account) => (
         <button
           onClick={() => handleRecharge(account)}
-          className="flex items-center text-blue-600 hover:text-blue-700 font-medium"
+          className="flex items-center text-[#ff5a0a] hover:text-[#d8450b] font-medium"
           disabled={account.status.toLowerCase() !== 'active'}
         >
           <Plus className="w-4 h-4 mr-1" />
@@ -147,7 +147,7 @@ export default function BalancePage() {
               <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
               <p className="text-2xl font-bold text-[var(--color-text-primary)]">{accounts.length}</p>
             </div>
-            <Users className="w-8 h-8 text-blue-500" />
+            <Users className="w-8 h-8 text-[#ff5a0a]" />
           </div>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
@@ -192,7 +192,7 @@ export default function BalancePage() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar por número de cuenta o teléfono..."
-            className="w-full pl-10 pr-4 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
           />
         </div>
       </div>
@@ -331,7 +331,7 @@ function RechargeModal({
                   onClick={() => handleQuickAmount(value)}
                   className={`px-4 py-2 border rounded-lg font-medium transition-colors ${
                     selectedAmount === value
-                      ? 'bg-blue-600 text-white border-blue-600'
+                      ? 'bg-[#ff5a0a] text-white border-[#ff5a0a]'
                       : 'border-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
                   }`}
                 >
@@ -360,7 +360,7 @@ function RechargeModal({
                   setAmount(parseFloat(e.target.value) || 0)
                   setSelectedAmount(null)
                 }}
-                className="w-full pl-8 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-8 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
                 placeholder="0.00"
               />
             </div>
@@ -375,7 +375,7 @@ function RechargeModal({
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               placeholder="Ej: Recarga mensual"
             />
           </div>

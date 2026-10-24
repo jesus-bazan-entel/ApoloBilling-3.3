@@ -210,6 +210,16 @@ pub struct SipDeviceWithPasswordResponse {
     pub password: String,
 }
 
+/// Password regeneration request body (optional; all fields optional so the
+/// endpoint stays usable with an empty `{}` body or no body at all).
+#[derive(Debug, Clone, Deserialize, Default, Validate)]
+pub struct PasswordRegenerateRequest {
+    /// Operator-supplied password. If omitted or empty, the server generates
+    /// a cryptographically random one (existing behavior).
+    #[validate(length(min = 8, max = 128, message = "password must be 8-128 characters"))]
+    pub new_password: Option<String>,
+}
+
 /// Password regeneration response
 #[derive(Debug, Clone, Serialize)]
 pub struct PasswordRegenerateResponse {

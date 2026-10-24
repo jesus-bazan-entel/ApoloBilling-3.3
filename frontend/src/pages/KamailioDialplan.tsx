@@ -278,7 +278,7 @@ export default function KamailioDialplanPage() {
       key: 'priority',
       header: 'Prioridad',
       render: (route: KamailioOutboundRoute) => (
-        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+        <span className="px-2 py-1 text-xs rounded-full bg-[#ffede3] text-[#d8450b]">
           {route.priority}
         </span>
       ),

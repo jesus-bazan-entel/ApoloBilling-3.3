@@ -4,7 +4,7 @@
 //! for phone number lookups and atomic balance updates.
 
 use apolo_core::{
-    models::{Account, AccountStatus, AccountType},
+    models::{Account, AccountStats, AccountStatus, AccountType},
     traits::{AccountRepository, Repository},
     AppError, AppResult,
 };
@@ -115,18 +115,21 @@ impl Repository<Account, i32> for PgAccountRepository {
         let row = sqlx::query_as::<sqlx::Postgres, AccountRow>(
             r#"
             INSERT INTO accounts (
-                account_number, customer_phone, account_type,
-                balance, credit_limit, currency, status, max_concurrent_calls, plan_id
+                account_number, account_name, customer_phone, account_type,
+                balance, credit_limit, currency, status, max_concurrent_calls, plan_id,
+                cod_ped, departamento, provincia, distrito
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING
-                id, account_number, customer_phone,
+                id, account_number, account_name, customer_phone,
                 account_type, balance, credit_limit, currency,
                 status, max_concurrent_calls, plan_id,
+                cod_ped, departamento, provincia, distrito,
                 created_at, updated_at
             "#,
         )
         .bind(&entity.account_number)
+        .bind(&entity.account_name)
         .bind(&entity.customer_phone)
         .bind(entity.account_type.to_string())
         .bind(entity.balance)
@@ -135,6 +138,10 @@ impl Repository<Account, i32> for PgAccountRepository {
         .bind(entity.status.to_string())
         .bind(entity.max_concurrent_calls)
         .bind(entity.plan_id)
+        .bind(&entity.cod_ped)
+        .bind(&entity.departamento)
+        .bind(&entity.provincia)
+        .bind(&entity.distrito)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
@@ -299,21 +306,23 @@ impl AccountRepository for PgAccountRepository {
         &self,
         status: Option<&str>,
         account_type: Option<&str>,
+        search: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> AppResult<(Vec<Account>, i64)> {
         debug!(
-            "Listing accounts with filters: status={:?}, type={:?}, limit={}, offset={}",
-            status, account_type, limit, offset
+            "Listing accounts with filters: status={:?}, type={:?}, search={:?}, limit={}, offset={}",
+            status, account_type, search, limit, offset
         );
 
         // Build dynamic query based on filters
         let mut query_str = String::from(
             r#"
             SELECT
-                id, account_number, customer_phone,
+                id, account_number, account_name, customer_phone,
                 account_type, balance, credit_limit, currency,
                 status, max_concurrent_calls, plan_id,
+                cod_ped, departamento, provincia, distrito,
                 created_at, updated_at
             FROM accounts
             WHERE 1=1
@@ -330,6 +339,23 @@ impl AccountRepository for PgAccountRepository {
         if let Some(t) = account_type {
             query_str.push_str(&format!(" AND account_type = '{}'", t));
             count_query.push_str(&format!(" AND account_type = '{}'", t));
+        }
+
+        // Search by account number or phone. Sanitize input (account numbers and
+        // phones are alphanumeric) to keep the inline LIKE injection-safe.
+        if let Some(s) = search {
+            let sanitized: String = s
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
+            if !sanitized.is_empty() {
+                let clause = format!(
+                    " AND (account_number ILIKE '%{0}%' OR customer_phone ILIKE '%{0}%')",
+                    sanitized
+                );
+                query_str.push_str(&clause);
+                count_query.push_str(&clause);
+            }
         }
 
         query_str.push_str(&format!(" ORDER BY id LIMIT {} OFFSET {}", limit, offset));
@@ -354,6 +380,37 @@ impl AccountRepository for PgAccountRepository {
 
         Ok((rows.into_iter().map(Into::into).collect(), total.0))
     }
+
+    #[instrument(skip(self))]
+    async fn stats(&self) -> AppResult<AccountStats> {
+        debug!("Computing global account statistics");
+
+        let row: (i64, i64, i64, i64, Decimal) = sqlx::query_as(
+            r#"
+            SELECT
+                COUNT(*)::BIGINT AS total_accounts,
+                COUNT(*) FILTER (WHERE LOWER(status) = 'active')::BIGINT AS active_accounts,
+                COUNT(*) FILTER (WHERE LOWER(account_type) = 'prepaid')::BIGINT AS prepaid_accounts,
+                COUNT(*) FILTER (WHERE LOWER(account_type) = 'postpaid')::BIGINT AS postpaid_accounts,
+                COALESCE(SUM(balance), 0)::NUMERIC AS total_balance
+            FROM accounts
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| {
+            error!("Database error computing account stats: {}", e);
+            AppError::Database(format!("Failed to compute account stats: {}", e))
+        })?;
+
+        Ok(AccountStats {
+            total_accounts: row.0,
+            active_accounts: row.1,
+            prepaid_accounts: row.2,
+            postpaid_accounts: row.3,
+            total_balance: row.4,
+        })
+    }
 }
 
 /// Helper struct for mapping database rows
@@ -361,6 +418,8 @@ impl AccountRepository for PgAccountRepository {
 struct AccountRow {
     id: i32,
     account_number: String,
+    #[sqlx(default)]
+    account_name: Option<String>,
     customer_phone: Option<String>,
     account_type: String,
     balance: Decimal,
@@ -369,6 +428,14 @@ struct AccountRow {
     status: String,
     max_concurrent_calls: i32,
     plan_id: Option<i32>,
+    #[sqlx(default)]
+    cod_ped: Option<String>,
+    #[sqlx(default)]
+    departamento: Option<String>,
+    #[sqlx(default)]
+    provincia: Option<String>,
+    #[sqlx(default)]
+    distrito: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -378,7 +445,7 @@ impl From<AccountRow> for Account {
         Self {
             id: row.id,
             account_number: row.account_number,
-            account_name: None, // Not in database
+            account_name: row.account_name,
             customer_phone: row.customer_phone,
             account_type: PgAccountRepository::parse_account_type(&row.account_type),
             balance: row.balance,
@@ -387,6 +454,10 @@ impl From<AccountRow> for Account {
             status: PgAccountRepository::parse_account_status(&row.status),
             max_concurrent_calls: row.max_concurrent_calls,
             plan_id: row.plan_id,
+            cod_ped: row.cod_ped,
+            departamento: row.departamento,
+            provincia: row.provincia,
+            distrito: row.distrito,
             created_at: row.created_at,
             updated_at: row.updated_at,
         }

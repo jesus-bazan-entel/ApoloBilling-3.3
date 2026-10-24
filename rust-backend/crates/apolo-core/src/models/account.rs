@@ -118,6 +118,22 @@ pub struct Account {
     /// Associated plan (if account was created from a plan)
     pub plan_id: Option<i32>,
 
+    /// Order code (COD_PED) from the provisioning template
+    #[serde(default)]
+    pub cod_ped: Option<String>,
+
+    /// Customer location: department/region
+    #[serde(default)]
+    pub departamento: Option<String>,
+
+    /// Customer location: province
+    #[serde(default)]
+    pub provincia: Option<String>,
+
+    /// Customer location: district
+    #[serde(default)]
+    pub distrito: Option<String>,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -183,10 +199,29 @@ impl Default for Account {
             status: AccountStatus::Active,
             max_concurrent_calls: 1,
             plan_id: None,
+            cod_ped: None,
+            departamento: None,
+            provincia: None,
+            distrito: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
     }
+}
+
+/// Aggregate statistics across all accounts (global, not page-scoped)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountStats {
+    /// Total number of accounts
+    pub total_accounts: i64,
+    /// Number of accounts with status = 'active'
+    pub active_accounts: i64,
+    /// Number of prepaid accounts
+    pub prepaid_accounts: i64,
+    /// Number of postpaid accounts
+    pub postpaid_accounts: i64,
+    /// Sum of balance across all accounts
+    pub total_balance: Decimal,
 }
 
 #[cfg(test)]

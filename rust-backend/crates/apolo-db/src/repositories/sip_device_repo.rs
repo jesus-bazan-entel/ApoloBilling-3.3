@@ -222,16 +222,25 @@ impl SipDeviceRepository for PgSipDeviceRepository {
     ) -> AppResult<Option<SipDevice>> {
         debug!("Finding SIP device by username: {}@{}", username, domain);
 
+        // INNER JOIN on accounts with status = 'active' so that a suspended or
+        // closed billing account blocks the device from registering: the directory
+        // lookup returns None -> the mod_xml_curl endpoint replies "not found" ->
+        // FreeSWITCH rejects the REGISTER. Devices with no/invalid account_id are
+        // also rejected (no matching active account row).
         let result = sqlx::query_as::<_, SipDeviceRow>(
             r#"
             SELECT
-                id, account_id, sip_username, sip_domain,
-                password_encrypted, password_nonce, a1_hash,
-                display_name, description, context, accountcode,
-                codecs, max_registrations, enabled,
-                created_at, updated_at
-            FROM sip_devices
-            WHERE sip_username = $1 AND sip_domain = $2 AND enabled = true
+                sd.id, sd.account_id, sd.sip_username, sd.sip_domain,
+                sd.password_encrypted, sd.password_nonce, sd.a1_hash,
+                sd.display_name, sd.description, sd.context, sd.accountcode,
+                sd.codecs, sd.max_registrations, sd.enabled,
+                sd.created_at, sd.updated_at
+            FROM sip_devices sd
+            JOIN accounts a ON a.id = sd.account_id
+            WHERE sd.sip_username = $1
+              AND sd.sip_domain = $2
+              AND sd.enabled = true
+              AND a.status = 'active'
             "#,
         )
         .bind(username)
@@ -279,12 +288,13 @@ impl SipDeviceRepository for PgSipDeviceRepository {
         &self,
         account_id: Option<i32>,
         enabled: Option<bool>,
+        search: Option<&str>,
         limit: i64,
         offset: i64,
     ) -> AppResult<(Vec<SipDevice>, i64)> {
         debug!(
-            "Listing SIP devices with filters: account_id={:?}, enabled={:?}",
-            account_id, enabled
+            "Listing SIP devices with filters: account_id={:?}, enabled={:?}, search={:?}",
+            account_id, enabled, search
         );
 
         // Build dynamic query
@@ -311,6 +321,20 @@ impl SipDeviceRepository for PgSipDeviceRepository {
         if let Some(e) = enabled {
             query_str.push_str(&format!(" AND enabled = {}", e));
             count_query.push_str(&format!(" AND enabled = {}", e));
+        }
+
+        // Search by SIP username (or display name). Sanitize to alphanumerics so
+        // the inline LIKE stays injection-safe (SIP usernames are alphanumeric).
+        if let Some(s) = search {
+            let sanitized: String = s.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            if !sanitized.is_empty() {
+                let clause = format!(
+                    " AND (sip_username ILIKE '%{0}%' OR display_name ILIKE '%{0}%')",
+                    sanitized
+                );
+                query_str.push_str(&clause);
+                count_query.push_str(&clause);
+            }
         }
 
         query_str.push_str(&format!(" ORDER BY id LIMIT {} OFFSET {}", limit, offset));

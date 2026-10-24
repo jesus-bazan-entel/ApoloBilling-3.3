@@ -1,0 +1,181 @@
+--- a/config/kamailio/kamailio.cfg
++++ b/config/kamailio/kamailio.cfg
+@@ -23,19 +23,19 @@
+ ##!define WITH_SIGNAL_SERVERNAT6
+ #!define WITH_MEDIA_SERVERNAT
+ #!define WITH_MULTIDOMAIN
+-#!define WITH_TELEBLOCK
++##!define WITH_TELEBLOCK  (disabled 2026-10: dSIPRouter leftover; TeleBlock blacklist (62.34.24.22), never used)
+ #!define WITH_ANTIFLOOD
+ ##!define WITH_DBCLUSTER
+-#!define WITH_LCR
++##!define WITH_LCR  (disabled 2026-10: dSIPRouter leftover; dsip_lcr from/to-prefix LCR, table empty)
+ ##!define WITH_TLS  (disabled 2026-10-24: unused; per-process CA load added ~38s to startup)
+ ##!define WITH_SCTP
+-#!define WITH_WEBSOCKETS
++##!define WITH_WEBSOCKETS  (disabled 2026-10: dSIPRouter leftover; no WSS listener since TLS was disabled)
+ ##!define WITH_DMQ
+ ##!define WITH_MSTEAMS  (disabled 2026-10-24: requires TLS sockets; no Teams gateways)
+ ##!define WITH_DNID_LNP_ENRICHMENT
+ #!define WITH_RTPENGINE
+-#!define WITH_TRANSNEXUS
+-#!define WITH_STIRSHAKEN
++##!define WITH_TRANSNEXUS  (disabled 2026-10: dSIPRouter leftover; ClearIP auth/verify service, never used)
++##!define WITH_STIRSHAKEN  (disabled 2026-10: dSIPRouter leftover; native STIR/SHAKEN, never enabled)
+ ##!define WITH_IPV6
+ ##!define WITH_HOMER
+ #!define WITH_DMZ
+@@ -346,7 +346,7 @@
+ # Whether the “Server” header for locally generated messages is set
+ server_signature = true
+ # What the generated "Server" header will be set to
+-server_header = "Server: dSIPRouter/DSIP_VERSION"
++server_header = "Server: Apolo-SBC"
+ 
+ # disable Stream Control Tranmission Protocol (SCTP)
+ #!ifdef WITH_SCTP
+@@ -403,8 +403,6 @@
+ server.pbx_invite_timeout_aftertry = 60000 desc "PBX INVITE timeout value if a SIP 100 message is received"
+ 
+ # DSIPRouter API Server Settings
+-server.api_server = "https://127.0.0.1:5000" desc "URL to the DSIPRouter API Server"
+-server.api_token = "lVhqw6o86odwlkL7SIEhBGbfmLJ9Dpjbf85JBYG6L2rNSMXTs6KAjqecsHdWBf5Q" desc "API Token for DSIPRouter API Server"
+ 
+ # Emergency Numbers
+ server.emergency_numbers = "^([2-9]11|112|999|000|988|933)$" desc "Emergency Numbers"
+@@ -475,7 +473,6 @@
+ loadmodule "json.so"
+ loadmodule "jansson.so"
+ loadmodule "jsonrpcs.so"
+-loadmodule "http_async_client.so"
+ loadmodule "uuid.so"
+ loadmodule "ipops.so"
+ loadmodule "sdpops.so"
+@@ -989,21 +986,6 @@
+ # Pass-Thru Auth IP to Domain mapping lookup. Allows PJSIP Pass-Thru to work correctly
+ #modparam("htable", "htable", "pbxip2domain=>size=8;autoexpire=0;dmqreplicate=DMQ_REPLICATE_ENABLED")
+ 
+-# ----- http_async_client params -----
+-modparam("http_async_client", "workers", 1)
+-modparam("http_async_client", "connection_timeout", 500)
+-modparam("http_async_client", "hash_size", 2048)
+-#!ifdef WITH_DEBUG
+-modparam("http_async_client", "curl_verbose", 1)
+-#!endif
+-#!ifdef WITH_TLS
+-modparam("http_async_client", "tls_client_cert", "/etc/dsiprouter/certs/dsiprouter-cert.pem")
+-modparam("http_async_client", "tls_client_key", "/etc/dsiprouter/certs/dsiprouter-key.pem")
+-modparam("http_async_client", "tls_ca_path", "/etc/dsiprouter/certs/")
+-# Disable SSL cert verification for self-signed dSIPRouter cert
+-modparam("http_async_client", "tls_verify_peer", 0)
+-modparam("http_async_client", "tls_verify_host", 0)
+-#!endif
+ 
+ # ---- sip trace params ----
+ #!ifdef WITH_HOMER
+@@ -1831,12 +1813,6 @@
+ 		route(SET_RECORD_ROUTE);
+ 	}
+ 
+-	if (is_method("NOTIFY|BYE") && is_rfc1918("$rd")) {
+-                if (!lookup("location","sip:$tU@$td")) {
+-                        xlog("L_DBG", "Notify Failed - NAT'd address for $tU@$td not found");
+-                }
+-        }
+-
+ 	# handle STIR/SHAKEN
+ #!ifdef WITH_TRANSNEXUS
+ 	if ((int)$sel(cfg_get.transnexus.authservice_enabled)) {
+@@ -1894,10 +1870,6 @@
+ 			$var(num_calls) = $sht(concurrent_calls=>$dlg_var(src_gwgroupid));
+ 			if ($var(num_calls) >= $xavu(src_call_settings=>limit)) {
+ 				sl_reply("480", "Call Limit Exceeded");
+-				$avp(notification_type) = NOTIFICATION_OVERLIMIT;
+-				$avp(notification_gwid) = $dlg_var(src_gwid);
+-				$avp(notification_gwgroupid) = $dlg_var(src_gwgroupid);
+-				route(SEND_NOTIFICATION);
+ 				exit;
+ 			}
+ 		}
+@@ -1907,10 +1879,6 @@
+ 		$var(num_calls) = $sht(concurrent_calls=>$dlg_var(dst_gwgroupid));
+ 		if ($var(num_calls) >= $xavu(dst_call_settings=>limit)) {
+ 			sl_reply("480", "Call Limit Exceeded");
+-			$avp(notification_type) = NOTIFICATION_OVERLIMIT;
+-			$avp(notification_gwid) = $dlg_var(dst_gwid);
+-			$avp(notification_gwgroupid) = $dlg_var(dst_gwgroupid);
+-			route(SEND_NOTIFICATION);
+ 			exit;
+ 		}
+ 	}
+@@ -3941,50 +3909,6 @@
+ }
+ #!endif
+ 
+-# send async http request for notifications
+-# required:     $avp(notification_type)
+-# required:     $avp(notification_gwgroupid)
+-# optional:     $avp(notification_gwid)
+-route[SEND_NOTIFICATION] {
+-	# Apolo: disabled 2026-10-24. Target is the retired dSIPRouter API (nginx :5000 -> 502)
+-	# and http_async_client in 5.8.3 double-frees under load -> shm corruption -> SEGV
+-	# crash-loop (incident 2026-10-23, 17 restarts). Clear the AVPs and bail out.
+-	$avp(notification_type) = $null;
+-	$avp(notification_gwgroupid) = $null;
+-	$avp(notification_gwid) = $null;
+-	return;
+-
+-	if ($avp(notification_type) != $null && $avp(notification_gwgroupid) != $null) {
+-		$http_req(method) = "POST";
+-		$http_req(hdr) = "User-Agent: http_async_client";
+-		$http_req(hdr) = "Authorization: Bearer " + $sel(cfg_get.server.api_token);
+-		$http_req(body) = '{"gwgroupid":' + $avp(notification_gwgroupid) + ', "type":' + $avp(notification_type) +
+-				', "gwid":' + $avp(notification_gwid) + ', "text_body":"Gateway Group [' + $avp(notification_gwgroupid) +
+-				'] triggered the following notification for Gateway [' + $avp(notification_gwid) + ']"}';
+-		$http_req(suspend) = 0;
+-
+-		xlog("L_INFO", "Sending request to $sel(cfg_get.server.api_server)/api/v1/notification/gwgroup for type $avp(notification_type)\n");
+-		http_async_query("$sel(cfg_get.server.api_server)/api/v1/notification/gwgroup", "HTTP_REPLY");
+-	}
+-	else {
+-		xlog("L_ERR", "avp 'notification_type' and 'notification_gwgroupid' are required for notification sending\n");
+-	}
+-
+-	$avp(notification_type) = $null;
+-	$avp(notification_gwgroupid) = $null;
+-	$avp(notification_gwid) = $null;
+-}
+-
+-route[HTTP_REPLY] {
+-	if ($http_ok) {
+-		xlog("L_INFO", "status: $http_rs\n");
+-		xlog("L_DBG", "body: $http_rb\n");
+-	}
+-	else {
+-		xlog("L_ERR", "error: $http_err)\n");
+-	}
+-}
+-
+ route[DIALOG_TIMEOUT] {
+ 	# TODO: handle edge cases
+ 	# 		when we rewrite the reply this may cause issues
+@@ -4471,19 +4395,6 @@
+ 					}
+ 					# else: fall through and let TM relay the best branch reply upstream unchanged
+ 
+-					# we can only send notification if mapped to endpoint group
+-					if ($dlg_var(src_gwtype) == FLT_PBX) {
+-						$avp(notification_type) = NOTIFICATION_GWFAILURE;
+-						$avp(notification_gwgroupid) = $dlg_var(src_gwgroupid);
+-						$avp(notification_gwid) = $dlg_var(src_gwid);
+-						route(SEND_NOTIFICATION);
+-					}
+-					else if ($dlg_var(dst_gwtype) == FLT_PBX) {
+-						$avp(notification_type) = NOTIFICATION_GWFAILURE;
+-						$avp(notification_gwgroupid) = $dlg_var(dst_gwgroupid);
+-						$avp(notification_gwid) = $dlg_var(dst_gwid);
+-						route(SEND_NOTIFICATION);
+-					}
+ 				}
+ 			}
+ 			# Don't teardown the RTPEngine if coming or going to MSTeams

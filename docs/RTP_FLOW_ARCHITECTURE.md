@@ -89,7 +89,7 @@
 
 ```ini
 [rtpengine]
-table = -1                    # No usar kernel module (userspace only)
+table = 0                     # Kernel module xt_RTPENGINE (tabla 0). table = -1 = solo userspace.
 no-fallback = false
 
 # INTERFACES DUALES (clave para la arquitectura)
@@ -133,6 +133,30 @@ modparam("rtpengine", "rtpengine_sock", "udp:localhost:7722")
 modparam("rtpengine", "rtpengine_retr", 5)
 modparam("rtpengine", "hash_table_tout", 60)
 ```
+
+### Modo kernel (table = 0) — requisitos
+
+`table = 0` usa el módulo `xt_RTPENGINE` (paquete `ngcp-rtpengine-kernel-dkms`).
+Sin esto el daemon cae a userspace en silencio (`no-fallback = false`):
+
+1. **Backend iptables-legacy.** `xt_RTPENGINE` es una extensión xtables: solo el
+   backend legacy crea e inspecciona su regla `-j RTPENGINE`. El script
+   `ngcp-rtpengine-iptables-setup` invoca los CLIs genéricos y oculta errores
+   (`2>/dev/null`). Fijar con:
+   `update-alternatives --set iptables /usr/sbin/iptables-legacy` (igual para
+   `ip6tables`). Lo aplica el instalador (`deploy_apolo_configs`). No afecta a
+   firewalld (ruleset nft propio); reiniciar `docker` tras el cambio para que
+   detecte el mismo backend.
+2. **Self-check post-arranque.** El drop-in
+   `config/rtpengine/systemd/override.conf` + `/usr/local/sbin/rtpengine-kernel-check`
+   registran en el journal `kernel forwarding OK` o `WARNING` (módulo / tabla
+   `/proc` / regla legacy ausentes). Nunca falla el servicio:
+   `journalctl -u rtpengine --since "5 min ago" | grep -i "WARNING\|kernel forwarding"`.
+3. **Activación:** solo con 0 sesiones (el restart tira el audio en curso),
+   ventana 02:00–05:00. Verificar `lsmod | grep xt_RTPENGINE`,
+   `iptables-legacy -L rtpengine -n -v` (contadores > 0 en llamada),
+   `cat /proc/rtpengine/0/list` y audio bidireccional en llamada entrante y
+   saliente. Rollback: `table = -1` + restart.
 
 ---
 

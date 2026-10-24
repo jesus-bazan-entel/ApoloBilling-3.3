@@ -54,7 +54,7 @@ export default function AuditLogs() {
 
   const getActionColor = (action: string) => {
     if (action.includes('create')) return 'bg-green-100 text-green-800 border-green-200'
-    if (action.includes('update')) return 'bg-blue-100 text-blue-800 border-blue-200'
+    if (action.includes('update')) return 'bg-[#ffede3] text-[#d8450b] border-[#ffbb9a]'
     if (action.includes('delete')) return 'bg-red-100 text-red-800 border-red-200'
     if (action.includes('login')) return 'bg-purple-100 text-purple-800 border-purple-200'
     return 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] border-[var(--color-border-primary)]'
@@ -113,7 +113,7 @@ export default function AuditLogs() {
       render: (log: AuditLog) => (
         <button
           onClick={() => setSelectedLog(log)}
-          className="text-blue-600 hover:text-blue-800 text-sm underline"
+          className="text-[#ff5a0a] hover:text-[#d8450b] text-sm underline"
         >
           Ver detalles
         </button>
@@ -144,7 +144,7 @@ export default function AuditLogs() {
           onClick={() => setShowFilters(!showFilters)}
           className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
             showFilters || hasActiveFilters
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              ? 'bg-[#ff5a0a] text-white hover:bg-[#d8450b]'
               : 'bg-[var(--color-bg-card)] border border-[var(--color-border-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
           }`}
         >
@@ -158,7 +158,7 @@ export default function AuditLogs() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
             <div className="flex items-center gap-3">
-              <FileSearch className="w-8 h-8 text-blue-600" />
+              <FileSearch className="w-8 h-8 text-[#ff5a0a]" />
               <div>
                 <p className="text-sm text-[var(--color-text-secondary)]">Total Logs</p>
                 <p className="text-2xl font-bold text-[var(--color-text-primary)]">{stats.total_logs?.toLocaleString()}</p>
@@ -204,7 +204,7 @@ export default function AuditLogs() {
                 value={filters.username}
                 onChange={(e) => handleFilterChange('username', e.target.value)}
                 placeholder="Filtrar por usuario..."
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
             <div>
@@ -214,7 +214,7 @@ export default function AuditLogs() {
                 value={filters.action}
                 onChange={(e) => handleFilterChange('action', e.target.value)}
                 placeholder="ej: create_account"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
             <div>
@@ -224,7 +224,7 @@ export default function AuditLogs() {
                 value={filters.entity_type}
                 onChange={(e) => handleFilterChange('entity_type', e.target.value)}
                 placeholder="ej: account, user"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
             <div>
@@ -234,7 +234,7 @@ export default function AuditLogs() {
                 value={filters.entity_id}
                 onChange={(e) => handleFilterChange('entity_id', e.target.value)}
                 placeholder="ID específico..."
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
             <div>
@@ -243,7 +243,7 @@ export default function AuditLogs() {
                 type="datetime-local"
                 value={filters.start_date}
                 onChange={(e) => handleFilterChange('start_date', e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
             <div>
@@ -252,7 +252,7 @@ export default function AuditLogs() {
                 type="datetime-local"
                 value={filters.end_date}
                 onChange={(e) => handleFilterChange('end_date', e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-transparent"
               />
             </div>
           </div>

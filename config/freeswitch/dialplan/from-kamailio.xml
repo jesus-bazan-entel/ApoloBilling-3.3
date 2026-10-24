@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="from-kamailio">
+
+    <!-- Force reliable provisional responses on every inbound from
+         Kamailio/Integratel. Must run before any extension that answers,
+         pre-answers or bridges, so it is in effect when FS emits the
+         first 18x. continue="true" falls through to the routing
+         extensions below. -->
+    <extension name="force-100rel" continue="true">
+      <condition field="destination_number" expression="^.*$">
+        <action application="set" data="sip_require_100rel=true"/>
+      </condition>
+    </extension>
+
+    <extension name="did-312216800137">
+      <!-- declared source_ip_pattern (enforced by Kamailio ACL, not FS): ^10\.35\.12\.68$ -->
+      <condition field="destination_number" expression="^31(\d+)$">
+        <action application="log" data="INFO Inbound DID 3122: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="original_destination=${destination_number}"/>
+        <action application="set" data="transformed_number=${destination_number:4}"/>
+        <action application="log" data="INFO Transformed: ${original_destination} -> ${transformed_number}"/>
+        <action application="set" data="call_timeout=120"/>
+        <action application="set" data="originate_timeout=120"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="target_contact=${sofia_contact(${transformed_number}@app.fonowin.pe)}"/>
+        <action application="bridge" data="${target_contact}"/>
+      </condition>
+    </extension>
+
+    <extension name="fonowin-legado-inbound">
+      <!-- declared source_ip_pattern (enforced by Kamailio ACL, not FS): ^10\.118\.0\.4$ -->
+      <condition field="destination_number" expression="^(\d+)$">
+        <action application="log" data="INFO Inbound Fonowin Legado Inbound: ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="call_timeout=60"/>
+        <action application="set" data="originate_timeout=60"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="set" data="target_contact=${sofia_contact($1@app.fonowin.pe)}"/>
+        <action application="bridge" data="${target_contact}"/>
+      </condition>
+    </extension>
+
+    <extension name="fallback-registered-user">
+      <condition field="destination_number" expression="^(\d+)$" break="never">
+        <action application="set" data="dialed_extension=$1"/>
+      </condition>
+      <condition field="${sofia_contact(user/${dialed_extension}@${sip_network_ip})}" expression="^sofia/">
+        <action application="log" data="INFO from-kamailio fallback: bridging to registered user ${dialed_extension}"/>
+        <action application="set" data="call_timeout=60"/>
+        <action application="set" data="inherit_codec=true"/>
+        <action application="bridge" data="user/${dialed_extension}"/>
+      </condition>
+    </extension>
+
+    <extension name="unmatched">
+      <condition field="destination_number" expression="^.*$">
+        <action application="log" data="WARNING from-kamailio: no route for ${destination_number} from ${network_addr}"/>
+        <action application="respond" data="404 Not Found"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
-  fetchSipDevices,
+  fetchSipDevicesPaginated,
   createSipDevice,
   updateSipDevice,
   deleteSipDevice,
@@ -31,6 +31,7 @@ import {
   Clock,
   Globe,
   Monitor,
+  Search,
 } from 'lucide-react'
 import type { SipDevice, SipDeviceWithPassword, Account } from '../types'
 
@@ -42,12 +43,30 @@ export default function SipDevicesPage() {
   const [viewingStatus, setViewingStatus] = useState<{ device: SipDevice; status: SipRegistrationStatus } | null>(null)
   const [error, setError] = useState('')
   const [createdDevice, setCreatedDevice] = useState<SipDeviceWithPassword | null>(null)
+  const [page, setPage] = useState(1)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
   const queryClient = useQueryClient()
 
-  const { data: devices = [], isLoading } = useQuery({
-    queryKey: ['sip-devices'],
-    queryFn: () => fetchSipDevices(),
+  const PER_PAGE = 25
+
+  // Debounce the search box and reset to page 1 whenever the term changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const { data: devicesPage, isLoading } = useQuery({
+    queryKey: ['sip-devices', page, search],
+    queryFn: () => fetchSipDevicesPaginated(page, PER_PAGE, search),
+    placeholderData: keepPreviousData,
   })
+
+  const devices = devicesPage?.data ?? []
+  const totalPages = devicesPage?.total_pages ?? 1
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -98,7 +117,8 @@ export default function SipDevicesPage() {
   })
 
   const regeneratePasswordMutation = useMutation({
-    mutationFn: regenerateSipDevicePassword,
+    mutationFn: ({ id, newPassword }: { id: number; newPassword?: string }) =>
+      regenerateSipDevicePassword(id, newPassword),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['sip-devices'] })
       setViewingPassword({
@@ -201,10 +221,10 @@ export default function SipDevicesPage() {
         <div className="flex items-center space-x-1">
           <button
             onClick={() => handleViewStatus(device)}
-            className="p-1.5 hover:bg-blue-50 rounded"
+            className="p-1.5 hover:bg-[#fff3ed] rounded"
             title="Ver estado de registro"
           >
-            <Activity className="w-4 h-4 text-blue-600" />
+            <Activity className="w-4 h-4 text-[#ff5a0a]" />
           </button>
           <button
             onClick={() => handleViewPassword(device)}
@@ -237,7 +257,7 @@ export default function SipDevicesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)] flex items-center">
-            <Phone className="w-8 h-8 mr-3 text-blue-600" />
+            <Phone className="w-8 h-8 mr-3 text-[#ff5a0a]" />
             Dispositivos SIP
           </h1>
           <p className="text-[var(--color-text-secondary)] mt-1">
@@ -246,11 +266,25 @@ export default function SipDevicesPage() {
         </div>
         <button
           onClick={handleCreate}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
+          className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] flex items-center"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nuevo Dispositivo
         </button>
+      </div>
+
+      {/* Search box (server-side, searches across all pages) */}
+      <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm border border-[var(--color-border-primary)] p-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-[var(--color-text-tertiary)]" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Buscar por usuario SIP o display name..."
+            className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] transition-colors placeholder:text-[var(--color-text-muted)]"
+          />
+        </div>
       </div>
 
       <DataTable
@@ -258,6 +292,11 @@ export default function SipDevicesPage() {
         columns={columns}
         loading={isLoading}
         emptyMessage="No hay dispositivos SIP configurados"
+        pagination={{
+          page,
+          totalPages,
+          onPageChange: setPage,
+        }}
       />
 
       {showModal && (
@@ -292,7 +331,12 @@ export default function SipDevicesPage() {
         <PasswordModal
           device={viewingPassword}
           onClose={() => setViewingPassword(null)}
-          onRegenerate={() => regeneratePasswordMutation.mutate(viewingPassword.id)}
+          onRegenerate={(newPassword) =>
+            regeneratePasswordMutation.mutate({
+              id: viewingPassword.id,
+              newPassword,
+            })
+          }
           isRegenerating={regeneratePasswordMutation.isPending}
         />
       )}
@@ -333,7 +377,7 @@ function DeviceModal({
   const [formData, setFormData] = useState({
     account_id: device?.account_id || (accounts[0]?.id || 0),
     sip_username: device?.sip_username || '',
-    sip_domain: device?.sip_domain || '10.10.22.4',
+    sip_domain: device?.sip_domain || '10.118.0.6',
     display_name: device?.display_name || '',
     description: device?.description || '',
     context: device?.context || 'from-pbx',
@@ -342,10 +386,21 @@ function DeviceModal({
     max_registrations: device?.max_registrations || 3,
     enabled: device?.enabled ?? true,
   })
+  // Custom password is only meaningful during creation; on edit the password
+  // is managed via the "Regenerar Contraseña" modal.
+  const [customPassword, setCustomPassword] = useState('')
+  const [showCustomPassword, setShowCustomPassword] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(formData)
+    // Only forward `password` when the operator typed something; empty →
+    // backend auto-generates (preserves existing behavior).
+    const payload: any = { ...formData }
+    const trimmed = customPassword.trim()
+    if (!device && trimmed) {
+      payload.password = trimmed
+    }
+    onSave(payload)
   }
 
   return (
@@ -382,7 +437,7 @@ function DeviceModal({
                   setFormData({ ...formData, sip_username: e.target.value })
                 }
                 placeholder="1001"
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
 
@@ -398,13 +453,73 @@ function DeviceModal({
                 onChange={(e) =>
                   setFormData({ ...formData, sip_domain: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                Puerto SIP: 5080 (configurar en softphone)
+                Puerto SIP: 5060 (configurar en softphone)
               </p>
             </div>
           </div>
+
+          {/* Custom password input — only on creation. On edit, the password
+              is handled by the dedicated "Regenerar Contraseña" modal. */}
+          {!device && (
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                Contraseña SIP
+              </label>
+              <div className="relative">
+                <input
+                  type={showCustomPassword ? 'text' : 'password'}
+                  value={customPassword}
+                  onChange={(e) => setCustomPassword(e.target.value)}
+                  placeholder="Dejar en blanco para generar automáticamente"
+                  minLength={8}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  className="w-full px-3 py-2 pr-24 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
+                />
+                <div className="absolute right-1 top-1 flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomPassword((v) => !v)}
+                    className="p-1.5 hover:bg-[var(--color-bg-secondary)] rounded"
+                    title={showCustomPassword ? 'Ocultar' : 'Mostrar'}
+                  >
+                    {showCustomPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Generate a 16-char alphanumeric password client-side
+                      // for convenience; the backend does the same if the
+                      // field is left blank on submit.
+                      const chars =
+                        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+                      const arr = new Uint32Array(16)
+                      crypto.getRandomValues(arr)
+                      setCustomPassword(
+                        Array.from(arr, (n) => chars[n % chars.length]).join('')
+                      )
+                      setShowCustomPassword(true)
+                    }}
+                    className="p-1.5 hover:bg-[var(--color-bg-secondary)] rounded"
+                    title="Generar aleatoria"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                Mínimo 8 caracteres. Si se deja vacío, el servidor genera una
+                contraseña aleatoria.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
@@ -416,7 +531,7 @@ function DeviceModal({
               onChange={(e) =>
                 setFormData({ ...formData, account_id: Number(e.target.value) })
               }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
             >
               {accounts.map((account: Account) => (
                 <option key={account.id} value={account.id}>
@@ -438,7 +553,7 @@ function DeviceModal({
                   setFormData({ ...formData, display_name: e.target.value })
                 }
                 placeholder="Juan Pérez"
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
             </div>
 
@@ -451,7 +566,7 @@ function DeviceModal({
                 onChange={(e) =>
                   setFormData({ ...formData, context: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               >
                 <option value="from-pbx">from-pbx (Saliente)</option>
                 <option value="from-internal">from-internal (Interno)</option>
@@ -472,7 +587,7 @@ function DeviceModal({
                   setFormData({ ...formData, accountcode: e.target.value })
                 }
                 placeholder="Ej: ACC-001"
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 Usado para vincular CDRs con facturación
@@ -494,7 +609,7 @@ function DeviceModal({
                     max_registrations: Number(e.target.value),
                   })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
             </div>
           </div>
@@ -509,7 +624,7 @@ function DeviceModal({
               onChange={(e) =>
                 setFormData({ ...formData, codecs: e.target.value })
               }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
             />
             <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
               Lista separada por comas: PCMU,PCMA,G729,opus
@@ -527,7 +642,7 @@ function DeviceModal({
               }
               rows={2}
               placeholder="Teléfono de escritorio, oficina principal..."
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
             />
           </div>
 
@@ -538,7 +653,7 @@ function DeviceModal({
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              className="w-4 h-4 text-[#ff5a0a] rounded focus:ring-[#ff5a0a]"
             />
             <label className="ml-2 text-sm font-medium text-[var(--color-text-secondary)]">
               Dispositivo activo
@@ -555,7 +670,7 @@ function DeviceModal({
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b]"
             >
               {device ? 'Actualizar' : 'Crear'}
             </button>
@@ -613,17 +728,22 @@ function PasswordModal({
 }: {
   device: SipDeviceWithPassword
   onClose: () => void
-  onRegenerate: () => void
+  onRegenerate: (newPassword?: string) => void
   isRegenerating: boolean
 }) {
   const [showPassword, setShowPassword] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(device.password)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
+
+  const customTooShort =
+    newPassword.trim().length > 0 && newPassword.trim().length < 8
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -641,7 +761,7 @@ function PasswordModal({
               Dispositivo
             </label>
             <p className="font-mono text-lg">
-              {device.sip_username}@{device.sip_domain}:5080
+              {device.sip_username}@{device.sip_domain}:5060
             </p>
           </div>
 
@@ -682,16 +802,55 @@ function PasswordModal({
             </div>
           </div>
 
-          <div className="pt-4 border-t">
+          <div className="pt-4 border-t space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
+                Nueva contraseña (opcional)
+              </label>
+              <div className="relative">
+                <input
+                  type={showNewPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Dejar vacío para generar automáticamente"
+                  minLength={8}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  className="w-full px-3 py-2 pr-10 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((v) => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-[var(--color-bg-secondary)] rounded"
+                  title={showNewPassword ? 'Ocultar' : 'Mostrar'}
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              {customTooShort && (
+                <p className="text-xs text-red-600 mt-1">
+                  Mínimo 8 caracteres.
+                </p>
+              )}
+            </div>
+
             <button
-              onClick={onRegenerate}
-              disabled={isRegenerating}
+              onClick={() => onRegenerate(newPassword.trim() || undefined)}
+              disabled={isRegenerating || customTooShort}
               className="w-full px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 flex items-center justify-center disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isRegenerating ? 'animate-spin' : ''}`} />
-              {isRegenerating ? 'Regenerando...' : 'Regenerar Contraseña'}
+              {isRegenerating
+                ? 'Aplicando...'
+                : newPassword.trim()
+                  ? 'Guardar nueva contraseña'
+                  : 'Regenerar aleatoria'}
             </button>
-            <p className="text-xs text-[var(--color-text-tertiary)] mt-2 text-center">
+            <p className="text-xs text-[var(--color-text-tertiary)] text-center">
               El dispositivo deberá registrarse nuevamente con la nueva contraseña
             </p>
           </div>
@@ -766,7 +925,7 @@ function CreatedDeviceModal({
           </button>
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="flex-1 px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b]"
           >
             Entendido
           </button>
@@ -929,7 +1088,7 @@ function RegistrationStatusModal({
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b]"
           >
             Cerrar
           </button>

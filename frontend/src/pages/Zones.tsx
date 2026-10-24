@@ -89,7 +89,7 @@ export default function ZonesPage() {
       key: 'zone_type',
       header: 'Tipo',
       render: (zone: Zone) => (
-        <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+        <span className="px-2 py-1 text-xs rounded-full bg-[#ffede3] text-[#d8450b]">
           {zone.zone_type || 'GEOGRAPHIC'}
         </span>
       ),
@@ -112,7 +112,7 @@ export default function ZonesPage() {
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setEditingZone(zone)}
-            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-1.5 text-[#ff5a0a] hover:bg-[#fff3ed] rounded-lg transition-colors"
             title="Editar"
           >
             <Pencil className="w-4 h-4" />
@@ -142,7 +142,7 @@ export default function ZonesPage() {
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
         >
           <Plus className="w-5 h-5 mr-2" />
           Nueva Zona
@@ -152,7 +152,7 @@ export default function ZonesPage() {
       {/* Summary Card */}
       <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-6 border border-[var(--color-border-primary)]">
         <div className="flex items-center">
-          <Globe className="w-8 h-8 text-blue-500 mr-4" />
+          <Globe className="w-8 h-8 text-[#ff5a0a] mr-4" />
           <div>
             <p className="text-sm text-[var(--color-text-tertiary)]">Total de Zonas</p>
             <p className="text-3xl font-bold text-[var(--color-text-primary)]">{zones.length}</p>
@@ -273,7 +273,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, zone_name: e.target.value })
               }
               placeholder="Ej: Peru_Lima, USA_NewYork"
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
             />
           </div>
 
@@ -288,7 +288,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, zone_code: e.target.value })
               }
               placeholder="Ej: PE-LIM, US-NYC"
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
             />
           </div>
 
@@ -303,7 +303,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 setFormData({ ...formData, description: e.target.value })
               }
               placeholder="Descripción de la zona"
-              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
             />
           </div>
 
@@ -317,7 +317,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                 onChange={(e) =>
                   setFormData({ ...formData, zone_type: e.target.value })
                 }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               >
                 <option value="GEOGRAPHIC">Geográfica</option>
                 <option value="MOBILE">Móvil</option>
@@ -336,7 +336,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
                   setFormData({ ...formData, region_name: e.target.value })
                 }
                 placeholder="Ej: Sudamérica"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
           </div>
@@ -349,7 +349,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 border-[var(--color-border-primary)] rounded focus:ring-blue-500"
+              className="w-4 h-4 text-[#ff5a0a] border-[var(--color-border-primary)] rounded focus:ring-[#ff5a0a]"
             />
             <label htmlFor="enabled" className="ml-2 text-sm text-[var(--color-text-secondary)]">
               Zona activa
@@ -367,7 +367,7 @@ function ZoneFormModal({ title, zone, onClose, onSubmit, isLoading, error }: Zon
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
             >
               {isLoading ? 'Guardando...' : 'Guardar'}
             </button>

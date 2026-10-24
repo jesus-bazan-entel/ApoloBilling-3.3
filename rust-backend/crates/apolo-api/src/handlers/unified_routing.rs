@@ -21,7 +21,12 @@ use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 // FreeSWITCH dialplan file path
-const TO_KAMAILIO_XML: &str = "/etc/freeswitch/dialplan/to-kamailio.xml";
+// Context consumed by the external sofia profile (sip_profiles/external.xml
+// ships with `<param name="context" value="from-kamailio"/>`). The old name
+// `to-kamailio.xml` was used when the external profile had the opposite
+// context label; renaming here keeps the generated dialplan in sync with
+// what the SIP profile actually loads.
+const FROM_KAMAILIO_XML: &str = "/etc/freeswitch/dialplan/from-kamailio.xml";
 
 // ============================================================================
 // Trunk Handlers
@@ -990,6 +995,7 @@ pub async fn list_outbound_routes(
                r.trunk_group_id, g.name as "trunk_group_name?",
                r.trunk_id, t.name as "trunk_name?",
                r.time_schedule, r.time_schedule_enabled, r.enabled,
+               r.strip_digits, r.prefix_to_add,
                r.kamailio_ruleid, r.sync_status, r.sync_error,
                r.created_at, r.updated_at
         FROM routing_outbound_routes r
@@ -1023,6 +1029,7 @@ pub async fn get_outbound_route(
                r.trunk_group_id, g.name as "trunk_group_name?",
                r.trunk_id, t.name as "trunk_name?",
                r.time_schedule, r.time_schedule_enabled, r.enabled,
+               r.strip_digits, r.prefix_to_add,
                r.kamailio_ruleid, r.sync_status, r.sync_error,
                r.created_at, r.updated_at
         FROM routing_outbound_routes r
@@ -1070,12 +1077,13 @@ pub async fn create_outbound_route(
         r#"
         INSERT INTO routing_outbound_routes (name, description, prefix_pattern, priority,
                                             trunk_group_id, trunk_id, time_schedule,
-                                            time_schedule_enabled, enabled)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                                            time_schedule_enabled, strip_digits, prefix_to_add, enabled)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING id, name, description, prefix_pattern, priority,
                   trunk_group_id, NULL as trunk_group_name,
                   trunk_id, NULL as trunk_name,
                   time_schedule, time_schedule_enabled, enabled,
+                  strip_digits, prefix_to_add,
                   kamailio_ruleid, sync_status, sync_error,
                   created_at, updated_at
         "#,
@@ -1087,6 +1095,8 @@ pub async fn create_outbound_route(
         req.trunk_id,
         req.time_schedule,
         req.time_schedule_enabled,
+        req.strip_digits,
+        req.prefix_to_add,
         req.enabled
     )
     .fetch_one(pool.get_ref())
@@ -1174,12 +1184,15 @@ pub async fn update_outbound_route(
             time_schedule = COALESCE($7, time_schedule),
             time_schedule_enabled = COALESCE($8, time_schedule_enabled),
             enabled = COALESCE($9, enabled),
+            strip_digits = COALESCE($10, strip_digits),
+            prefix_to_add = COALESCE($11, prefix_to_add),
             sync_status = 'pending'
-        WHERE id = $10
+        WHERE id = $12
         RETURNING id, name, description, prefix_pattern, priority,
                   trunk_group_id, NULL as trunk_group_name,
                   trunk_id, NULL as trunk_name,
                   time_schedule, time_schedule_enabled, enabled,
+                  strip_digits, prefix_to_add,
                   kamailio_ruleid, sync_status, sync_error,
                   created_at, updated_at
         "#,
@@ -1192,6 +1205,8 @@ pub async fn update_outbound_route(
         req.time_schedule,
         req.time_schedule_enabled,
         req.enabled,
+        req.strip_digits,
+        req.prefix_to_add.as_deref(),
         route_id
     )
     .fetch_optional(pool.get_ref())
@@ -1366,10 +1381,13 @@ pub async fn list_inbound_routes(
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.name as "destination_trunk_name?",
-               r.send_early_media, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
+               pt.name as "parallel_trunk_name?",
+               r.send_early_media, r.parallel_trunk_id, r.direct_routing, r.fs_numbers,
+               r.failover_destinations, r.enabled, r.freeswitch_extension_id,
                r.sync_status, r.sync_error, r.created_at, r.updated_at
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
+        LEFT JOIN routing_trunks pt ON r.parallel_trunk_id = pt.id
         ORDER BY r.priority, r.did_pattern
         "#
     )
@@ -1398,6 +1416,10 @@ pub async fn list_inbound_routes(
             destination_trunk_id: r.destination_trunk_id,
             destination_trunk_name: r.destination_trunk_name,
             send_early_media: Some(r.send_early_media),
+            parallel_trunk_id: r.parallel_trunk_id,
+            parallel_trunk_name: r.parallel_trunk_name,
+            direct_routing: r.direct_routing,
+            fs_numbers: r.fs_numbers,
             failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
             enabled: r.enabled,
             freeswitch_extension_id: r.freeswitch_extension_id,
@@ -1429,10 +1451,13 @@ pub async fn get_inbound_route(
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.name as "destination_trunk_name?",
-               r.send_early_media, r.failover_destinations, r.enabled, r.freeswitch_extension_id,
+               pt.name as "parallel_trunk_name?",
+               r.send_early_media, r.parallel_trunk_id, r.direct_routing, r.fs_numbers,
+               r.failover_destinations, r.enabled, r.freeswitch_extension_id,
                r.sync_status, r.sync_error, r.created_at, r.updated_at
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
+        LEFT JOIN routing_trunks pt ON r.parallel_trunk_id = pt.id
         WHERE r.id = $1
         "#,
         route_id
@@ -1462,6 +1487,10 @@ pub async fn get_inbound_route(
                 destination_trunk_id: r.destination_trunk_id,
                 destination_trunk_name: r.destination_trunk_name,
                 send_early_media: Some(r.send_early_media),
+                parallel_trunk_id: r.parallel_trunk_id,
+                parallel_trunk_name: r.parallel_trunk_name,
+                direct_routing: r.direct_routing,
+                fs_numbers: r.fs_numbers,
                 failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
                 enabled: r.enabled,
                 freeswitch_extension_id: r.freeswitch_extension_id,
@@ -1479,9 +1508,10 @@ pub async fn get_inbound_route(
 /// Create an inbound route
 ///
 /// POST /api/v1/routing/inbound
-#[instrument(skip(pool, admin, req))]
+#[instrument(skip(pool, mysql_pool, admin, req))]
 pub async fn create_inbound_route(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     req: web::Json<CreateInboundRouteRequest>,
     admin: SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
@@ -1493,6 +1523,14 @@ pub async fn create_inbound_route(
     if req.destination_host.trim().is_empty() {
         return Err(AppError::Validation("Destination host cannot be empty".to_string()));
     }
+
+    if req.direct_routing && req.destination_trunk_id.is_none() {
+        return Err(AppError::Validation(
+            "Direct routing requires a destination trunk".to_string(),
+        ));
+    }
+    let fs_numbers = normalize_fs_numbers(&req.fs_numbers)?;
+    ensure_fs_numbers_unclaimed(pool.get_ref(), None, &fs_numbers).await?;
 
     let failover_json = serde_json::to_value(&req.failover_destinations).unwrap_or_default();
     let extension_id = slugify(&req.name);
@@ -1515,12 +1553,14 @@ pub async fn create_inbound_route(
                                            destination_profile, call_timeout, inherit_codec,
                                            ignore_early_media, bypass_media, strip_digits,
                                            prefix_to_add, destination_trunk_id, send_early_media,
-                                           failover_destinations, enabled, freeswitch_extension_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                                           failover_destinations, enabled, freeswitch_extension_id,
+                                           parallel_trunk_id, direct_routing, fs_numbers)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
         RETURNING id, name, description, did_pattern, source_ip_pattern, priority,
                   destination_host, destination_port, destination_profile,
                   call_timeout, inherit_codec, ignore_early_media, bypass_media,
                   strip_digits, prefix_to_add, destination_trunk_id, send_early_media,
+                  parallel_trunk_id, direct_routing, fs_numbers,
                   failover_destinations, enabled, freeswitch_extension_id,
                   sync_status, sync_error, created_at, updated_at
         "#,
@@ -1542,7 +1582,10 @@ pub async fn create_inbound_route(
         req.send_early_media,
         failover_json,
         req.enabled,
-        extension_id
+        extension_id,
+        req.parallel_trunk_id,
+        req.direct_routing,
+        &fs_numbers
     )
     .fetch_one(pool.get_ref())
     .await
@@ -1567,6 +1610,10 @@ pub async fn create_inbound_route(
         destination_trunk_id: r.destination_trunk_id,
         destination_trunk_name: trunk_name,
         send_early_media: Some(r.send_early_media),
+        parallel_trunk_id: r.parallel_trunk_id,
+        parallel_trunk_name: None,
+        direct_routing: r.direct_routing,
+        fs_numbers: r.fs_numbers,
         failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
         enabled: r.enabled,
         freeswitch_extension_id: r.freeswitch_extension_id,
@@ -1576,30 +1623,77 @@ pub async fn create_inbound_route(
         updated_at: r.updated_at,
     };
 
-    // Sync to FreeSWITCH
-    match sync_inbound_routes_to_freeswitch(&pool).await {
-        Ok(_) => {
-            let _ = sqlx::query!(
-                "UPDATE routing_inbound_routes SET sync_status = 'synced', sync_error = NULL WHERE id = $1",
-                route.id
-            )
-            .execute(pool.get_ref())
-            .await;
+    // Sync to FreeSWITCH (writes /etc/freeswitch/dialplan/from-kamailio.xml
+    // with a dialplan extension per enabled inbound route).
+    let fs_sync_result = sync_inbound_routes_to_freeswitch(&pool).await;
 
-            log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "success", None).await;
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
+    // Sync to Kamailio (inserts a dr_rules row so the carrier INVITE hits
+    // our FS gateway). Skipped silently when KAMAILIO_DATABASE_URL is not
+    // configured, so dev environments without Kamailio still work.
+    let kam_sync_result: Result<Option<i32>, AppError> = match &mysql_pool {
+        Some(mysql) => sync_inbound_route_to_kamailio(
+            pool.get_ref(),
+            mysql.get_ref(),
+            route.id,
+            &route.name,
+            &route.did_pattern,
+            route.priority,
+            &route.destination_host,
+            route.destination_port,
+            route.destination_profile.as_deref(),
+            route.destination_trunk_id,
+        )
+        .await
+        .map(Some),
+        None => Ok(None),
+    };
+
+    // Reconcile sync_status from BOTH legs. Any failure marks the row as
+    // error so the operator can see it in the UI badge.
+    let (status, error, kamailio_ruleid) = match (&fs_sync_result, &kam_sync_result) {
+        (Ok(()), Ok(rid)) => ("synced", None, *rid),
+        (Err(e), _) => ("error", Some(format!("FreeSWITCH: {}", e)), None),
+        (_, Err(e)) => ("error", Some(format!("Kamailio: {}", e)), None),
+    };
+    let _ = sqlx::query!(
+        "UPDATE routing_inbound_routes SET sync_status = $1, sync_error = $2, kamailio_ruleid = COALESCE($3, kamailio_ruleid) WHERE id = $4",
+        status,
+        error,
+        kamailio_ruleid,
+        route.id
+    )
+    .execute(pool.get_ref())
+    .await;
+
+    // Log sync outcome for both targets
+    match &fs_sync_result {
+        Ok(()) => log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "success", None).await,
+        Err(e) => log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "error", Some(&e.to_string())).await,
+    }
+    match &kam_sync_result {
+        Ok(Some(_)) => log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "kamailio", "success", None).await,
+        Ok(None) => {} // Kamailio not configured; not an error
+        Err(e) => log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "kamailio", "error", Some(&e.to_string())).await,
+    }
+
+    // Reload Kamailio drouting once after writing the rule(s).
+    // Direct routing: repoint the rule at the trunk + maintain the FreeSWITCH divert.
+    if let (Some(mysql), Ok(Some(_))) = (&mysql_pool, &kam_sync_result) {
+        if let Err(e) = apply_inbound_direct_routing(pool.get_ref(), mysql.get_ref(), route.id).await {
+            error!(route_id = %route.id, "Direct inbound routing sync failed: {}", e);
+            let msg = format!("Kamailio (direct): {}", e);
             let _ = sqlx::query!(
                 "UPDATE routing_inbound_routes SET sync_status = 'error', sync_error = $1 WHERE id = $2",
-                &error_msg,
+                msg,
                 route.id
             )
             .execute(pool.get_ref())
             .await;
-
-            log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "freeswitch", "error", Some(&error_msg)).await;
+            log_sync_operation(&pool, "create", "inbound_route", Some(route.id), "kamailio", "error", Some(&e.to_string())).await;
         }
+    }
+    if matches!(kam_sync_result, Ok(Some(_))) {
+        reload_kamailio_drouting().await;
     }
 
     // Audit log
@@ -1620,15 +1714,25 @@ pub async fn create_inbound_route(
 /// Update an inbound route
 ///
 /// PUT /api/v1/routing/inbound/{id}
-#[instrument(skip(pool, admin, req))]
+#[instrument(skip(pool, mysql_pool, admin, req))]
 pub async fn update_inbound_route(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     path: web::Path<Uuid>,
     req: web::Json<UpdateInboundRouteRequest>,
     admin: SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let route_id = path.into_inner();
     info!(route_id = %route_id, "Updating inbound route");
+
+    let fs_numbers = match &req.fs_numbers {
+        Some(nums) => {
+            let nums = normalize_fs_numbers(nums)?;
+            ensure_fs_numbers_unclaimed(pool.get_ref(), Some(route_id), &nums).await?;
+            Some(nums)
+        }
+        None => None,
+    };
 
     let failover_json = req.failover_destinations.as_ref().map(|f| serde_json::to_value(f).unwrap_or_default());
 
@@ -1654,12 +1758,16 @@ pub async fn update_inbound_route(
             send_early_media = COALESCE($16, send_early_media),
             failover_destinations = COALESCE($17, failover_destinations),
             enabled = COALESCE($18, enabled),
+            parallel_trunk_id = $19,
+            direct_routing = COALESCE($21, direct_routing),
+            fs_numbers = COALESCE($22, fs_numbers),
             sync_status = 'pending'
-        WHERE id = $19
+        WHERE id = $20
         RETURNING id, name, description, did_pattern, source_ip_pattern, priority,
                   destination_host, destination_port, destination_profile,
                   call_timeout, inherit_codec, ignore_early_media, bypass_media,
                   strip_digits, prefix_to_add, destination_trunk_id, send_early_media,
+                  parallel_trunk_id, direct_routing, fs_numbers,
                   failover_destinations, enabled, freeswitch_extension_id,
                   sync_status, sync_error, created_at, updated_at
         "#,
@@ -1681,7 +1789,10 @@ pub async fn update_inbound_route(
         req.send_early_media,
         failover_json,
         req.enabled,
-        route_id
+        req.parallel_trunk_id,
+        route_id,
+        req.direct_routing,
+        fs_numbers.as_deref()
     )
     .fetch_optional(pool.get_ref())
     .await
@@ -1719,6 +1830,10 @@ pub async fn update_inbound_route(
         destination_trunk_id: r.destination_trunk_id,
         destination_trunk_name: trunk_name,
         send_early_media: Some(r.send_early_media),
+        parallel_trunk_id: r.parallel_trunk_id,
+        parallel_trunk_name: None,
+        direct_routing: r.direct_routing,
+        fs_numbers: r.fs_numbers,
         failover_destinations: serde_json::from_value(r.failover_destinations.unwrap_or_default()).unwrap_or_default(),
         enabled: r.enabled,
         freeswitch_extension_id: r.freeswitch_extension_id,
@@ -1728,30 +1843,94 @@ pub async fn update_inbound_route(
         updated_at: r.updated_at,
     };
 
-    // Sync to FreeSWITCH
-    match sync_inbound_routes_to_freeswitch(&pool).await {
-        Ok(_) => {
-            let _ = sqlx::query!(
-                "UPDATE routing_inbound_routes SET sync_status = 'synced', sync_error = NULL WHERE id = $1",
-                route.id
-            )
-            .execute(pool.get_ref())
-            .await;
+    // Sync to FreeSWITCH (regenerates the full from-kamailio.xml).
+    let fs_sync_result = sync_inbound_routes_to_freeswitch(&pool).await;
 
-            log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "success", None).await;
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
+    // Sync to Kamailio. If the route already has a ruleid, UPDATE that row;
+    // otherwise INSERT and record the new ruleid. This keeps dr_rules in
+    // lockstep with Postgres across renames, prefix edits, etc.
+    let existing_ruleid = sqlx::query_scalar!(
+        "SELECT kamailio_ruleid FROM routing_inbound_routes WHERE id = $1",
+        route.id
+    )
+    .fetch_one(pool.get_ref())
+    .await
+    .unwrap_or(None);
+
+    let kam_sync_result: Result<Option<i32>, AppError> = match (&mysql_pool, existing_ruleid) {
+        (Some(mysql), Some(rid)) => update_inbound_route_in_kamailio(
+            pool.get_ref(),
+            mysql.get_ref(),
+            rid,
+            &route.name,
+            &route.did_pattern,
+            route.priority,
+            &route.destination_host,
+            route.destination_port,
+            route.destination_profile.as_deref(),
+            route.destination_trunk_id,
+        )
+        .await
+        .map(|_| Some(rid)),
+        (Some(mysql), None) => sync_inbound_route_to_kamailio(
+            pool.get_ref(),
+            mysql.get_ref(),
+            route.id,
+            &route.name,
+            &route.did_pattern,
+            route.priority,
+            &route.destination_host,
+            route.destination_port,
+            route.destination_profile.as_deref(),
+            route.destination_trunk_id,
+        )
+        .await
+        .map(Some),
+        (None, _) => Ok(None),
+    };
+
+    let (status, error, new_ruleid) = match (&fs_sync_result, &kam_sync_result) {
+        (Ok(()), Ok(rid)) => ("synced", None, *rid),
+        (Err(e), _) => ("error", Some(format!("FreeSWITCH: {}", e)), None),
+        (_, Err(e)) => ("error", Some(format!("Kamailio: {}", e)), None),
+    };
+    let _ = sqlx::query!(
+        "UPDATE routing_inbound_routes SET sync_status = $1, sync_error = $2, kamailio_ruleid = COALESCE($3, kamailio_ruleid) WHERE id = $4",
+        status,
+        error,
+        new_ruleid,
+        route.id
+    )
+    .execute(pool.get_ref())
+    .await;
+
+    match &fs_sync_result {
+        Ok(()) => log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "success", None).await,
+        Err(e) => log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "error", Some(&e.to_string())).await,
+    }
+    match &kam_sync_result {
+        Ok(Some(_)) => log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "kamailio", "success", None).await,
+        Ok(None) => {}
+        Err(e) => log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "kamailio", "error", Some(&e.to_string())).await,
+    }
+
+    // Direct routing: repoint the rule at the trunk + maintain the FreeSWITCH divert.
+    if let (Some(mysql), Ok(Some(_))) = (&mysql_pool, &kam_sync_result) {
+        if let Err(e) = apply_inbound_direct_routing(pool.get_ref(), mysql.get_ref(), route.id).await {
+            error!(route_id = %route.id, "Direct inbound routing sync failed: {}", e);
+            let msg = format!("Kamailio (direct): {}", e);
             let _ = sqlx::query!(
                 "UPDATE routing_inbound_routes SET sync_status = 'error', sync_error = $1 WHERE id = $2",
-                &error_msg,
+                msg,
                 route.id
             )
             .execute(pool.get_ref())
             .await;
-
-            log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "freeswitch", "error", Some(&error_msg)).await;
+            log_sync_operation(&pool, "update", "inbound_route", Some(route.id), "kamailio", "error", Some(&e.to_string())).await;
         }
+    }
+    if matches!(kam_sync_result, Ok(Some(_))) {
+        reload_kamailio_drouting().await;
     }
 
     // Audit log
@@ -1772,14 +1951,36 @@ pub async fn update_inbound_route(
 /// Delete an inbound route
 ///
 /// DELETE /api/v1/routing/inbound/{id}
-#[instrument(skip(pool, admin))]
+#[instrument(skip(pool, mysql_pool, admin))]
 pub async fn delete_inbound_route(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     path: web::Path<Uuid>,
     admin: SuperadminUser,
 ) -> Result<HttpResponse, AppError> {
     let route_id = path.into_inner();
     info!(route_id = %route_id, "Deleting inbound route");
+
+    // Capture the Kamailio ruleid before deletion so we can remove the
+    // corresponding dr_rules entry afterwards.
+    let existing_ruleid = sqlx::query_scalar!(
+        "SELECT kamailio_ruleid FROM routing_inbound_routes WHERE id = $1",
+        route_id
+    )
+    .fetch_optional(pool.get_ref())
+    .await
+    .ok()
+    .flatten()
+    .flatten();
+    let existing_fs_ruleid = sqlx::query_scalar!(
+        "SELECT kamailio_fs_ruleid FROM routing_inbound_routes WHERE id = $1",
+        route_id
+    )
+    .fetch_optional(pool.get_ref())
+    .await
+    .ok()
+    .flatten()
+    .flatten();
 
     let result = sqlx::query!("DELETE FROM routing_inbound_routes WHERE id = $1", route_id)
         .execute(pool.get_ref())
@@ -1790,13 +1991,33 @@ pub async fn delete_inbound_route(
         return Err(AppError::NotFound(format!("Inbound route {} not found", route_id)));
     }
 
-    // Regenerate FreeSWITCH XML
+    // Regenerate FreeSWITCH XML (dropping the extension for this route).
     match sync_inbound_routes_to_freeswitch(&pool).await {
         Ok(_) => {
             log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "freeswitch", "success", None).await;
         }
         Err(e) => {
             log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "freeswitch", "error", Some(&e.to_string())).await;
+        }
+    }
+
+    // Drop the direct-routing FreeSWITCH divert (group 9100 rule + app numbers).
+    if let Some(mysql) = &mysql_pool {
+        if let Err(e) = clear_inbound_fs_divert(mysql.get_ref(), route_id, existing_fs_ruleid).await {
+            log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "kamailio", "error", Some(&e.to_string())).await;
+        }
+    }
+
+    // Drop the Kamailio dr_rules row (if we had one) and reload drouting.
+    if let (Some(mysql), Some(rid)) = (&mysql_pool, existing_ruleid) {
+        match delete_inbound_route_from_kamailio(mysql.get_ref(), rid).await {
+            Ok(()) => {
+                log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "kamailio", "success", None).await;
+                reload_kamailio_drouting().await;
+            }
+            Err(e) => {
+                log_sync_operation(&pool, "delete", "inbound_route", Some(route_id), "kamailio", "error", Some(&e.to_string())).await;
+            }
         }
     }
 
@@ -2114,6 +2335,7 @@ pub async fn sync_to_kamailio(
                trunk_group_id, NULL as trunk_group_name,
                trunk_id, NULL as trunk_name,
                time_schedule, time_schedule_enabled, enabled,
+               strip_digits, prefix_to_add,
                kamailio_ruleid, sync_status, sync_error,
                created_at, updated_at
         FROM routing_outbound_routes
@@ -2224,6 +2446,7 @@ pub async fn force_sync_to_kamailio(
                trunk_group_id, NULL as trunk_group_name,
                trunk_id, NULL as trunk_name,
                time_schedule, time_schedule_enabled, enabled,
+               strip_digits, prefix_to_add,
                kamailio_ruleid, sync_status, sync_error,
                created_at, updated_at
         FROM routing_outbound_routes
@@ -2438,6 +2661,196 @@ async fn update_trunk_in_kamailio(
     Ok(())
 }
 
+/// Ensure a trunk is registered in Kamailio's `dr_gateways` and return its gwid.
+///
+/// Public trunks become type=1 SIP gateways (matching `sync_trunk_to_kamailio`);
+/// private trunks — internal FreeSWITCH / softswitch endpoints such as a legacy
+/// PBX — become type=9 (internal PBX) gateways so they can be referenced as
+/// outbound `dr_rules` destinations. An existing `dr_gateways` row with the same
+/// address is reused to avoid row explosion (the inbound path and legacy
+/// dSIPRouter rows may already point there). The resolved gwid is persisted to
+/// `routing_trunks.kamailio_gwid` (clearing any prior sync error) so the UI
+/// reflects reality and subsequent route syncs resolve the gateway instantly.
+///
+/// This is what lets a private-trunk outbound route (e.g. mobile prefix → legacy
+/// FreeSWITCH) sync at all: previously the route sync hard-failed with "Trunk
+/// not synced to Kamailio" because private trunks never received a gwid.
+async fn ensure_trunk_kamailio_gwid(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    trunk_id: Uuid,
+) -> Result<i32, AppError> {
+    let trunk = sqlx::query!(
+        "SELECT host, port, trunk_type, strip_digits, prefix_to_add, name, kamailio_gwid \
+         FROM routing_trunks WHERE id = $1",
+        trunk_id
+    )
+    .fetch_optional(pg_pool)
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?
+    .ok_or_else(|| AppError::Validation(format!("Trunk {} not found", trunk_id)))?;
+
+    // Already provisioned: nothing to do.
+    if let Some(gwid) = trunk.kamailio_gwid {
+        return Ok(gwid);
+    }
+
+    let port = trunk.port.unwrap_or(5060);
+    let address = format!("{}:{}", trunk.host, port);
+
+    // Reuse a gateway already pointing at this address, but PREFER one that is
+    // not bound to a dSIPRouter gwgroup. A gwgroup-bound gateway routes the call
+    // through the dispatcher LB path (ds_select_dst on the gwgroup's setid); if
+    // that dispatcher set has no live destinations the call dies with "600 Busy
+    // Everywhere" instead of relaying. A gwgroup-less gateway relays straight to
+    // the trunk address, which is what a private trunk wants. `(m.gwgroupid IS
+    // NOT NULL) ASC` puts unbound gateways first.
+    let existing: Option<u32> = match sqlx::query_scalar(
+        "SELECT g.gwid FROM dr_gateways g \
+         LEFT JOIN dsip_gw2gwgroup m ON m.gwid = g.gwid \
+         WHERE g.address = ? \
+         ORDER BY (m.gwgroupid IS NOT NULL) ASC, g.gwid ASC LIMIT 1",
+    )
+    .bind(&address)
+    .fetch_optional(mysql_pool)
+    .await
+    {
+        Ok(v) => v,
+        // dsip_gw2gwgroup is dSIPRouter-specific and may be absent in a plain
+        // Kamailio deployment; fall back to a simple address match.
+        Err(_) => sqlx::query_scalar("SELECT gwid FROM dr_gateways WHERE address = ? LIMIT 1")
+            .bind(&address)
+            .fetch_optional(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Lookup trunk gateway: {}", e)))?,
+    };
+
+    let gwid = if let Some(gwid) = existing {
+        gwid as i32
+    } else {
+        // type=9 (internal PBX) for private trunks, type=1 (SIP gateway) for public.
+        let gw_type = if trunk.trunk_type.as_deref() == Some("private") {
+            9i32
+        } else {
+            1i32
+        };
+        let strip = trunk.strip_digits.unwrap_or(0) as u32;
+        let prefix = trunk.prefix_to_add.clone().unwrap_or_default();
+        let result = sqlx::query(
+            "INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(gw_type)
+        .bind(&address)
+        .bind(strip)
+        .bind(&prefix)
+        .bind("")
+        .bind(&trunk.name)
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Create trunk gateway: {}", e)))?;
+        // Make the new gateway live before any dr_rules row references it.
+        reload_kamailio_drouting().await;
+        result.last_insert_id() as i32
+    };
+
+    // Persist so the UI shows the trunk synced and future route syncs are instant.
+    let _ = sqlx::query!(
+        "UPDATE routing_trunks SET kamailio_gwid = $1, sync_status = 'synced', sync_error = NULL WHERE id = $2",
+        gwid,
+        trunk_id
+    )
+    .execute(pg_pool)
+    .await;
+
+    Ok(gwid)
+}
+
+/// Resolve (reusing or creating) a dedicated `dr_gateways` row for an outbound
+/// route that applies a per-route number transformation (`strip` / `pri_prefix`).
+///
+/// drouting applies strip/prefix at the GATEWAY level, and a trunk's gateway is
+/// shared by every route pointing at that trunk (e.g. the same softswitch serves
+/// both mobiles un-prefixed and Lima fixed lines that need a leading "1"). So a
+/// route with its own strip/prefix needs its own gateway carrying those values;
+/// the route's `dr_rules.gwlist` is pointed at it. Routes with no transformation
+/// (strip 0 + empty prefix) keep using the trunk's plain gateway via
+/// `ensure_trunk_kamailio_gwid` — this helper is only called when one is set.
+///
+/// Gateways are keyed by (address, strip, pri_prefix) and reused; gwgroup-bound
+/// rows are avoided for the same reason as in `ensure_trunk_kamailio_gwid`.
+async fn ensure_route_gateway(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    trunk_id: Uuid,
+    strip: i32,
+    prefix: &str,
+) -> Result<i32, AppError> {
+    let trunk = sqlx::query!(
+        "SELECT host, port, trunk_type, name FROM routing_trunks WHERE id = $1",
+        trunk_id
+    )
+    .fetch_optional(pg_pool)
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?
+    .ok_or_else(|| AppError::Validation(format!("Trunk {} not found", trunk_id)))?;
+
+    let port = trunk.port.unwrap_or(5060);
+    let address = format!("{}:{}", trunk.host, port);
+    let strip_u = strip.max(0) as u32;
+
+    // Reuse a gateway with the SAME address + strip + pri_prefix, preferring one
+    // not bound to a dSIPRouter gwgroup (see ensure_trunk_kamailio_gwid).
+    let existing: Option<u32> = match sqlx::query_scalar(
+        "SELECT g.gwid FROM dr_gateways g \
+         LEFT JOIN dsip_gw2gwgroup m ON m.gwid = g.gwid \
+         WHERE g.address = ? AND g.strip = ? AND g.pri_prefix = ? \
+         ORDER BY (m.gwgroupid IS NOT NULL) ASC, g.gwid ASC LIMIT 1",
+    )
+    .bind(&address)
+    .bind(strip_u)
+    .bind(prefix)
+    .fetch_optional(mysql_pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(_) => sqlx::query_scalar(
+            "SELECT gwid FROM dr_gateways WHERE address = ? AND strip = ? AND pri_prefix = ? LIMIT 1",
+        )
+        .bind(&address)
+        .bind(strip_u)
+        .bind(prefix)
+        .fetch_optional(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Lookup route gateway: {}", e)))?,
+    };
+
+    if let Some(gwid) = existing {
+        return Ok(gwid as i32);
+    }
+
+    let gw_type = if trunk.trunk_type.as_deref() == Some("private") {
+        9i32
+    } else {
+        1i32
+    };
+    let description = format!("{} +{} -{}", trunk.name, prefix, strip);
+    let result = sqlx::query(
+        "INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(gw_type)
+    .bind(&address)
+    .bind(strip_u)
+    .bind(prefix)
+    .bind("")
+    .bind(&description)
+    .execute(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Create route gateway: {}", e)))?;
+    // Make the new gateway live before the dr_rules row references it.
+    reload_kamailio_drouting().await;
+    Ok(result.last_insert_id() as i32)
+}
+
 /// Reload Kamailio drouting module to apply changes
 async fn reload_kamailio_drouting() {
     use tokio::process::Command;
@@ -2572,7 +2985,8 @@ async fn sync_trunk_to_freeswitch(
     <param name="proxy" value="{}:{}"/>
     <param name="register" value="{}"/>
     <param name="username" value="{}"/>
-{}    <param name="register-transport" value="{}"/>
+{}    <param name="caller-id-in-from" value="true"/>
+    <param name="register-transport" value="{}"/>
     <param name="ping" value="25"/>
     <param name="ping-max" value="3"/>
     <param name="ping-min" value="1"/>
@@ -2683,6 +3097,17 @@ async fn delete_trunk_from_freeswitch(gateway_name: &str) -> Result<(), AppError
 // SIP Status Check Handlers
 // ============================================================================
 
+/// Who ran the OPTIONS check: private trunks are checked through their
+/// FreeSWITCH gateway, public ones through Kamailio. Must match the
+/// routing_sip_status_log.check_source CHECK ('freeswitch', 'kamailio').
+fn sip_check_source(trunk_type: &str) -> &'static str {
+    if trunk_type == "private" {
+        "freeswitch"
+    } else {
+        "kamailio"
+    }
+}
+
 /// Check SIP status for all trunks
 ///
 /// GET /api/v1/routing/sip-status
@@ -2735,13 +3160,15 @@ pub async fn check_all_trunks_sip_status(
             }
             Err(e) => {
                 errors += 1;
-                ("error".to_string(), e.to_string(), None, None, None)
+                // routing_trunks.sip_status only accepts unknown/reachable/unreachable/checking
+                ("unreachable".to_string(), e.to_string(), None, None, None)
             }
         };
 
         // Update trunk status in database
         let now = chrono::Utc::now();
-        let _ = sqlx::query!(
+        let check_source = sip_check_source(trunk_type);
+        if let Err(e) = sqlx::query!(
             r#"
             UPDATE routing_trunks
             SET sip_status = $1, sip_status_message = $2,
@@ -2757,24 +3184,30 @@ pub async fn check_all_trunks_sip_status(
             trunk.id
         )
         .execute(pool.get_ref())
-        .await;
+        .await
+        {
+            warn!(trunk = %trunk.name, error = %e, "Failed to update trunk SIP status");
+        }
 
         // Log the check
-        let _ = sqlx::query!(
+        if let Err(e) = sqlx::query!(
             r#"
             INSERT INTO routing_sip_status_log
             (trunk_id, check_source, status, response_code, latency_ms, error_message)
             VALUES ($1, $2, $3, $4, $5, $6)
             "#,
             trunk.id,
-            trunk_type,
+            check_source,
             if status == "reachable" { "success" } else { "error" },
             response_code,
             latency_ms,
             if status == "reachable" { None } else { Some(&status_message) }
         )
         .execute(pool.get_ref())
-        .await;
+        .await
+        {
+            warn!(trunk = %trunk.name, error = %e, "Failed to log SIP status check");
+        }
 
         results.push(SipStatusCheck {
             trunk_id: trunk.id,
@@ -2788,7 +3221,7 @@ pub async fn check_all_trunks_sip_status(
             response_code,
             latency_ms,
             checked_at: now,
-            check_source: trunk_type.to_string(),
+            check_source: check_source.to_string(),
             sip_exchange,
         });
     }
@@ -2848,7 +3281,8 @@ pub async fn check_trunk_sip_status(
 
     // Update trunk status
     let now = chrono::Utc::now();
-    let _ = sqlx::query!(
+    let check_source = sip_check_source(trunk_type);
+    if let Err(e) = sqlx::query!(
         r#"
         UPDATE routing_trunks
         SET sip_status = $1, sip_status_message = $2,
@@ -2864,24 +3298,30 @@ pub async fn check_trunk_sip_status(
         trunk_id
     )
     .execute(pool.get_ref())
-    .await;
+    .await
+    {
+        warn!(trunk_id = %trunk_id, error = %e, "Failed to update trunk SIP status");
+    }
 
     // Log the check
-    let _ = sqlx::query!(
+    if let Err(e) = sqlx::query!(
         r#"
         INSERT INTO routing_sip_status_log
         (trunk_id, check_source, status, response_code, latency_ms, error_message)
         VALUES ($1, $2, $3, $4, $5, $6)
         "#,
         trunk_id,
-        trunk_type,
+        check_source,
         if status == "reachable" { "success" } else { "error" },
         response_code,
         latency_ms,
         if status == "reachable" { None } else { Some(&status_message) }
     )
     .execute(pool.get_ref())
-    .await;
+    .await
+    {
+        warn!(trunk_id = %trunk_id, error = %e, "Failed to log SIP status check");
+    }
 
     let result = SipStatusCheck {
         trunk_id,
@@ -2895,7 +3335,7 @@ pub async fn check_trunk_sip_status(
         response_code,
         latency_ms,
         checked_at: now,
-        check_source: trunk_type.to_string(),
+        check_source: check_source.to_string(),
         sip_exchange,
     };
 
@@ -3350,15 +3790,21 @@ async fn sync_outbound_route_to_kamailio(
             None => return Err(AppError::Validation("Trunk group not synced to Kamailio".to_string())),
         }
     } else if let Some(trunk_id) = route.trunk_id {
-        // Get Kamailio gwid
-        let trunk = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        match trunk.and_then(|t| t.kamailio_gwid) {
-            Some(id) => id.to_string(),
-            None => return Err(AppError::Validation("Trunk not synced to Kamailio".to_string())),
+        let strip = route.strip_digits.unwrap_or(0);
+        let prefix = route.prefix_to_add.clone().unwrap_or_default();
+        if strip > 0 || !prefix.is_empty() {
+            // Per-route number transformation (e.g. Lima fixed 3119898 -> 13119898):
+            // needs its own gateway carrying strip/pri_prefix, since the trunk's
+            // gateway is shared with routes that must NOT be transformed.
+            ensure_route_gateway(pg_pool, mysql_pool, trunk_id, strip, &prefix)
+                .await?
+                .to_string()
+        } else {
+            // No transformation: auto-provision/reuse the trunk's plain gateway
+            // (private trunks, and legacy rows whose kamailio_gwid was never set).
+            ensure_trunk_kamailio_gwid(pg_pool, mysql_pool, trunk_id)
+                .await?
+                .to_string()
         }
     } else {
         return Err(AppError::Validation("No destination specified".to_string()));
@@ -3410,14 +3856,18 @@ async fn update_outbound_route_in_kamailio(
             None => return Err(AppError::Validation("Trunk group not synced".to_string())),
         }
     } else if let Some(trunk_id) = route.trunk_id {
-        let trunk = sqlx::query!("SELECT kamailio_gwid FROM routing_trunks WHERE id = $1", trunk_id)
-            .fetch_optional(pg_pool)
-            .await
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        match trunk.and_then(|t| t.kamailio_gwid) {
-            Some(id) => id.to_string(),
-            None => return Err(AppError::Validation("Trunk not synced".to_string())),
+        // Mirror sync_outbound_route_to_kamailio: per-route transformation gets a
+        // dedicated gateway; otherwise reuse the trunk's plain gateway.
+        let strip = route.strip_digits.unwrap_or(0);
+        let prefix = route.prefix_to_add.clone().unwrap_or_default();
+        if strip > 0 || !prefix.is_empty() {
+            ensure_route_gateway(pg_pool, mysql_pool, trunk_id, strip, &prefix)
+                .await?
+                .to_string()
+        } else {
+            ensure_trunk_kamailio_gwid(pg_pool, mysql_pool, trunk_id)
+                .await?
+                .to_string()
         }
     } else {
         return Err(AppError::Validation("No destination specified".to_string()));
@@ -3459,6 +3909,491 @@ async fn delete_outbound_route_from_kamailio(mysql_pool: &MySqlPool, ruleid: i32
 }
 
 // ============================================================================
+// Inbound route ↔ Kamailio sync
+// ============================================================================
+// Kamailio's dr_rules.prefix is a literal longest-prefix match, not a regex —
+// it cannot store an ECMAScript/PCRE pattern like `^312216800137$`. We derive
+// the leading-digit literal from the stored `did_pattern`:
+//   * `^3122$`        → "3122"
+//   * `^312[0-9]+$`   → "312"    (stops at first non-digit)
+//   * `^.+$` / `\d+$` → ""       (empty = match-all, which is fine)
+// The full regex is still enforced downstream in FreeSWITCH's from-kamailio
+// dialplan, so Kamailio just needs to get the call to the right PBX endpoint.
+fn extract_kamailio_prefix(did_pattern: &str) -> String {
+    let body = did_pattern.trim_start_matches('^').trim_end_matches('$');
+    body.chars().take_while(|c| c.is_ascii_digit()).collect()
+}
+
+/// Resolve the dr_gateways.gwid we should send the inbound call to.
+/// Preference order:
+///   1. destination_trunk_id → routing_trunks.kamailio_gwid (already synced)
+///   2. When destination_profile is "internal", target FreeSWITCH's external
+///      sofia profile port (5062) rather than the UI-supplied port. The UI's
+///      destination_port is about the FS dialplan bridge (which resolves via
+///      `user/<ext>@<host>` ignoring the port), but Kamailio needs the actual
+///      listening socket, which is the FS external profile at 5062. Without
+///      this override, a default UI form (port=5060, profile=internal) would
+///      route inbound carrier calls to the FS *internal* profile, which
+///      rejects unauthenticated traffic from the LAN.
+///   3. An existing dr_gateways row whose address matches the resolved
+///      destination, reused to avoid a row explosion.
+///   4. Create a new type=9 (internal PBX) gateway on the fly.
+async fn resolve_inbound_target_gwid(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    destination_trunk_id: Option<uuid::Uuid>,
+    destination_host: &str,
+    destination_port: Option<i32>,
+    destination_profile: Option<&str>,
+    route_name: &str,
+) -> Result<u32, AppError> {
+    // For internal-profile routes the carrier INVITE MUST first reach our own
+    // FreeSWITCH (the from-kamailio dialplan transforms the dialed number and may
+    // parallel-fork to a registered device). destination_trunk_id on such a route
+    // only tells the FS dialplan which gateway to BRIDGE to — it must NOT become
+    // the Kamailio next-hop, or the call would skip FS and hit the trunk directly
+    // with the untransformed number (observed as a 404 after the trunk gained a
+    // kamailio_gwid for outbound use). So only honor destination_trunk_id as the
+    // Kamailio target when the route is NOT internal-profile.
+    if destination_profile != Some("internal") {
+        if let Some(trunk_id) = destination_trunk_id {
+            let trunk = sqlx::query!(
+                "SELECT kamailio_gwid FROM routing_trunks WHERE id = $1",
+                trunk_id
+            )
+            .fetch_optional(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            if let Some(gwid) = trunk.and_then(|t| t.kamailio_gwid) {
+                return Ok(gwid as u32);
+            }
+        }
+    }
+
+    // See comment above: internal-profile routes always hit FS external at 5062.
+    let port = match destination_profile {
+        Some("internal") => 5062,
+        _ => destination_port.unwrap_or(5060),
+    };
+    // dr_gateways.address is stored as bare host:port (no sip: scheme). The
+    // dSIPRouter kamailio.cfg prepends sip: itself when constructing the
+    // next-hop RURI; if we include it here the result is sip:sip:... which
+    // Kamailio cannot parse, and the call dies with `479 Regretfully...`.
+    let address = format!("{}:{}", destination_host, port);
+
+    let existing: Option<u32> = sqlx::query_scalar(
+        "SELECT gwid FROM dr_gateways WHERE address = ? LIMIT 1",
+    )
+    .bind(&address)
+    .fetch_optional(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Lookup inbound gateway: {}", e)))?;
+
+    if let Some(gwid) = existing {
+        return Ok(gwid);
+    }
+
+    // Create a type=9 (internal PBX) gateway so the call lands on our FS.
+    let result = sqlx::query(
+        "INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description) \
+         VALUES (9, ?, 0, '', '', ?)",
+    )
+    .bind(&address)
+    .bind(format!("Inbound target for {}", route_name))
+    .execute(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Create inbound gateway: {}", e)))?;
+
+    Ok(result.last_insert_id() as u32)
+}
+
+/// Insert a dr_rules row for an inbound route. Returns the newly-allocated
+/// ruleid so the caller can persist it in `routing_inbound_routes.kamailio_ruleid`.
+async fn sync_inbound_route_to_kamailio(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    route_id: uuid::Uuid,
+    name: &str,
+    did_pattern: &str,
+    priority: Option<i32>,
+    destination_host: &str,
+    destination_port: Option<i32>,
+    destination_profile: Option<&str>,
+    destination_trunk_id: Option<uuid::Uuid>,
+) -> Result<i32, AppError> {
+    let _ = route_id; // reserved for future tagging in description
+    let gwid = resolve_inbound_target_gwid(
+        pg_pool,
+        mysql_pool,
+        destination_trunk_id,
+        destination_host,
+        destination_port,
+        destination_profile,
+        name,
+    )
+    .await?;
+
+    let prefix = extract_kamailio_prefix(did_pattern);
+    let priority = priority.unwrap_or(100);
+
+    // Inbound rules live in groupid 9000 by convention (mirrors the existing
+    // rules 2004/2032/2035/2040 that dSIPRouter seeded). Outbound uses 8000.
+    const INBOUND_GROUP_ID: &str = "9000";
+
+    let result = sqlx::query(
+        "INSERT INTO dr_rules (groupid, prefix, timerec, priority, routeid, gwlist, description) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(INBOUND_GROUP_ID)
+    .bind(&prefix)
+    .bind("")
+    .bind(priority)
+    .bind("")
+    .bind(gwid.to_string())
+    .bind(format!("name:{}", name))
+    .execute(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Insert inbound dr_rule: {}", e)))?;
+
+    Ok(result.last_insert_id() as i32)
+}
+
+/// Update an existing dr_rules row in place.
+async fn update_inbound_route_in_kamailio(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    ruleid: i32,
+    name: &str,
+    did_pattern: &str,
+    priority: Option<i32>,
+    destination_host: &str,
+    destination_port: Option<i32>,
+    destination_profile: Option<&str>,
+    destination_trunk_id: Option<uuid::Uuid>,
+) -> Result<(), AppError> {
+    let gwid = resolve_inbound_target_gwid(
+        pg_pool,
+        mysql_pool,
+        destination_trunk_id,
+        destination_host,
+        destination_port,
+        destination_profile,
+        name,
+    )
+    .await?;
+
+    let prefix = extract_kamailio_prefix(did_pattern);
+    let priority = priority.unwrap_or(100);
+
+    sqlx::query(
+        "UPDATE dr_rules SET prefix = ?, priority = ?, gwlist = ?, description = ? WHERE ruleid = ?",
+    )
+    .bind(&prefix)
+    .bind(priority)
+    .bind(gwid.to_string())
+    .bind(format!("name:{}", name))
+    .bind(ruleid as u32)
+    .execute(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Update inbound dr_rule: {}", e)))?;
+
+    Ok(())
+}
+
+async fn delete_inbound_route_from_kamailio(
+    mysql_pool: &MySqlPool,
+    ruleid: i32,
+) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM dr_rules WHERE ruleid = ?")
+        .bind(ruleid as u32)
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Delete inbound dr_rule: {}", e)))?;
+    Ok(())
+}
+
+/// dr_rules group for app numbers diverted back through FreeSWITCH when their
+/// inbound route is direct (FLT_INBOUND_FS in kamailio.cfg).
+const INBOUND_FS_GROUP_ID: &str = "9100";
+
+/// Trim, drop blanks/duplicates and reject anything that is not a plain number.
+fn normalize_fs_numbers(numbers: &[String]) -> Result<Vec<String>, AppError> {
+    let mut out: Vec<String> = Vec::new();
+    for n in numbers {
+        let n = n.trim();
+        if n.is_empty() {
+            continue;
+        }
+        if !n.chars().all(|c| c.is_ascii_digit()) || n.len() > 32 {
+            return Err(AppError::Validation(format!(
+                "Invalid number in FreeSWITCH list: '{}' (digits only)",
+                n
+            )));
+        }
+        if !out.iter().any(|o| o == n) {
+            out.push(n.to_string());
+        }
+    }
+    Ok(out)
+}
+
+/// A number can only be diverted by one route: kamailio.apolo_inbound_fs_numbers
+/// is keyed by number, so a second route would silently steal it.
+async fn ensure_fs_numbers_unclaimed(
+    pool: &PgPool,
+    route_id: Option<Uuid>,
+    numbers: &[String],
+) -> Result<(), AppError> {
+    if numbers.is_empty() {
+        return Ok(());
+    }
+    let clash = sqlx::query!(
+        r#"SELECT r.name, n AS "number!"
+           FROM routing_inbound_routes r, unnest(r.fs_numbers) AS n
+           WHERE n = ANY($1) AND ($2::uuid IS NULL OR r.id <> $2)
+           LIMIT 1"#,
+        numbers,
+        route_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?;
+    match clash {
+        Some(c) => Err(AppError::Validation(format!(
+            "Number {} is already listed in inbound route '{}'",
+            c.number, c.name
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Gateway for a direct inbound route: the trunk address with the route's own
+/// strip/prefix, tagged "direct" in attrs field 6 so kamailio.cfg knows the call
+/// skips FreeSWITCH (app-number divert + via=direct CDR). Never shared with
+/// outbound gateways, which lack the tag.
+async fn ensure_direct_inbound_gateway(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    trunk_id: Uuid,
+    strip: i32,
+    prefix: &str,
+) -> Result<u32, AppError> {
+    let trunk = sqlx::query!(
+        "SELECT host, port, name FROM routing_trunks WHERE id = $1",
+        trunk_id
+    )
+    .fetch_optional(pg_pool)
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?
+    .ok_or_else(|| AppError::Validation(format!("Trunk {} not found", trunk_id)))?;
+
+    let address = format!("{}:{}", trunk.host, trunk.port.unwrap_or(5060));
+    let strip_u = strip.max(0) as u32;
+
+    let existing: Option<u32> = sqlx::query_scalar(
+        "SELECT gwid FROM dr_gateways WHERE address = ? AND strip = ? AND pri_prefix = ? \
+         AND attrs LIKE '%,direct' ORDER BY gwid LIMIT 1",
+    )
+    .bind(&address)
+    .bind(strip_u)
+    .bind(prefix)
+    .fetch_optional(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Lookup direct gateway: {}", e)))?;
+    if let Some(gwid) = existing {
+        return Ok(gwid);
+    }
+
+    let result = sqlx::query(
+        "INSERT INTO dr_gateways (type, address, strip, pri_prefix, attrs, description) \
+         VALUES (9, ?, ?, ?, '', ?)",
+    )
+    .bind(&address)
+    .bind(strip_u)
+    .bind(prefix)
+    .bind(format!("{} direct inbound +{} -{}", trunk.name, prefix, strip))
+    .execute(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Create direct gateway: {}", e)))?;
+    let gwid = result.last_insert_id() as u32;
+
+    // attrs = gwid,gwtype,msteams_domain,signalling,media,apolo_flag (see SET_CALLDST_INFO)
+    sqlx::query("UPDATE dr_gateways SET attrs = ? WHERE gwid = ?")
+        .bind(format!("{},9,,proxy,proxy,direct", gwid))
+        .bind(gwid)
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Tag direct gateway: {}", e)))?;
+    Ok(gwid)
+}
+
+/// Remove the group-9100 rule and the app numbers of a route.
+async fn clear_inbound_fs_divert(
+    mysql_pool: &MySqlPool,
+    route_id: Uuid,
+    fs_ruleid: Option<i32>,
+) -> Result<(), AppError> {
+    if let Some(rid) = fs_ruleid {
+        sqlx::query("DELETE FROM dr_rules WHERE ruleid = ?")
+            .bind(rid as u32)
+            .execute(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Delete FS divert rule: {}", e)))?;
+    }
+    sqlx::query("DELETE FROM apolo_inbound_fs_numbers WHERE route_id = ?")
+        .bind(route_id.to_string())
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Delete FS numbers: {}", e)))?;
+    Ok(())
+}
+
+/// Runs after the regular inbound sync (which always points the route's dr_rule
+/// at FreeSWITCH). For direct routes: repoint that rule at the trunk's direct
+/// gateway, mirror the route into group 9100 targeting FreeSWITCH, and publish
+/// fs_numbers to the htable Kamailio reloads every 30s. Otherwise remove any
+/// leftover divert so the route behaves exactly as before.
+async fn apply_inbound_direct_routing(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+    route_id: Uuid,
+) -> Result<(), AppError> {
+    let r = sqlx::query!(
+        "SELECT name, did_pattern, priority, destination_host, destination_port, destination_profile,
+                destination_trunk_id, strip_digits, prefix_to_add, direct_routing,
+                fs_numbers, kamailio_ruleid, kamailio_fs_ruleid
+         FROM routing_inbound_routes WHERE id = $1",
+        route_id
+    )
+    .fetch_optional(pg_pool)
+    .await
+    .map_err(|e| AppError::Database(e.to_string()))?
+    .ok_or_else(|| AppError::NotFound(format!("Inbound route {} not found", route_id)))?;
+
+    let (Some(ruleid), Some(trunk_id), true) =
+        (r.kamailio_ruleid, r.destination_trunk_id, r.direct_routing)
+    else {
+        clear_inbound_fs_divert(mysql_pool, route_id, r.kamailio_fs_ruleid).await?;
+        if r.kamailio_fs_ruleid.is_some() {
+            sqlx::query!(
+                "UPDATE routing_inbound_routes SET kamailio_fs_ruleid = NULL WHERE id = $1",
+                route_id
+            )
+            .execute(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        }
+        return Ok(());
+    };
+
+    // The FreeSWITCH gateway the rule pointed at until now becomes the divert target.
+    let fs_gwid = resolve_inbound_target_gwid(
+        pg_pool,
+        mysql_pool,
+        Some(trunk_id),
+        &r.destination_host,
+        r.destination_port,
+        r.destination_profile.as_deref(),
+        &r.name,
+    )
+    .await?;
+    let direct_gwid = ensure_direct_inbound_gateway(
+        pg_pool,
+        mysql_pool,
+        trunk_id,
+        r.strip_digits.unwrap_or(0),
+        r.prefix_to_add.as_deref().unwrap_or("").trim(),
+    )
+    .await?;
+
+    sqlx::query("UPDATE dr_rules SET gwlist = ?, description = ? WHERE ruleid = ?")
+        .bind(direct_gwid.to_string())
+        .bind(format!("name:{} (direct)", r.name))
+        .bind(ruleid as u32)
+        .execute(mysql_pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Repoint inbound dr_rule: {}", e)))?;
+
+    let prefix = extract_kamailio_prefix(&r.did_pattern);
+    let priority = r.priority.unwrap_or(100);
+    let description = format!("name:{} (via FreeSWITCH)", r.name);
+    let fs_ruleid = match r.kamailio_fs_ruleid {
+        Some(rid) => {
+            sqlx::query(
+                "UPDATE dr_rules SET groupid = ?, prefix = ?, priority = ?, gwlist = ?, description = ? \
+                 WHERE ruleid = ?",
+            )
+            .bind(INBOUND_FS_GROUP_ID)
+            .bind(&prefix)
+            .bind(priority)
+            .bind(fs_gwid.to_string())
+            .bind(&description)
+            .bind(rid as u32)
+            .execute(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Update FS divert rule: {}", e)))?;
+            rid
+        }
+        None => {
+            let res = sqlx::query(
+                "INSERT INTO dr_rules (groupid, prefix, timerec, priority, routeid, gwlist, description) \
+                 VALUES (?, ?, '', ?, '', ?, ?)",
+            )
+            .bind(INBOUND_FS_GROUP_ID)
+            .bind(&prefix)
+            .bind(priority)
+            .bind(fs_gwid.to_string())
+            .bind(&description)
+            .execute(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Insert FS divert rule: {}", e)))?;
+            let rid = res.last_insert_id() as i32;
+            sqlx::query!(
+                "UPDATE routing_inbound_routes SET kamailio_fs_ruleid = $1 WHERE id = $2",
+                rid,
+                route_id
+            )
+            .execute(pg_pool)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
+            rid
+        }
+    };
+
+    // Replace this route's numbers in one transaction so Kamailio never reloads a half list.
+    let mut tx = mysql_pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    sqlx::query("DELETE FROM apolo_inbound_fs_numbers WHERE route_id = ?")
+        .bind(route_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| AppError::Database(format!("Clear FS numbers: {}", e)))?;
+    for number in &r.fs_numbers {
+        sqlx::query("INSERT INTO apolo_inbound_fs_numbers (number, route_id) VALUES (?, ?)")
+            .bind(number)
+            .bind(route_id.to_string())
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::Database(format!("Insert FS number {}: {}", number, e)))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
+    info!(
+        route_id = %route_id,
+        direct_gwid,
+        fs_gwid,
+        fs_ruleid,
+        fs_numbers = r.fs_numbers.len(),
+        "Inbound route set to direct routing"
+    );
+    Ok(())
+}
+
+// ============================================================================
 // FreeSWITCH Sync Functions
 // ============================================================================
 
@@ -3472,9 +4407,11 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                r.call_timeout, r.inherit_codec, r.ignore_early_media, r.bypass_media,
                r.strip_digits, r.prefix_to_add, r.destination_trunk_id,
                t.freeswitch_gateway_name as trunk_gateway_name,
-               r.send_early_media, r.failover_destinations, r.freeswitch_extension_id
+               r.send_early_media, r.failover_destinations, r.freeswitch_extension_id,
+               pt.freeswitch_gateway_name as parallel_trunk_gateway_name
         FROM routing_inbound_routes r
         LEFT JOIN routing_trunks t ON r.destination_trunk_id = t.id
+        LEFT JOIN routing_trunks pt ON r.parallel_trunk_id = pt.id
         WHERE r.enabled = true
         ORDER BY r.priority, r.did_pattern
         "#
@@ -3485,7 +4422,7 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
 
     // Generate XML
     let mut xml = String::from("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<include>\n");
-    xml.push_str("  <context name=\"to-kamailio\">\n");
+    xml.push_str("  <context name=\"from-kamailio\">\n");
 
     for route in &routes {
         let failover: Vec<FailoverDestination> = serde_json::from_value(
@@ -3513,100 +4450,25 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             "$1"
         };
 
-        // Source IP filter if specified
+        // NOTE: we intentionally do NOT emit a `<condition field="network_addr"
+        // expression="...">` wrapper even when route.source_ip_pattern is
+        // set. In the split architecture the FS external profile's peer is
+        // always Kamailio's LAN IP (never the original carrier IP) — so the
+        // filter never matches and the call silently falls through to the
+        // fallback / unmatched extension (observed 2026-04-18). Carrier-side
+        // ACL is Kamailio's job via the `address` table (group 2); the
+        // `source_ip_pattern` column remains for documentation / future use
+        // by an inbound-route → Kamailio ACL sync. Surface it as a comment.
         if let Some(ref source_ip) = route.source_ip_pattern {
             xml.push_str(&format!(
-                "      <condition field=\"${{network_addr}}\" expression=\"{}\">\n",
+                "      <!-- declared source_ip_pattern (enforced by Kamailio ACL, not FS): {} -->\n",
                 escape_xml(source_ip)
             ));
-            xml.push_str(&format!(
-                "        <condition field=\"destination_number\" expression=\"{}\">\n",
-                escape_xml(&route.did_pattern)
-            ));
+        }
 
-            // Log
-            xml.push_str(&format!(
-                "          <action application=\"log\" data=\"INFO Inbound {}: ${{caller_id_number}} -> ${{destination_number}}\"/>\n",
-                route.name
-            ));
-
-            // Number transformation if needed
-            if needs_transformation {
-                xml.push_str(&format!(
-                    "          <action application=\"set\" data=\"original_destination=${{destination_number}}\"/>\n"
-                ));
-                if strip_digits > 0 && !prefix_to_add.is_empty() {
-                    // Strip digits and add prefix
-                    xml.push_str(&format!(
-                        "          <action application=\"set\" data=\"transformed_number={}${{destination_number:{}}}\"/>\n",
-                        escape_xml(prefix_to_add), strip_digits
-                    ));
-                } else if strip_digits > 0 {
-                    // Only strip digits
-                    xml.push_str(&format!(
-                        "          <action application=\"set\" data=\"transformed_number=${{destination_number:{}}}\"/>\n",
-                        strip_digits
-                    ));
-                } else {
-                    // Only add prefix
-                    xml.push_str(&format!(
-                        "          <action application=\"set\" data=\"transformed_number={}${{destination_number}}\"/>\n",
-                        escape_xml(prefix_to_add)
-                    ));
-                }
-                xml.push_str(&format!(
-                    "          <action application=\"log\" data=\"INFO Transformed: ${{original_destination}} -> ${{transformed_number}}\"/>\n"
-                ));
-            }
-
-            // Settings
-            xml.push_str(&format!(
-                "          <action application=\"set\" data=\"call_timeout={}\"/>\n",
-                call_timeout
-            ));
-            xml.push_str(&format!(
-                "          <action application=\"set\" data=\"originate_timeout={}\"/>\n",
-                call_timeout
-            ));
-
-            if route.ignore_early_media.unwrap_or(false) {
-                xml.push_str("          <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
-            }
-            if route.inherit_codec.unwrap_or(true) {
-                xml.push_str("          <action application=\"set\" data=\"inherit_codec=true\"/>\n");
-            }
-
-            // Early media: send 183 Session Progress with ringback tone
-            if route.send_early_media {
-                xml.push_str("          <action application=\"set\" data=\"ringback=${us-ring}\"/>\n");
-                xml.push_str("          <action application=\"set\" data=\"instant_ringback=true\"/>\n");
-                xml.push_str("          <action application=\"pre_answer\"/>\n");
-            }
-
-            // Bridge - use gateway if trunk is set, user/ for registered extensions, otherwise sofia/profile
-            let bridge = if let Some(ref gateway_name) = route.trunk_gateway_name {
-                // Route via gateway (for internal PBX trunks)
-                format!("sofia/gateway/{}/{}", gateway_name, dial_var)
-            } else if dest_profile == "internal" && dest_port == 5080 {
-                // Route to registered users (softphones) - use user/ dial string to avoid hairpin
-                format!("user/{}@{}", dial_var, route.destination_host)
-            } else {
-                // Route via profile/host:port (for external destinations)
-                let mut b = format!(
-                    "sofia/{}/{}@{}:{}",
-                    dest_profile, dial_var, route.destination_host, dest_port
-                );
-                for fo in &failover {
-                    b.push_str(&format!("|sofia/{}/{}@{}:{}", dest_profile, dial_var, fo.host, fo.port));
-                }
-                b
-            };
-            xml.push_str(&format!("          <action application=\"bridge\" data=\"{}\"/>\n", bridge));
-
-            xml.push_str("        </condition>\n");
-            xml.push_str("      </condition>\n");
-        } else {
-            // No source IP filter
+        // Always emit the non-IP-filtered branch; the old source_ip_pattern
+        // wrapping branch was removed because of the misbehavior above.
+        {
             xml.push_str(&format!(
                 "      <condition field=\"destination_number\" expression=\"{}\">\n",
                 escape_xml(&route.did_pattern)
@@ -3661,6 +4523,15 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             if route.inherit_codec.unwrap_or(true) {
                 xml.push_str("        <action application=\"set\" data=\"inherit_codec=true\"/>\n");
             }
+            // Don't relay the callee's display (Remote-Party-ID from the
+            // destination, e.g. Legado's "Outbound Call") back to the carrier
+            // in the 200 OK P-Asserted-Identity; keep the dialed DID instead.
+            // mod_sofia builds the response PAI from effective_callee_id_*
+            // first, so pinning them is what actually overrides the callee's
+            // RPID; ignore_display_updates only stops the mid-call INFO/UPDATE.
+            xml.push_str("        <action application=\"set\" data=\"ignore_display_updates=true\"/>\n");
+            xml.push_str("        <action application=\"set\" data=\"effective_callee_id_name=${destination_number}\"/>\n");
+            xml.push_str("        <action application=\"set\" data=\"effective_callee_id_number=${destination_number}\"/>\n");
 
             // Early media: send 183 Session Progress with ringback tone
             if route.send_early_media {
@@ -3669,15 +4540,57 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                 xml.push_str("        <action application=\"pre_answer\"/>\n");
             }
 
-            // Bridge - use gateway if trunk is set, user/ for registered extensions, otherwise sofia/profile
-            let bridge = if let Some(ref gateway_name) = route.trunk_gateway_name {
-                // Route via gateway (for internal PBX trunks)
-                format!("sofia/gateway/{}/{}", gateway_name, dial_var)
-            } else if dest_profile == "internal" && dest_port == 5080 {
-                // Route to registered users (softphones) - use user/ dial string to avoid hairpin
-                format!("user/{}@{}", dial_var, route.destination_host)
+            // Bridge selection:
+            //   * Explicit trunk set on the route → sofia gateway (for PBX
+            //     trunks or outbound-to-carrier patterns).
+            //   * Profile "internal" → resolve the registered softphone's
+            //     current contact via ${sofia_contact(...)} and bridge to
+            //     that URL. We deliberately avoid the `user/<ext>@domain`
+            //     form because it triggers a directory lookup that requires
+            //     the domain to be declared in mod_xml_curl's directory
+            //     response for a non-auth action — which our handler does
+            //     not serve, so FS returns 480 USER_NOT_REGISTERED even
+            //     when the softphone is registered (observed 2026-04-18).
+            //     sofia_contact goes straight to the registrar table.
+            //   * Anything else → raw sofia/<profile>/<user>@<host>:<port>.
+            // Parallel ring: if the route has a parallel_trunk_id set, ALSO ring
+            // the registered device (mobile app) in parallel via its CURRENT
+            // registration contact (${sofia_contact}). This reaches the app through
+            // the push SBC's path (waking it via FCM). We deliberately do NOT send
+            // a bare INVITE to the SBC as a trunk gateway: the SBC routes the AOR
+            // back toward us and rejects with "482 Loop Detected". The selected
+            // parallel trunk (e.g. SBC Push) just enables the behaviour. Comma in
+            // the bridge string = simultaneous, first to answer wins.
+            let parallel_enabled = route.parallel_trunk_gateway_name.is_some();
+            if parallel_enabled {
+                // CRITICAL for parallel ring: ignore early media. Otherwise the
+                // first leg to send 183 Session Progress with SDP (e.g. the legacy
+                // FS) makes FreeSWITCH commit to that leg's early media and CANCEL
+                // the slower push leg before the mobile app can ring. With
+                // ignore_early_media=true FS keeps every leg ringing until one
+                // actually answers (200 OK). The caller hears local ringback.
+                xml.push_str("        <action application=\"set\" data=\"ignore_early_media=true\"/>\n");
+                // Use the route's destination_host (SIP domain) for the parallel
+                // sofia_contact lookup. Devices register with the SIP domain
+                // (e.g. app.fonowin.pe), not the server IP — using ${local_ip_v4}
+                // would fail to find them because the AOR domain wouldn't match.
+                xml.push_str(&format!(
+                    "        <action application=\"set\" data=\"push_contact=${{sofia_contact({}@{})}}\"/>\n",
+                    dial_var, route.destination_host
+                ));
+            }
+            let parallel_leg = if parallel_enabled { ",${push_contact}".to_string() } else { String::new() };
+
+            if let Some(ref gateway_name) = route.trunk_gateway_name {
+                let primary = format!("sofia/gateway/{}/{}{}", gateway_name, dial_var, parallel_leg);
+                xml.push_str(&format!("        <action application=\"bridge\" data=\"{}\"/>\n", primary));
+            } else if dest_profile == "internal" {
+                xml.push_str(&format!(
+                    "        <action application=\"set\" data=\"target_contact=${{sofia_contact({}@{})}}\"/>\n",
+                    dial_var, route.destination_host
+                ));
+                xml.push_str(&format!("        <action application=\"bridge\" data=\"${{target_contact}}{}\"/>\n", parallel_leg));
             } else {
-                // Route via profile/host:port (for external destinations)
                 let mut b = format!(
                     "sofia/{}/{}@{}:{}",
                     dest_profile, dial_var, route.destination_host, dest_port
@@ -3685,9 +4598,9 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
                 for fo in &failover {
                     b.push_str(&format!("|sofia/{}/{}@{}:{}", dest_profile, dial_var, fo.host, fo.port));
                 }
-                b
-            };
-            xml.push_str(&format!("        <action application=\"bridge\" data=\"{}\"/>\n", bridge));
+                b.push_str(&parallel_leg);
+                xml.push_str(&format!("        <action application=\"bridge\" data=\"{}\"/>\n", b));
+            }
 
             xml.push_str("      </condition>\n");
         }
@@ -3695,11 +4608,29 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
         xml.push_str("    </extension>\n");
     }
 
-    // Fallback reject extension
-    xml.push_str("    <extension name=\"fallback-reject\">\n");
-    xml.push_str("      <condition field=\"destination_number\" expression=\"^(.+)$\">\n");
-    xml.push_str("        <action application=\"log\" data=\"WARNING Rejecting call from unknown source: ${network_addr}\"/>\n");
-    xml.push_str("        <action application=\"respond\" data=\"403 Forbidden\"/>\n");
+    // Fallback: if none of the DID-specific extensions above matched, try a
+    // direct registered-user lookup (destination_number as extension name).
+    // This lets the system work out-of-the-box for the "extension dialing"
+    // case (carrier presents an already-normalized extension number) without
+    // requiring an explicit inbound route record. If the user isn't
+    // registered either, respond 404 so the carrier can generate proper
+    // tones instead of the misleading 403.
+    xml.push_str("    <extension name=\"fallback-registered-user\">\n");
+    xml.push_str("      <condition field=\"destination_number\" expression=\"^(\\d+)$\" break=\"never\">\n");
+    xml.push_str("        <action application=\"set\" data=\"dialed_extension=$1\"/>\n");
+    xml.push_str("      </condition>\n");
+    xml.push_str("      <condition field=\"${sofia_contact(user/${dialed_extension}@${sip_network_ip})}\" expression=\"^sofia/\">\n");
+    xml.push_str("        <action application=\"log\" data=\"INFO from-kamailio fallback: bridging to registered user ${dialed_extension}\"/>\n");
+    xml.push_str("        <action application=\"set\" data=\"call_timeout=60\"/>\n");
+    xml.push_str("        <action application=\"set\" data=\"inherit_codec=true\"/>\n");
+    xml.push_str("        <action application=\"bridge\" data=\"user/${dialed_extension}\"/>\n");
+    xml.push_str("      </condition>\n");
+    xml.push_str("    </extension>\n");
+
+    xml.push_str("    <extension name=\"unmatched\">\n");
+    xml.push_str("      <condition field=\"destination_number\" expression=\"^.*$\">\n");
+    xml.push_str("        <action application=\"log\" data=\"WARNING from-kamailio: no route for ${destination_number} from ${network_addr}\"/>\n");
+    xml.push_str("        <action application=\"respond\" data=\"404 Not Found\"/>\n");
     xml.push_str("      </condition>\n");
     xml.push_str("    </extension>\n");
 
@@ -3707,13 +4638,13 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
     xml.push_str("</include>\n");
 
     // Backup existing file
-    if Path::new(TO_KAMAILIO_XML).exists() {
-        let backup_path = format!("{}.bak", TO_KAMAILIO_XML);
-        let _ = fs::copy(TO_KAMAILIO_XML, &backup_path).await;
+    if Path::new(FROM_KAMAILIO_XML).exists() {
+        let backup_path = format!("{}.bak", FROM_KAMAILIO_XML);
+        let _ = fs::copy(FROM_KAMAILIO_XML, &backup_path).await;
     }
 
     // Write new file
-    fs::write(TO_KAMAILIO_XML, xml).await.map_err(|e| {
+    fs::write(FROM_KAMAILIO_XML, xml).await.map_err(|e| {
         error!(error = %e, "Failed to write FreeSWITCH dialplan");
         AppError::Internal(format!("Failed to write dialplan: {}", e))
     })?;
@@ -4014,11 +4945,11 @@ async fn import_outbound_routes_from_kamailio(pg_pool: &PgPool, mysql_pool: &MyS
 
 /// Import inbound routes from FreeSWITCH to-kamailio.xml
 async fn import_inbound_routes_from_freeswitch(pg_pool: &PgPool) -> Result<i64, AppError> {
-    if !Path::new(TO_KAMAILIO_XML).exists() {
+    if !Path::new(FROM_KAMAILIO_XML).exists() {
         return Ok(0);
     }
 
-    let content = fs::read_to_string(TO_KAMAILIO_XML).await.map_err(|e| {
+    let content = fs::read_to_string(FROM_KAMAILIO_XML).await.map_err(|e| {
         AppError::Internal(format!("Failed to read dialplan file: {}", e))
     })?;
 

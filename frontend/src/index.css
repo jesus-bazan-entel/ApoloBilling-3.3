@@ -1,92 +1,136 @@
 @import "tailwindcss";
 
+/*
+ * WIN Design System — copiado de https://win.pe
+ * Fuente: https://win.pe/css/main-26.min.css?v=2.3
+ * :root { --orange:#ff5a0a; --dorange:#d8450b; --lorange:#fff3ed;
+ *         --gray:#4b4b4b; --lgray:#f6f6f6; --dgray:#7c7e80;
+ *         --brown:#301d19; --yellow:#ffc200; }
+ * Tipografías win.pe: MADETommySoft / Panton / Exo
+ */
+
 :root {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Exo', 'MADETommySoft', 'Panton', system-ui, -apple-system, sans-serif;
 
-  /* Fibertel Brand Colors */
-  --color-brand-blue: #0099D9;
-  --color-brand-blue-dark: #007BB5;
-  --color-brand-blue-light: #33ADDF;
-  --color-brand-gray: #6B7280;
-  --color-brand-gray-dark: #4B5563;
-  --color-brand-gray-light: #9CA3AF;
+  /* WIN Brand — https://win.pe */
+  --win-orange: #ff5a0a;
+  --win-dorange: #d8450b;
+  --win-lorange: #fff3ed;
+  --win-yellow: #ffc200;
+  --win-brown: #301d19;
+  --win-gray: #4b4b4b;
+  --win-lgray: #f6f6f6;
+  --win-dgray: #7c7e80;
+  --win-sgray: #bfbfbf;
 
-  /* Primary accent - Fibertel blue */
-  --color-primary: #0099D9;
-  --color-primary-hover: #007BB5;
-  --color-primary-light: #E0F7FF;
-  --color-secondary: #6B7280;
+  --color-brand-blue: #ff5a0a;
+  --color-brand-blue-dark: #d8450b;
+  --color-brand-blue-light: #ff7736;
+  --color-brand-gray: #4b4b4b;
+  --color-brand-gray-dark: #301d19;
+  --color-brand-gray-light: #7c7e80;
 
-  /* Light theme colors - Pastel blue tones */
+  /* Primary accent - WIN naranja */
+  --color-primary: #ff5a0a;
+  --color-primary-hover: #d8450b;
+  --color-primary-light: #fff3ed;
+  --color-secondary: #ffc200;
+
+  /* Light theme */
   --color-bg-primary: #ffffff;
-  --color-bg-secondary: #F0F9FF;
-  --color-bg-tertiary: #E0F2FE;
+  --color-bg-secondary: #fff8f5;
+  --color-bg-tertiary: #fff3ed;
   --color-bg-card: #ffffff;
-  --color-bg-hover: #E0F7FF;
+  --color-bg-hover: #ffeee6;
 
-  --color-text-primary: #1E293B;
-  --color-text-secondary: #475569;
-  --color-text-tertiary: #64748B;
-  --color-text-muted: #94A3B8;
+  --color-text-primary: #301d19;
+  --color-text-secondary: #4b4b4b;
+  --color-text-tertiary: #7c7e80;
+  --color-text-muted: #bfbfbf;
 
-  --color-border-primary: #BAE6FD;
-  --color-border-secondary: #7DD3FC;
+  --color-border-primary: #ffdac8;
+  --color-border-secondary: #ffbb9a;
 
-  --color-shadow: rgba(0, 153, 217, 0.08);
-  --color-shadow-md: rgba(0, 153, 217, 0.12);
+  --color-shadow: rgba(255, 90, 10, 0.08);
+  --color-shadow-md: rgba(255, 90, 10, 0.12);
 
-  /* Success, Warning, Error with pastel variants */
-  --color-success: #10B981;
-  --color-success-bg: #D1FAE5;
-  --color-warning: #F59E0B;
-  --color-warning-bg: #FEF3C7;
-  --color-error: #EF4444;
-  --color-error-bg: #FEE2E2;
-  --color-info: #0099D9;
-  --color-info-bg: #E0F7FF;
+  --color-success: #1bd741;
+  --color-success-bg: #dcfae3;
+  --color-warning: #ffc200;
+  --color-warning-bg: #fef6d8;
+  --color-error: #e5484d;
+  --color-error-bg: #fee2e2;
+  --color-info: #ff5a0a;
+  --color-info-bg: #fff3ed;
 
-  /* Scrollbar */
-  --color-scrollbar-track: #E0F2FE;
-  --color-scrollbar-thumb: #7DD3FC;
-  --color-scrollbar-thumb-hover: #38BDF8;
+  --color-scrollbar-track: #fff3ed;
+  --color-scrollbar-thumb: #ffbb9a;
+  --color-scrollbar-thumb-hover: #ff5a0a;
 
-  /* Sidebar - kept dark with Fibertel blue accents */
-  --color-sidebar-bg: #0D1B2A;
-  --color-sidebar-border: #1B3A4B;
-  --color-sidebar-text: #94A3B8;
-  --color-sidebar-text-active: #38BDF8;
-  --color-sidebar-accent: #0099D9;
+  /* Sidebar WIN — marrón oscuro + acento naranja */
+  --color-sidebar-bg: #211310;
+  --color-sidebar-border: #3a241d;
+  --color-sidebar-text: #d6c4bc;
+  --color-sidebar-text-active: #ffffff;
+  --color-sidebar-accent: #ff5a0a;
 }
 
-/* Dark theme - Deep blue tones */
+/* Data viz (NOC dashboard). The today/compare pair was validated with the
+   dataviz palette checks against #ffffff (light) and #241611 (dark). */
+:root {
+  --viz-today: #ff5a0a;
+  --viz-compare: #7c7e80;
+  --viz-grid: #eeeae6;
+  --viz-axis: #d9cfc8;
+  --viz-delta-good: #006300;
+  --viz-delta-bad: #c62f2f;
+  --viz-status-good: #0ca30c;
+  --viz-status-warning: #fab219;
+  --viz-status-critical: #d03b3b;
+}
+
 .dark {
-  --color-bg-primary: #0F172A;
-  --color-bg-secondary: #1E293B;
-  --color-bg-tertiary: #334155;
-  --color-bg-card: #1E293B;
-  --color-bg-hover: #334155;
+  --viz-today: #f05a14;
+  --viz-compare: #7d6f68;
+  --viz-grid: #3a271f;
+  --viz-axis: #4a2e22;
+  --viz-delta-good: #2fbf4f;
+  --viz-delta-bad: #ef6b6b;
+}
 
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #E2E8F0;
-  --color-text-tertiary: #94A3B8;
-  --color-text-muted: #64748B;
+/* Dark theme — marrón profundo WIN */
+.dark {
+  --color-bg-primary: #1c110d;
+  --color-bg-secondary: #160d0a;
+  --color-bg-tertiary: #2a1a14;
+  --color-bg-card: #241611;
+  --color-bg-hover: #332016;
 
-  --color-border-primary: #334155;
-  --color-border-secondary: #475569;
+  --color-text-primary: #fdf3ec;
+  --color-text-secondary: #e8d5c8;
+  --color-text-tertiary: #b49a8b;
+  --color-text-muted: #7c6a60;
 
-  --color-shadow: rgba(0, 0, 0, 0.3);
+  --color-border-primary: #4a2e22;
+  --color-border-secondary: #6b3d26;
+
+  --color-shadow: rgba(0, 0, 0, 0.4);
   --color-shadow-md: rgba(0, 0, 0, 0.5);
 
-  /* Dark theme status colors */
-  --color-success-bg: rgba(16, 185, 129, 0.15);
-  --color-warning-bg: rgba(245, 158, 11, 0.15);
-  --color-error-bg: rgba(239, 68, 68, 0.15);
-  --color-info-bg: rgba(0, 153, 217, 0.15);
+  --color-success-bg: rgba(27, 215, 65, 0.15);
+  --color-warning-bg: rgba(255, 194, 0, 0.15);
+  --color-error-bg: rgba(229, 72, 77, 0.15);
+  --color-info-bg: rgba(255, 90, 10, 0.15);
 
-  /* Scrollbar dark */
-  --color-scrollbar-track: #1E293B;
-  --color-scrollbar-thumb: #475569;
-  --color-scrollbar-thumb-hover: #64748B;
+  --color-scrollbar-track: #241611;
+  --color-scrollbar-thumb: #4a2e22;
+  --color-scrollbar-thumb-hover: #ff5a0a;
+
+  --color-sidebar-bg: #160d0a;
+  --color-sidebar-border: #3a241d;
+  --color-sidebar-text: #b49a8b;
+  --color-sidebar-text-active: #ffffff;
+  --color-sidebar-accent: #ff5a0a;
 }
 
 body {
@@ -101,207 +145,236 @@ body {
   min-height: 100vh;
 }
 
-/* Custom scrollbar */
+/* Headings estilo WIN: negros, uppercase en páginas */
+.win-page-title {
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+  line-height: 1.1;
+}
+.win-page-subtitle {
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+
+/* Card estilo win.pe: radius 20-30px, borde naranja suave */
+.win-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px var(--color-shadow);
+}
+.win-card-hover:hover {
+  box-shadow: 0 16px 40px var(--color-shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Botón primario estilo win.pe .link: pill + borde negro + hard shadow */
+.win-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: var(--win-orange);
+  color: #fff;
+  font-weight: 800;
+  border: 1px solid #000;
+  border-radius: 50px;
+  box-shadow: 5px 7px 0px -2px rgba(0, 0, 0, 0.75);
+  transition: transform 0.25s ease-in-out;
+  cursor: pointer;
+}
+.win-btn-primary:hover {
+  transform: scale(1.03);
+  background-color: var(--win-dorange);
+}
+.win-btn-primary:active {
+  transform: scale(0.99);
+}
+.win-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Botón secundario blanco estilo win.pe */
+.win-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #fff;
+  color: var(--win-orange);
+  font-weight: 800;
+  border: 1px solid #000;
+  border-radius: 50px;
+  box-shadow: 5px 7px 0px -2px rgba(0, 0, 0, 0.75);
+  transition: transform 0.25s ease-in-out;
+  cursor: pointer;
+}
+.dark .win-btn-secondary {
+  background-color: var(--color-bg-card);
+}
+.win-btn-secondary:hover {
+  transform: scale(1.03);
+}
+
+/* Inputs estilo win.pe: radius 20px, borde naranja */
+.win-input {
+  width: 100%;
+  border-radius: 20px;
+  border: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.win-input:focus {
+  border-color: var(--win-orange);
+  box-shadow: 0 0 0 3px rgba(255, 90, 10, 0.15);
+  outline: none;
+}
+.win-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Custom scrollbar WIN */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
   background: var(--color-scrollbar-track);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb {
   background: var(--color-scrollbar-thumb);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-scrollbar-thumb-hover);
 }
 
-/* Smooth animations */
+/* Animations */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
 }
-
 @keyframes pulse-soft {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
-
 @keyframes glow {
-  0%, 100% {
-    box-shadow: 0 0 5px rgba(0, 153, 217, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(0, 153, 217, 0.5);
-  }
+  0%, 100% { box-shadow: 0 0 5px rgba(255, 90, 10, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(255, 90, 10, 0.5); }
 }
+.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out forwards; }
+.animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+.animate-glow { animation: glow 2s ease-in-out infinite; }
 
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
-}
+/* Charts */
+.recharts-wrapper { transition: transform 0.2s ease; }
+.recharts-tooltip-wrapper { z-index: 50 !important; }
+.badge-pulse { animation: pulse-soft 2s ease-in-out infinite; }
+.tabular-nums { font-variant-numeric: tabular-nums; }
 
-.animate-slide-in-right {
-  animation: slideInRight 0.3s ease-out forwards;
-}
-
-.animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
-}
-
-.animate-glow {
-  animation: glow 2s ease-in-out infinite;
-}
-
-/* Chart hover effects */
-.recharts-wrapper {
-  transition: transform 0.2s ease;
-}
-
-.recharts-tooltip-wrapper {
-  z-index: 50 !important;
-}
-
-/* Badge pulse animation */
-.badge-pulse {
-  animation: pulse-soft 2s ease-in-out infinite;
-}
-
-/* Tabular numbers for better alignment */
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Focus styles - Fibertel blue */
+/* Focus WIN */
 *:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
-
-/* Selection color - Fibertel blue */
 ::selection {
-  background-color: #BAE6FD;
-  color: #0369A1;
+  background-color: #ffdac8;
+  color: #301d19;
 }
 
-/* Card hover glow effect */
+/* Card hover glow WIN */
 .card-glow:hover {
-  box-shadow: 0 0 0 1px rgba(0, 153, 217, 0.15),
-              0 4px 6px -1px rgba(0, 153, 217, 0.08),
-              0 10px 15px -3px rgba(0, 153, 217, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 90, 10, 0.15),
+              0 4px 6px -1px rgba(255, 90, 10, 0.08),
+              0 10px 15px -3px rgba(255, 90, 10, 0.08);
 }
 
-/* Gradient text - Fibertel blue gradient */
+/* Gradient text WIN */
 .gradient-text {
-  background: linear-gradient(135deg, #0099D9 0%, #38BDF8 100%);
+  background: linear-gradient(135deg, #ff5a0a 0%, #d8450b 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Glass morphism effect */
+/* Glass */
 .glass {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
-
 .dark .glass {
-  background: rgba(15, 23, 42, 0.85);
+  background: rgba(28, 17, 13, 0.85);
 }
 
-/* Smooth transitions for all interactive elements */
 button, a, input, select, textarea {
   transition: all 0.2s ease;
 }
 
-/* Better table row hover */
 tr:hover td {
   background-color: var(--color-bg-hover);
 }
 
-/* Loading skeleton shimmer */
+/* Skeleton shimmer WIN */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
-
 .skeleton {
-  background: linear-gradient(90deg, #E0F2FE 25%, #BAE6FD 50%, #E0F2FE 75%);
+  background: linear-gradient(90deg, #fff3ed 25%, #ffdac8 50%, #fff3ed 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
-
 .dark .skeleton {
-  background: linear-gradient(90deg, #1E293B 25%, #334155 50%, #1E293B 75%);
+  background: linear-gradient(90deg, #241611 25%, #3a241d 50%, #241611 75%);
   background-size: 200% 100%;
 }
 
-/* Fibertel button styles */
+/* Legacy compat: btn-primary */
 .btn-primary {
-  background: linear-gradient(135deg, #0099D9 0%, #007BB5 100%);
+  background: linear-gradient(135deg, #ff5a0a 0%, #d8450b 100%);
   color: white;
   border: none;
   transition: all 0.2s ease;
 }
-
 .btn-primary:hover {
-  background: linear-gradient(135deg, #33ADDF 0%, #0099D9 100%);
+  background: linear-gradient(135deg, #ff7736 0%, #ff5a0a 100%);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 153, 217, 0.3);
+  box-shadow: 0 4px 12px rgba(255, 90, 10, 0.3);
 }
 
-/* Input focus states */
 input:focus, select:focus, textarea:focus {
   border-color: var(--color-primary) !important;
-  box-shadow: 0 0 0 3px rgba(0, 153, 217, 0.15);
+  box-shadow: 0 0 0 3px rgba(255, 90, 10, 0.15);
 }
 
-/* Status badges with Fibertel styling */
+/* Status badges WIN */
 .badge-success {
   background-color: var(--color-success-bg);
   color: var(--color-success);
 }
-
 .badge-warning {
   background-color: var(--color-warning-bg);
+  color: #8a6d00;
+}
+.dark .badge-warning {
   color: var(--color-warning);
 }
-
 .badge-error {
   background-color: var(--color-error-bg);
   color: var(--color-error);
 }
-
 .badge-info {
   background-color: var(--color-info-bg);
   color: var(--color-info);

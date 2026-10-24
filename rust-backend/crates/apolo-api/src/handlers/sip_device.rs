@@ -3,7 +3,8 @@
 //! HTTP handlers for SIP device management endpoints.
 
 use crate::dto::sip_device::{
-    FreeswitchIpRequest, FreeswitchIpResponse, PasswordRegenerateResponse, SipDeviceCreateRequest,
+    FreeswitchIpRequest, FreeswitchIpResponse, PasswordRegenerateRequest,
+    PasswordRegenerateResponse, SipDeviceCreateRequest,
     SipDeviceFilterParams, SipDeviceResponse, SipDeviceUpdateRequest, SipDeviceWithPasswordResponse,
     SipRegistrationStatusResponse,
 };
@@ -47,6 +48,7 @@ pub async fn list_sip_devices(
         .list_filtered(
             filters.account_id,
             filters.enabled,
+            filters.search.as_deref(),
             query.limit(),
             query.offset(),
         )
@@ -397,18 +399,38 @@ pub async fn get_sip_device_password(
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
-/// Regenerate SIP device password
+/// Regenerate (or set) SIP device password.
 ///
 /// POST /api/v1/sip-devices/{id}/regenerate-password
-#[instrument(skip(pool, sip_service, _user))]
+///
+/// Body is optional. An empty body, `{}`, or `{"new_password": null}` keeps
+/// the historical behavior (server-generated password). Passing a non-empty
+/// `new_password` lets the operator choose the value — validated for length
+/// by the DTO.
+#[instrument(skip(pool, sip_service, _user, req))]
 pub async fn regenerate_sip_device_password(
     pool: web::Data<PgPool>,
     sip_service: web::Data<Arc<SipDeviceService>>,
     path: web::Path<i32>,
     _user: AuthenticatedUser,
+    req: Option<web::Json<PasswordRegenerateRequest>>,
 ) -> Result<HttpResponse, AppError> {
     let device_id = path.into_inner();
     debug!(id = device_id, "Regenerating SIP device password");
+
+    // Validate the body if one was supplied.
+    let custom_password: Option<String> = match req {
+        Some(body) => {
+            body.validate().map_err(|e| {
+                warn!("Password regenerate validation failed: {}", e);
+                AppError::Validation(e.to_string())
+            })?;
+            body.new_password
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+        }
+        None => None,
+    };
 
     let repo = PgSipDeviceRepository::new(pool.get_ref().clone());
     let device = repo
@@ -416,8 +438,9 @@ pub async fn regenerate_sip_device_password(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("SIP device {} not found", device_id)))?;
 
-    // Generate new password
-    let new_password = SipDeviceService::generate_password();
+    // Use caller-provided password if any, else generate.
+    let new_password =
+        custom_password.unwrap_or_else(SipDeviceService::generate_password);
 
     // Encrypt and generate new A1 hash
     let (encrypted, nonce) = sip_service.encrypt_password(&new_password)?;

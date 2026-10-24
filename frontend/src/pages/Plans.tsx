@@ -150,7 +150,7 @@ export default function PlansPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-text-primary)] flex items-center">
-            <FileText className="w-8 h-8 mr-3 text-blue-600" />
+            <FileText className="w-8 h-8 mr-3 text-[#ff5a0a]" />
             Planes
           </h1>
           <p className="text-[var(--color-text-secondary)] mt-1">
@@ -159,7 +159,7 @@ export default function PlansPage() {
         </div>
         <button
           onClick={handleCreate}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
+          className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] flex items-center"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nuevo Plan
@@ -264,7 +264,7 @@ function PlanModal({
                 onChange={(e) =>
                   setFormData({ ...formData, plan_name: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
             </div>
 
@@ -280,7 +280,7 @@ function PlanModal({
                 onChange={(e) =>
                   setFormData({ ...formData, plan_code: e.target.value })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
               />
             </div>
           </div>
@@ -296,7 +296,7 @@ function PlanModal({
               onChange={(e) =>
                 setFormData({ ...formData, account_type: e.target.value as AccountType })
               }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-[var(--color-bg-secondary)]"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
             >
               <option value="PREPAID">Prepago</option>
               <option value="POSTPAID">Postpago</option>
@@ -320,7 +320,7 @@ function PlanModal({
                     initial_balance: Number(e.target.value),
                   })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 El saldo inicial no puede ser cero (sin planes ilimitados)
@@ -343,7 +343,7 @@ function PlanModal({
                     credit_limit: Number(e.target.value),
                   })
                 }
-                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
                 El límite de crédito no puede ser cero (sin planes ilimitados)
@@ -367,7 +367,7 @@ function PlanModal({
                   max_concurrent_calls: Number(e.target.value),
                 })
               }
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
             />
           </div>
 
@@ -381,7 +381,7 @@ function PlanModal({
                 setFormData({ ...formData, description: e.target.value })
               }
               rows={2}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
             />
           </div>
 
@@ -392,7 +392,7 @@ function PlanModal({
               onChange={(e) =>
                 setFormData({ ...formData, enabled: e.target.checked })
               }
-              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              className="w-4 h-4 text-[#ff5a0a] rounded focus:ring-[#ff5a0a]"
             />
             <label className="ml-2 text-sm font-medium text-[var(--color-text-secondary)]">
               Plan activo
@@ -409,7 +409,7 @@ function PlanModal({
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b]"
             >
               {plan ? 'Actualizar' : 'Crear'}
             </button>

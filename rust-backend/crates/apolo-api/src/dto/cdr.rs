@@ -54,13 +54,12 @@ pub struct CdrExportParams {
     /// Called number filter (prefix match)
     pub callee: Option<String>,
 
-    /// Start date filter
-    #[serde(default, deserialize_with = "deserialize_optional_datetime")]
-    pub start_date: Option<DateTime<Utc>>,
+    /// Start date filter (YYYY-MM-DD in Lima time or RFC 3339), resolved
+    /// with the same rules as the CDR list so both return the same rows
+    pub start_date: Option<String>,
 
-    /// End date filter
-    #[serde(default, deserialize_with = "deserialize_optional_datetime")]
-    pub end_date: Option<DateTime<Utc>>,
+    /// End date filter (YYYY-MM-DD means end of that day in Lima time)
+    pub end_date: Option<String>,
 
     /// Export format
     #[serde(default)]

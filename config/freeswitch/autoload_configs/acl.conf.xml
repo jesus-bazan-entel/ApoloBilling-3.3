@@ -2,25 +2,32 @@
 <configuration name="acl.conf" description="Network Lists">
   <network-lists>
 
-    <!-- ACL para PBX -->
-    <list name="pbx-acl" default="deny">
-      <node type="allow" cidr="172.16.1.25/32"/>
-      <node type="allow" cidr="10.212.134.0/24"/>
-    </list>
-
-    <!-- ACL para Kamailio - Todas las interfaces -->
+    <!--
+      kamailio-acl: which peers may send traffic INTO FreeSWITCH's external
+      profile. This must cover Kamailio's LAN interface (loopback and the
+      internal IP) and loopback for local OPTIONS tests.
+      Kamailio never reaches FS from the public carrier IP directly —
+      Integratel hits Kamailio, Kamailio hits FS from the LAN side.
+    -->
     <list name="kamailio-acl" default="deny">
-      <node type="allow" cidr="10.10.22.4/32"/>
-      <node type="allow" cidr="10.124.194.14/32"/>
       <node type="allow" cidr="127.0.0.1/32"/>
+      <node type="allow" cidr="10.118.0.0/28"/>
     </list>
 
-    <!-- Red local automática -->
+    <!-- pbx-acl: IP-authenticated PBX trunks. Sources matching this list
+         set sip_authorized=true on the channel, so the internal profile's
+         auth-calls=true is bypassed for them (digest auth not required). -->
+    <list name="pbx-acl" default="deny">
+      <node type="allow" cidr="10.118.0.0/28"/>
+      <node type="allow" cidr="10.118.0.4/32"/>
+    </list>
+
+    <!-- Auto-detected local network for bypass decisions. -->
     <list name="localnet.auto" default="allow">
-      <node type="allow" cidr="172.16.0.0/12"/>
       <node type="allow" cidr="10.0.0.0/8"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+      <node type="allow" cidr="192.168.0.0/16"/>
     </list>
 
   </network-lists>
 </configuration>
-

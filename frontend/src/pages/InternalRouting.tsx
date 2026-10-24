@@ -218,7 +218,7 @@ export default function InternalRouting() {
         <button
           onClick={() => syncMutation.mutate()}
           disabled={syncMutation.isPending}
-          className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#ff5a0a] px-4 py-2 text-sm font-medium text-white hover:bg-[#d8450b] disabled:opacity-50"
         >
           <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
           Sincronizar
@@ -232,7 +232,7 @@ export default function InternalRouting() {
             onClick={() => setActiveTab('routes')}
             className={`border-b-2 px-1 py-4 text-sm font-medium ${
               activeTab === 'routes'
-                ? 'border-cyan-500 text-cyan-600'
+                ? 'border-[#ff5a0a] text-[#ff5a0a]'
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
             }`}
           >
@@ -242,7 +242,7 @@ export default function InternalRouting() {
             onClick={() => setActiveTab('endpoints')}
             className={`border-b-2 px-1 py-4 text-sm font-medium ${
               activeTab === 'endpoints'
-                ? 'border-cyan-500 text-cyan-600'
+                ? 'border-[#ff5a0a] text-[#ff5a0a]'
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
             }`}
           >
@@ -262,7 +262,7 @@ export default function InternalRouting() {
               </h2>
               <button
                 onClick={() => { setEditingRoute(null); setShowRouteModal(true); }}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#ff5a0a] px-3 py-2 text-sm font-medium text-white hover:bg-[#d8450b]"
               >
                 <Plus className="h-4 w-4" />
                 Nueva Ruta
@@ -326,7 +326,7 @@ export default function InternalRouting() {
               </h2>
               <button
                 onClick={() => { setEditingEndpoint(null); setShowEndpointModal(true); }}
-                className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-700"
+                className="inline-flex items-center gap-2 rounded-lg bg-[#ff5a0a] px-3 py-2 text-sm font-medium text-white hover:bg-[#d8450b]"
               >
                 <Plus className="h-4 w-4" />
                 Nuevo Endpoint
@@ -425,7 +425,7 @@ function EndpointCard({
     <div className={`rounded-lg border bg-white p-4 shadow-sm dark:bg-gray-800 dark:border-gray-700 ${!endpoint.enabled ? 'opacity-60' : ''}`}>
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Server className={`h-5 w-5 ${isFS ? 'text-green-500' : 'text-blue-500'}`} />
+          <Server className={`h-5 w-5 ${isFS ? 'text-green-500' : 'text-[#ff5a0a]'}`} />
           <span className="font-medium text-gray-900 dark:text-white">{endpoint.name}</span>
         </div>
         <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ function EndpointCard({
               Principal
             </span>
           )}
-          <span className={`rounded px-2 py-1 text-xs ${isFS ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+          <span className={`rounded px-2 py-1 text-xs ${isFS ? 'bg-green-100 text-green-700' : 'bg-[#ffede3] text-[#d8450b]'}`}>
             {isFS ? 'FreeSWITCH' : 'Kamailio'}
           </span>
         </div>
@@ -762,7 +762,7 @@ function EndpointModal({
             <button
               type="submit"
               disabled={mutation.isPending}
-              className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              className="rounded-lg bg-[#ff5a0a] px-4 py-2 text-sm font-medium text-white hover:bg-[#d8450b] disabled:opacity-50"
             >
               {mutation.isPending ? 'Guardando...' : 'Guardar'}
             </button>
@@ -982,7 +982,7 @@ function RouteModal({
             <button
               type="submit"
               disabled={mutation.isPending}
-              className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-700 disabled:opacity-50"
+              className="rounded-lg bg-[#ff5a0a] px-4 py-2 text-sm font-medium text-white hover:bg-[#d8450b] disabled:opacity-50"
             >
               {mutation.isPending ? 'Guardando...' : 'Guardar'}
             </button>

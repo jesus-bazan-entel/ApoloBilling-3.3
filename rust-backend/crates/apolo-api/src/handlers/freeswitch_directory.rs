@@ -115,10 +115,13 @@ pub async fn directory_lookup(
             return Ok(not_found_response());
         }
         None => {
+            // No matching row can mean: device doesn't exist, device is disabled,
+            // or its billing account is suspended/closed (the repo query INNER JOINs
+            // accounts with status = 'active'). All three correctly block REGISTER.
             debug!(
                 username = %username,
                 realm = %realm,
-                "Device not found"
+                "Device not found, disabled, or account not active"
             );
             return Ok(not_found_response());
         }
@@ -172,6 +175,7 @@ fn build_directory_xml(device: &apolo_core::models::SipDevice) -> String {
               <params>
                 <param name="a1-hash" value="{a1_hash}"/>
                 <param name="vm-password" value=""/>
+                <param name="expire-seconds" value="3600"/>
               </params>
               <variables>
                 <variable name="toll_allow" value="domestic,international,local"/>
@@ -184,7 +188,7 @@ fn build_directory_xml(device: &apolo_core::models::SipDevice) -> String {
                 <variable name="callgroup" value="default"/>
                 <variable name="absolute_codec_string" value="{codecs}"/>
                 <variable name="max_registrations" value="{max_registrations}"/>
-                <variable name="sip-force-expires" value="300"/>
+                <variable name="sip-force-expires" value="3600"/>
               </variables>
             </user>
           </users>

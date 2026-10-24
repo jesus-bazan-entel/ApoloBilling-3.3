@@ -1,0 +1,29 @@
+<include>
+  <!--
+    Gateway: Kamailio (FS-facing listener).
+    Kamailio listens on the LAN IP port 5080 specifically to receive traffic
+    from FreeSWITCH. All outbound-to-PSTN calls go through this gateway;
+    Kamailio then makes the routing decision and forwards to the carrier
+    (Integratel) from its external interface.
+    IP is rewritten at install time by deploy_apolo_configs().
+  -->
+  <gateway name="kamailio">
+    <param name="realm" value="10.118.0.6"/>
+    <param name="proxy" value="10.118.0.6:5080"/>
+    <param name="register" value="false"/>
+
+    <!-- Trunk-style: no digest challenge. Kamailio authorizes via ACL. -->
+    <param name="username" value="freeswitch"/>
+    <param name="password" value=""/>
+
+    <param name="register-transport" value="udp"/>
+    <param name="caller-id-in-from" value="true"/>
+
+    <!-- OPTIONS ping so FS marks the gateway NOREG/UP correctly. -->
+    <param name="ping" value="25"/>
+    <param name="ping-max" value="3"/>
+    <param name="ping-min" value="1"/>
+
+    <param name="retry-seconds" value="10"/>
+  </gateway>
+</include>

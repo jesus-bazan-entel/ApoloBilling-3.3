@@ -21,6 +21,7 @@ use services::{
     RealtimeBiller,
     CdrGenerator,
     CallSimulator,
+    KamailioCdrSync,
 };
 use esl::{FreeSwitchCluster, EslServer};
 
@@ -127,6 +128,18 @@ async fn main() -> std::io::Result<()> {
         });
 
         info!("✅ ESL Server started on 0.0.0.0:8021 (server mode for testing)");
+    }
+
+    // Kamailio dialog CDRs for inbound calls routed direct (no FreeSWITCH/ESL)
+    if let Some(kamailio_url) = config.kamailio_database_url.clone() {
+        match KamailioCdrSync::connect(db_pool.clone(), &kamailio_url).await {
+            Ok(sync) => {
+                tokio::spawn(sync.run());
+            }
+            Err(e) => error!("Kamailio CDR sync disabled - cannot connect to Kamailio DB: {}", e),
+        }
+    } else {
+        info!("⚠️  KAMAILIO_DATABASE_URL not set - Kamailio CDR sync disabled");
     }
 
     // HTTP Server

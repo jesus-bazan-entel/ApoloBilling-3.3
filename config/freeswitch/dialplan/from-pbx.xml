@@ -1,78 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Context 'from-pbx': used by the internal SIP profile (:5060). Every call
+  from a registered SIP customer lands here.
+
+  Routing order:
+    1. local-extensions  → dial another registered extension on this box
+    2. outbound-to-kamailio → bridge everything else to Kamailio's
+       FS-facing listener at 10.118.0.6:5080; Kamailio picks the trunk
+       and hands the call to the PSTN carrier.
+
+  IPs are rewritten at install time by deploy_apolo_configs().
+-->
 <include>
   <context name="from-pbx">
 
-    <!-- Llamadas entrantes desde fibertelperu hacia Kamailio -->
-    <extension name="inbound-fibertelperu">
-      <condition field="${sip_gateway_name}" expression="^fibertelperu$">
-        <action application="log" data="INFO FS: Llamada ENTRANTE fibertelperu ${caller_id_number} -> ${destination_number}"/>
-
-        <!-- Bypass media para mejor rendimiento -->
-        <action application="set" data="bypass_media=true"/>
+    <!-- Inbound calls from the FreeSWITCH "Legado" (10.118.0.4) arrive on this
+         internal profile because pbx-acl allows 10.118.0.4. They are INBOUND
+         calls toward a Fonowin subscriber, not customer outbound, so terminate
+         them at the subscriber (app.fonowin.pe) before the outbound-to-kamailio
+         fallback. Without this they fall through to outbound-to-kamailio, get
+         classified as PBX-outbound by Kamailio (drouting group 8000), match the
+         generic "Lima prefijo 7" rule (gw 954, pri_prefix='1') and loop back to
+         Legado as 1<number> -> 404 NO_ROUTE_DESTINATION.
+         Mirror of 'fonowin-legado-inbound' in the from-kamailio context. -->
+    <extension name="legado-inbound-subscriber">
+      <condition field="${network_addr}" expression="^10\.118\.0\.4$"/>
+      <condition field="destination_number" expression="^(\d+)$">
+        <action application="log" data="INFO from-pbx: Legado inbound to subscriber ${caller_id_number} -> ${destination_number}"/>
+        <action application="set" data="call_timeout=60"/>
+        <action application="set" data="originate_timeout=60"/>
         <action application="set" data="inherit_codec=true"/>
-
-        <!-- Habilitar 100rel -->
-        <action application="set" data="sip_enable_100rel=true"/>
-        <action application="export" data="sip_enable_100rel=true"/>
-
-        <!-- Preservar caller ID original -->
-        <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
-        <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
-
-        <action application="log" data="INFO FS: Bridge a Kamailio ${destination_number}@10.10.22.4:5060"/>
-
-        <!-- Enviar a Kamailio -->
-        <action application="bridge" data="{bypass_media=true}sofia/external/${destination_number}@10.10.22.4:5060"/>
+        <action application="set" data="target_contact=${sofia_contact($1@app.fonowin.pe)}"/>
+        <action application="bridge" data="${target_contact}"/>
       </condition>
     </extension>
 
-    <!-- Llamadas a extensiones locales (softphones registrados) -->
-    <!-- Solo hace match si el usuario está activamente registrado en FreeSWITCH -->
     <extension name="local-extensions">
-      <!-- Condición 1: El destino debe ser numérico -->
       <condition field="destination_number" expression="^(\d+)$" break="never">
         <action application="set" data="dialed_extension=$1"/>
       </condition>
-      <!-- Condición 2: El usuario debe estar registrado (sofia_contact devuelve algo que empieza con sofia/) -->
-      <condition field="${sofia_contact(user/${dialed_extension}@10.10.22.4)}" expression="^sofia/">
-        <action application="log" data="INFO FS: Usuario local ${dialed_extension} REGISTRADO - conectando"/>
-
+      <condition field="${sofia_contact(user/${dialed_extension}@10.118.0.6)}" expression="^sofia/">
+        <action application="log" data="INFO from-pbx: extension ${dialed_extension} registered, bridging"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="hangup_after_bridge=true"/>
-
-        <!-- Preservar caller ID -->
         <action application="set" data="effective_caller_id_number=${caller_id_number}"/>
         <action application="set" data="effective_caller_id_name=${caller_id_name}"/>
-
-        <!-- Conectar con el usuario registrado -->
-        <action application="bridge" data="user/${dialed_extension}@10.10.22.4"/>
+        <action application="bridge" data="user/${dialed_extension}@10.118.0.6"/>
       </condition>
     </extension>
 
     <extension name="outbound-to-kamailio">
       <condition field="destination_number" expression="^(.+)$">
-
-        <action application="log" data="INFO FS: Llamada desde ${network_ip} → $1"/>
-
-        <!-- IMPORTANTE: Configurar bypass ANTES de bridge -->
-        <action application="set" data="bypass_media=true"/>
+        <action application="log" data="INFO from-pbx: outbound ${caller_id_number} -> $1 via kamailio"/>
         <action application="set" data="inherit_codec=true"/>
-
-        <!-- Habilitar 100rel -->
         <action application="set" data="sip_enable_100rel=true"/>
         <action application="export" data="sip_enable_100rel=true"/>
-
-        <!-- Headers -->
         <action application="export" data="sip_h_P-Asserted-Identity=${sip_h_P-Asserted-Identity}"/>
 
-        <action application="log" data="INFO FS: Bridge a Kamailio $1@10.10.22.4:5060"/>
-
-        <!-- Bridge -->
-        <action application="bridge" data="{bypass_media=true}sofia/external/$1@10.10.22.4:5060"/>
-
+        <!-- Route via the 'kamailio' gateway (defined in external/gateways/kamailio.xml).
+             Using the gateway form lets OPTIONS/ACL/retry settings apply. -->
+        <action application="bridge" data="sofia/gateway/kamailio/$1"/>
       </condition>
     </extension>
 
   </context>
 </include>
-

@@ -1,26 +1,29 @@
 <include>
+  <!--
+    External SIP profile: FreeSWITCH <-> Kamailio trunk bus.
+    Port 5062 on the LAN. Outbound customer calls are bridged here via the
+    'kamailio' gateway; inbound traffic from Kamailio (carrier-originated)
+    enters the 'from-kamailio' context.
+    IP is rewritten at install time by deploy_apolo_configs().
+  -->
   <profile name="external">
     <settings>
-      <param name="sip-ip" value="10.10.22.4"/>
+      <param name="sip-ip" value="10.118.0.6"/>
       <param name="sip-port" value="5062"/>
-      <param name="rtp-ip" value="10.10.22.4"/>
+      <param name="rtp-ip" value="10.118.0.6"/>
 
-      <param name="context" value="to-kamailio"/>
+      <param name="context" value="from-kamailio"/>
       <param name="dialplan" value="XML"/>
 
       <param name="disable-register" value="true"/>
-      <!-- bypass-media deshabilitado: RTPEngine (via Kamailio) es el media relay autoritativo.
-           Con bypass-media=true, FS generaba re-INVITEs post-bridge que desincronizaban los
-           legs de RTPEngine causando one-way streams y entrecorte de llamadas. -->
+
+      <!-- RTPEngine authoritative: never bypass. -->
       <param name="inbound-bypass-media" value="false"/>
       <param name="bypass-media-after-bridge" value="false"/>
-      <!-- <param name="proxy-media" value="true"/> -->
 
-      <!-- CRÍTICO: Habilitar 100rel/PRACK -->
       <param name="enable-100rel" value="true"/>
       <param name="auto-answer-100rel" value="true"/>
 
-      <!-- Session Timers (requerido por Kamailio) -->
       <param name="enable-timer" value="true"/>
       <param name="session-timeout" value="1800"/>
       <param name="minimum-session-expires" value="120"/>

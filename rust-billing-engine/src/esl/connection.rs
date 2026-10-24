@@ -9,6 +9,8 @@ use crate::esl::event::EslEvent;
 pub struct EslConnection {
     stream: Arc<Mutex<BufReader<TcpStream>>>,
     server_id: String,
+    /// UUIDs of the channels alive at connect time (None if the snapshot failed)
+    initial_channel_uuids: Option<Vec<String>>,
 }
 
 impl EslConnection {
@@ -44,6 +46,16 @@ impl EslConnection {
 
         info!("✅ Authenticated to FreeSWITCH: {}", server_id);
 
+        // Snapshot live channels before subscribing, so no event can interleave
+        // with the api response. Used to reconcile active_calls on (re)connect.
+        let initial_channel_uuids = match Self::fetch_channel_uuids(&mut reader).await {
+            Ok(uuids) => Some(uuids),
+            Err(e) => {
+                warn!("Could not snapshot channels from {}: {}", server_id, e);
+                None
+            }
+        };
+
         // Subscribe to events
         Self::write_command(
             &mut reader,
@@ -61,6 +73,7 @@ impl EslConnection {
         Ok(Self {
             stream: Arc::new(Mutex::new(reader)),
             server_id,
+            initial_channel_uuids,
         })
     }
 
@@ -105,6 +118,36 @@ impl EslConnection {
 
     pub fn server_id(&self) -> &str {
         &self.server_id
+    }
+
+    pub fn initial_channel_uuids(&self) -> Option<&[String]> {
+        self.initial_channel_uuids.as_deref()
+    }
+
+    async fn fetch_channel_uuids(
+        reader: &mut BufReader<TcpStream>
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        Self::write_command(reader, "api show channels as json\n\n").await?;
+        let response = Self::read_response(reader).await?;
+
+        let body = response
+            .split_once("\n\n")
+            .map(|(_, body)| body)
+            .ok_or("Malformed api response")?;
+        let json: serde_json::Value = serde_json::from_str(body.trim())?;
+
+        // FreeSWITCH omits "rows" when there are no channels
+        let uuids = json
+            .get("rows")
+            .and_then(|rows| rows.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|row| row.get("uuid").and_then(|u| u.as_str()))
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(uuids)
     }
 
     // Helper: Read response from FreeSWITCH
