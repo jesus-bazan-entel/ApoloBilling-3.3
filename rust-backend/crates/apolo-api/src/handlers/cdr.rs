@@ -234,8 +234,10 @@ async fn attach_accounts(pool: &PgPool, rows: &mut [CdrResponse]) -> AppResult<(
     Ok(())
 }
 
-/// Phone numbers are personal data (Ley 29733): operators see them masked,
-/// admins in full. Filters still match the full number server-side.
+/// Phone numbers are personal data (Ley 29733): operators see them masked on
+/// screen, admins in full. Filters still match the full number server-side.
+/// The export is never masked: it is the file reconciled against carriers by
+/// MSISDN, and every export is recorded in audit_logs (who, when, filters).
 fn masks_numbers(user: &AuthenticatedUser) -> bool {
     !user.is_admin()
 }
@@ -348,7 +350,6 @@ pub async fn export_cdrs(
 
     let params = query.into_inner();
     let account_id = resolve_account(db.get_ref(), params.account_id, &params.account).await?;
-    let masked = masks_numbers(&user);
 
     info!(
         "Starting CDR export: user={}, format={:?}, limit={}, start={}, end={}, direction={:?}",
@@ -371,7 +372,6 @@ pub async fn export_cdrs(
             "account": params.account,
             "outcome": params.outcome,
             "min_billsec": params.min_billsec,
-            "masked": masked,
             "limit": params.limit,
         }))
         .build()
@@ -403,7 +403,7 @@ pub async fn export_cdrs(
     ));
 
     let cursor = ExportCursor::new(pool, params, account_id, start, end);
-    Ok(response.streaming(export_stream(cursor, masked)))
+    Ok(response.streaming(export_stream(cursor)))
 }
 
 /// Get CDR statistics
@@ -591,7 +591,6 @@ fn csv_line(cdr: &CdrResponse) -> String {
 /// fails visibly) instead of ending it early as if the file were complete.
 fn export_stream(
     cursor: ExportCursor,
-    masked: bool,
 ) -> impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>> {
     #[derive(Clone, Copy)]
     enum Phase {
@@ -619,10 +618,7 @@ fn export_stream(
                     Ok(Some(cdrs)) => {
                         let mut out = String::new();
                         let mut first_row = first;
-                        for mut cdr in cdrs {
-                            if masked {
-                                mask_response(&mut cdr);
-                            }
+                        for cdr in cdrs {
                             match format {
                                 ExportFormat::Csv => out.push_str(&csv_line(&cdr)),
                                 ExportFormat::Json | ExportFormat::Jsonl => {
