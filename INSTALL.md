@@ -21,8 +21,7 @@
 13. [Integración Final](#13-integración-final)
 14. [Sistema de Routing Unificado](#14-sistema-de-routing-unificado)
 15. [Dispositivos SIP y Monitoreo](#15-dispositivos-sip-y-monitoreo)
-16. [Rutas Internas](#16-rutas-internas)
-17. [Verificación](#17-verificación)
+16. [Verificación](#16-verificación)
 
 ---
 
@@ -1003,74 +1002,9 @@ EOF
 
 ---
 
-## 16. Rutas Internas
+## 16. Verificación
 
-Las rutas internas definen la interconexión entre FreeSWITCH y Kamailio dentro del sistema.
-
-### 16.1 System Endpoints
-
-Los endpoints del sistema representan los puntos de conexión internos:
-
-```bash
-# Crear endpoint de sistema:
-sudo -u postgres psql -d apolo_billing << 'EOF'
-INSERT INTO system_endpoints (name, endpoint_type, host, port, transport, enabled, description)
-VALUES
-  ('FreeSWITCH Internal', 'freeswitch', '127.0.0.1', 5080, 'udp', true, 'FreeSWITCH internal profile'),
-  ('FreeSWITCH External', 'freeswitch', '127.0.0.1', 5062, 'udp', true, 'FreeSWITCH external profile'),
-  ('Kamailio SBC', 'kamailio', '127.0.0.1', 5060, 'udp', true, 'Kamailio SIP proxy');
-EOF
-```
-
-### 16.2 Rutas Internas
-
-```bash
-# Ejemplo de ruta: FreeSWITCH → Kamailio
-sudo -u postgres psql -d apolo_billing << 'EOF'
-INSERT INTO internal_routes (
-  name,
-  route_type,
-  source_endpoint_id,
-  destination_endpoint_id,
-  context,
-  match_pattern,
-  priority,
-  enabled
-)
-VALUES (
-  'Outbound to Kamailio',
-  'fs_to_kamailio',
-  1,  -- FreeSWITCH Internal
-  3,  -- Kamailio SBC
-  'from-pbx',
-  '^[0-9]+$',
-  10,
-  true
-);
-EOF
-```
-
-### 16.3 Tipos de Rutas
-
-| Tipo | Descripción |
-|------|-------------|
-| `fs_to_kamailio` | Llamadas de FreeSWITCH hacia carriers via Kamailio |
-| `kamailio_to_fs` | Llamadas entrantes de Kamailio hacia FreeSWITCH |
-| `fs_internal` | Llamadas internas dentro de FreeSWITCH |
-
-### 16.4 API de Rutas Internas
-
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/api/v1/internal-routes` | GET/POST | Listar/crear rutas |
-| `/api/v1/internal-routes/{id}` | GET/PUT/DELETE | CRUD individual |
-| `/api/v1/internal-routes/endpoints` | GET/POST | Endpoints del sistema |
-
----
-
-## 17. Verificación
-
-### 17.1 Script de verificación completa
+### 16.1 Script de verificación completa
 
 ```bash
 #!/bin/bash
@@ -1125,7 +1059,7 @@ echo "=========================================="
 sudo -u postgres psql -d apolo_billing -c "SELECT 'routing_trunks' as tabla, count(*) FROM routing_trunks UNION ALL SELECT 'routing_inbound_routes', count(*) FROM routing_inbound_routes UNION ALL SELECT 'routing_outbound_routes', count(*) FROM routing_outbound_routes UNION ALL SELECT 'sip_devices', count(*) FROM sip_devices;"
 ```
 
-### 17.2 Logs útiles
+### 16.2 Logs útiles
 
 ```bash
 # Ver todos los logs en tiempo real
@@ -1144,7 +1078,7 @@ tail -f /var/log/freeswitch/freeswitch.log
 tail -f /var/log/kamailio/kamailio.log
 ```
 
-### 17.3 Acceder al sistema
+### 16.3 Acceder al sistema
 
 1. Abrir navegador: `http://TU_IP_SERVIDOR`
 2. Login: `admin` / `admin123`
@@ -1403,13 +1337,6 @@ curl -X POST http://localhost:8000/api/v1/freeswitch/directory \
 | `/api/v1/freeswitch/directory` | POST | Autenticación dinámica (mod_xml_curl) |
 | `/api/v1/freeswitch/allowed-ips` | GET/POST | IPs permitidas |
 
-### Rutas Internas
-| Endpoint | Método | Descripción |
-|----------|--------|-------------|
-| `/api/v1/internal-routes` | GET/POST | Rutas internas |
-| `/api/v1/internal-routes/{id}` | GET/PUT/DELETE | CRUD ruta |
-| `/api/v1/internal-routes/endpoints` | GET/POST | Endpoints del sistema |
-
 ### Kamailio Dialplan
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
@@ -1488,8 +1415,7 @@ tail -f /var/log/freeswitch/freeswitch.log | grep -i auth
 | `/zones` | Zonas de tarificación | operator |
 | `/plans` | Planes de cuenta | admin |
 | `/sip-devices` | **Dispositivos SIP** | admin |
-| `/routing` | **Routing Unificado** (Inbound/Outbound) | admin |
-| `/internal-routing` | **Rutas Internas** | admin |
+| `/routing` | **Enrutamiento** (trunks, rutas entrantes/salientes) | admin |
 | `/kamailio-dialplan` | **Dialplan Kamailio** | superadmin |
 | `/dialplan` | Dialplan FreeSWITCH | superadmin |
 | `/users` | Gestión de usuarios | superadmin |

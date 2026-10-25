@@ -41,19 +41,6 @@ COPY public.plans (id, plan_name, plan_code, account_type, initial_balance, cred
 
 
 --
--- Data for Name: system_endpoints; Type: TABLE DATA; Schema: public; Owner: -
---
-
-COPY public.system_endpoints (id, name, endpoint_type, description, ip_address, port, transport, fs_profile, fs_context, kam_gwid, kam_gw_type, enabled, is_primary, created_at, updated_at) FROM stdin;
-c0816ff0-921c-413c-822a-ec76aff7dbc4	FreeSWITCH Internal	freeswitch	FreeSWITCH internal profile for registered devices	10.10.22.4	5080	udp	internal	from-pbx	\N	9	t	t	2026-04-08 18:48:51.442571-07	2026-04-08 18:48:51.442571-07
-b982fcf8-90e6-41a7-aef3-dd788c99aa9e	FreeSWITCH External	freeswitch	FreeSWITCH external profile for trunk connections	10.10.22.4	5062	udp	external	public	\N	9	t	f	2026-04-08 18:48:51.442571-07	2026-04-08 18:48:51.442571-07
-fd17ef02-4bba-439a-a9a4-8bb203714bbf	Kamailio SBC	kamailio	Kamailio SBC for carrier routing	10.10.22.4	5060	udp	\N	\N	\N	8	t	t	2026-04-08 18:48:51.443401-07	2026-04-08 18:48:51.443401-07
-a72e1965-1b74-4a2c-9c09-083280829d4a	Kamailio PBX Endpoint	kamailio	Kamailio endpoint receiving calls from FreeSWITCH	10.10.22.4	5082	udp	\N	\N	100	9	t	f	2026-04-08 18:48:51.443401-07	2026-04-08 18:48:51.443401-07
-d23be433-773e-44be-ae12-c0acb9f1ef99	FreeSWITCH Inbound	freeswitch	FreeSWITCH inbound profile for carrier calls	10.10.22.4	5082	udp	inbound	public	\N	9	t	f	2026-04-08 20:13:40.909547-07	2026-04-08 20:13:40.909547-07
-\.
-
-
---
 -- Data for Name: system_settings; Type: TABLE DATA; Schema: public; Owner: -
 --
 

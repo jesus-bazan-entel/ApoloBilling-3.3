@@ -62,7 +62,7 @@ const adminSection: NavSection = {
   items: [
     { name: 'Aprovisionamiento', href: '/provisioning', icon: UserPlus },
     { name: 'Dispositivos SIP', href: '/sip-devices', icon: Headphones },
-    { name: 'Rutas Externas', href: '/routing', icon: Router },
+    { name: 'Enrutamiento', href: '/routing', icon: Router },
   ],
 }
 

@@ -316,34 +316,6 @@ ALTER SEQUENCE public.freeswitch_allowed_ips_id_seq OWNED BY public.freeswitch_a
 
 
 --
--- Name: internal_routes; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.internal_routes (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    name character varying(100) NOT NULL,
-    description text,
-    route_type character varying(30) NOT NULL,
-    source_endpoint_id uuid,
-    dest_endpoint_id uuid,
-    bypass_media boolean DEFAULT true NOT NULL,
-    inherit_codec boolean DEFAULT true NOT NULL,
-    enable_100rel boolean DEFAULT true NOT NULL,
-    call_timeout integer DEFAULT 60 NOT NULL,
-    prefix_pattern character varying(50) DEFAULT '.*'::character varying,
-    sync_status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
-    sync_error text,
-    last_sync timestamp with time zone,
-    priority integer DEFAULT 100 NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT internal_routes_route_type_check CHECK (((route_type)::text = ANY ((ARRAY['fs_to_kamailio'::character varying, 'kamailio_to_fs'::character varying])::text[]))),
-    CONSTRAINT internal_routes_sync_status_check CHECK (((sync_status)::text = ANY ((ARRAY['pending'::character varying, 'synced'::character varying, 'error'::character varying])::text[])))
-);
-
-
---
 -- Name: plans; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -938,31 +910,6 @@ ALTER SEQUENCE public.sip_devices_id_seq OWNED BY public.sip_devices.id;
 
 
 --
--- Name: system_endpoints; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.system_endpoints (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    name character varying(100) NOT NULL,
-    endpoint_type character varying(30) NOT NULL,
-    description text,
-    ip_address character varying(45) NOT NULL,
-    port integer NOT NULL,
-    transport character varying(10) DEFAULT 'udp'::character varying NOT NULL,
-    fs_profile character varying(50),
-    fs_context character varying(50),
-    kam_gwid integer,
-    kam_gw_type integer DEFAULT 9,
-    enabled boolean DEFAULT true NOT NULL,
-    is_primary boolean DEFAULT false NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT system_endpoints_endpoint_type_check CHECK (((endpoint_type)::text = ANY ((ARRAY['freeswitch'::character varying, 'kamailio'::character varying])::text[]))),
-    CONSTRAINT system_endpoints_transport_check CHECK (((transport)::text = ANY ((ARRAY['udp'::character varying, 'tcp'::character varying, 'tls'::character varying])::text[])))
-);
-
-
---
 -- Name: system_settings; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1277,14 +1224,6 @@ ALTER TABLE ONLY public.freeswitch_allowed_ips
 
 
 --
--- Name: internal_routes internal_routes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.internal_routes
-    ADD CONSTRAINT internal_routes_pkey PRIMARY KEY (id);
-
-
---
 -- Name: plans plans_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1378,22 +1317,6 @@ ALTER TABLE ONLY public.routing_trunks
 
 ALTER TABLE ONLY public.sip_devices
     ADD CONSTRAINT sip_devices_pkey PRIMARY KEY (id);
-
-
---
--- Name: system_endpoints system_endpoints_endpoint_type_ip_address_port_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.system_endpoints
-    ADD CONSTRAINT system_endpoints_endpoint_type_ip_address_port_key UNIQUE (endpoint_type, ip_address, port);
-
-
---
--- Name: system_endpoints system_endpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.system_endpoints
-    ADD CONSTRAINT system_endpoints_pkey PRIMARY KEY (id);
 
 
 --
@@ -1588,20 +1511,6 @@ CREATE INDEX idx_cdrs_uuid ON public.cdrs USING btree (call_uuid);
 --
 
 CREATE INDEX idx_freeswitch_ips_enabled ON public.freeswitch_allowed_ips USING btree (enabled) WHERE (enabled = true);
-
-
---
--- Name: idx_internal_routes_enabled; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_internal_routes_enabled ON public.internal_routes USING btree (enabled);
-
-
---
--- Name: idx_internal_routes_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_internal_routes_type ON public.internal_routes USING btree (route_type);
 
 
 --
@@ -1906,13 +1815,6 @@ CREATE INDEX idx_sip_devices_username ON public.sip_devices USING btree (sip_use
 
 
 --
--- Name: idx_system_endpoints_type; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_system_endpoints_type ON public.system_endpoints USING btree (endpoint_type);
-
-
---
 -- Name: idx_tarifas_dates; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2085,22 +1987,6 @@ ALTER TABLE ONLY public.cdrs
 
 ALTER TABLE ONLY public.cdrs
     ADD CONSTRAINT cdrs_reservation_id_fkey FOREIGN KEY (reservation_id) REFERENCES public.balance_reservations(id) ON DELETE SET NULL;
-
-
---
--- Name: internal_routes internal_routes_dest_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.internal_routes
-    ADD CONSTRAINT internal_routes_dest_endpoint_id_fkey FOREIGN KEY (dest_endpoint_id) REFERENCES public.system_endpoints(id) ON DELETE CASCADE;
-
-
---
--- Name: internal_routes internal_routes_source_endpoint_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.internal_routes
-    ADD CONSTRAINT internal_routes_source_endpoint_id_fkey FOREIGN KEY (source_endpoint_id) REFERENCES public.system_endpoints(id) ON DELETE CASCADE;
 
 
 --

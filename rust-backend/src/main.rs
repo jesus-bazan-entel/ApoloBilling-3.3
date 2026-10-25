@@ -8,7 +8,7 @@ use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
     configure_dialplan, configure_freeswitch_directory,
-    configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
+    configure_kamailio_dialplan, configure_kamailio_endpoints,
     configure_provisioning, configure_settings, configure_sip_devices,
     configure_stats,
     configure_unified_routing, configure_users, create_cdr, ws_handler,
@@ -62,8 +62,6 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_provisioning)
             // Unified Routing management (superadmin only)
             .configure(configure_unified_routing)
-            // Internal routing (FreeSWITCH <-> Kamailio)
-            .service(configure_internal_routes())
             // Kamailio Endpoints (PBX) - direct DB access
             .configure(configure_kamailio_endpoints)
             // FreeSWITCH mod_xml_curl directory (IP whitelist protected, no JWT)

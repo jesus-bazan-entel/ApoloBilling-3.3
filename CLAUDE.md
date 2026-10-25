@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │  - Zones/Prefixes/Tariffs     - Dialplan Management             │
 │  - Plans / Users / Audit      - Unified Routing (In/Outbound)   │
 │  - SIP Devices + Directory    - SIP OPTIONS Monitoring          │
-│  - Kamailio Integration       - Internal Routes                 │
+│  - Kamailio Integration                                         │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┼───────────────┐
@@ -106,24 +106,20 @@ rust-backend/
     │   │   ├── freeswitch_directory.rs # mod_xml_curl endpoint
     │   │   ├── kamailio_dialplan.rs  # Kamailio carriers/groups
     │   │   ├── kamailio_endpoints.rs # PBX endpoints (type=9)
-    │   │   ├── internal_routes.rs    # FS ↔ Kamailio routes
     │   │   └── ...
     │   └── dto/
     │       ├── routing.rs            # Trunk, route DTOs
     │       ├── sip_device.rs         # SIP device DTOs
-    │       ├── internal_route.rs     # Internal route DTOs
     │       └── ...
     ├── apolo-db/             # PostgreSQL repositories (SQLx 0.8)
     │   └── repositories/
     │       ├── sip_device_repo.rs    # SIP device queries
-    │       ├── internal_route_repo.rs # Internal route queries
     │       └── ...
     ├── apolo-auth/           # JWT (HTTP-only cookies) + Argon2 authentication
     ├── apolo-cache/          # Redis caching layer
     ├── apolo-core/           # Shared models, traits, error handling, configuration
     │   └── models/
     │       ├── sip_device.rs         # SIP device model
-    │       ├── internal_route.rs     # Internal route model
     │       └── ...
     ├── apolo-services/       # Business logic services
     │   └── sip_device.rs             # SIP OPTIONS monitoring service
@@ -152,8 +148,7 @@ frontend/src/
 │   ├── ActiveCalls.tsx       # Live calls
 │   ├── Provisioning.tsx      # Customer + SIP device in one step
 │   ├── SipDevices.tsx        # SIP device management (NEW)
-│   ├── UnifiedRouting.tsx    # Inbound/outbound routes (NEW)
-│   ├── InternalRouting.tsx   # FS ↔ Kamailio routes (NEW)
+│   ├── UnifiedRouting.tsx    # Menu "Enrutamiento": trunks, inbound/outbound routes
 │   ├── KamailioDialplan.tsx  # Kamailio carriers/groups (NEW)
 │   ├── Dialplan.tsx          # FreeSWITCH dialplan
 │   ├── Users.tsx             # User management
@@ -180,7 +175,6 @@ frontend/src/
 - `sip_device.rs` - SIP device management
 - `freeswitch_directory.rs` - Dynamic authentication endpoint for mod_xml_curl
 - `kamailio_dialplan.rs` - Kamailio carrier and group management
-- `internal_routes.rs` - FreeSWITCH ↔ Kamailio interconnection
 
 ## Database Schema (PostgreSQL)
 
@@ -207,10 +201,6 @@ Core tables in `apolo_billing` database:
 ### SIP Devices
 - `sip_devices` - SIP extensions/devices (username, password, codecs, account)
 - `freeswitch_allowed_ips` - IP whitelist for directory endpoint
-
-### Internal Routes
-- `system_endpoints` - FreeSWITCH/Kamailio connection points
-- `internal_routes` - Route definitions (fs_to_kamailio, kamailio_to_fs)
 
 ### System Configuration
 - `system_settings` - Key-value system settings (sip_options_enabled, etc.)
@@ -302,14 +292,6 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/kamailio-dialplan/carriers` | GET/POST | Carriers (dr_gateways type=8) | Superadmin |
 | `/kamailio-dialplan/routes` | GET/POST | Routing rules (dr_rules) | Superadmin |
 | `/kamailio-endpoints` | GET/POST | PBX endpoints (type=9) | Superadmin |
-
-### Internal Routes Endpoints
-
-| Endpoint | Method | Description | Access |
-|----------|--------|-------------|--------|
-| `/internal-routes` | GET/POST | FS ↔ Kamailio routes | Admin |
-| `/internal-routes/{id}` | GET/PUT/DELETE | CRUD internal route | Admin |
-| `/internal-routes/endpoints` | GET/POST | System endpoints | Admin |
 
 ## Engine Modes
 
@@ -405,7 +387,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 003_add_missing_tables.sql | Additional missing tables |
 | 004_unified_routing.sql | Unified routing system (trunks, groups, routes) |
 | 005_trunk_type_and_sip_status.sql | Trunk types (public/private) and SIP OPTIONS logging |
-| 006_internal_routes.sql | Internal routes and system endpoints |
+| 006_internal_routes.sql | Internal routes and system endpoints (dropped by 022) |
 | 007_inbound_route_transformation.sql | destination_transform field |
 | 008_inbound_route_trunk_destination.sql | trunk_destination_id field |
 | 009_inbound_early_media.sql | early_media field for inbound routes |
@@ -421,6 +403,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 019_noc_events.sql | `noc_events` — incident/campaign/migration marks on the dashboard traffic chart (`POST/DELETE /stats/noc/events`, admin+). Dashboard thresholds/capacity are optional `system_settings` keys: `noc_asr_warn/crit`, `noc_ner_warn/crit`, `noc_min_range_attempts`, `noc_max_channels`, `noc_max_cps` |
 | 020_noc_live_quality_and_pdd.sql | `cdrs.pdd_ms` (INVITE → first 180/183, written by the billing engine from FS `*_uepoch` vars; NULL on direct Kamailio CDRs) + SELECT on `monitoring_rtpengine_metrics`/`monitoring_kamailio_metrics` for the backend role (dashboard quality = last 15 min of 1-min samples) |
 | 021_cdr_media_quality.sql | `cdrs.mos` / `cdrs.rtp_loss_pct`: worst leg's FreeSWITCH-measured MOS and received-RTP loss (`rtp_audio_in_mos`, `skip_packet_count / media_packet_count`), written by the engine. Still written, but no longer on the dashboard (see *NOC quality indicators*) |
+| 022_drop_internal_routes.sql | Drops `internal_routes` / `system_endpoints` (the *Rutas Internas* module, removed 2026-10-25; backup in `/root/internal_routes-backup-*.sql`) |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 
@@ -551,12 +534,13 @@ Extension → FreeSWITCH :5080 → Kamailio :5060 → VOIPSWITCH (172.16.1.25) �
 - Returns XML with A1 hash, codecs, caller ID
 - Used by mod_xml_curl during REGISTER
 
-### Internal Routes (PostgreSQL)
+### FreeSWITCH ↔ Kamailio links (PostgreSQL)
 
-Tables for managing FreeSWITCH ↔ Kamailio interconnection:
+The interconnection is defined by private trunks (each auto-provisions a type=9 `dr_gateways` row),
+`dr_rules` and the generated `from-kamailio.xml`. The old *Rutas Internas* module
+(`internal_routes` / `system_endpoints`, a sync stub that never wrote anything) was removed on
+2026-10-25 (migration 022).
 
-- `system_endpoints` - FreeSWITCH/Kamailio connection points
-- `internal_routes` - Route definitions (fs_to_kamailio, kamailio_to_fs)
 - `routing_trunks` - Unified trunk management (private/public)
 - `routing_sip_status_log` - SIP OPTIONS monitoring
 
