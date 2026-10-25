@@ -657,6 +657,11 @@ route lists by hand in `fs_numbers` (post-transform). Those numbers are diverted
 events: their CDRs come from Kamailio dialog CDRs (`acc` `cdr_enable`, table `acc_cdrs`, `via=direct`)
 imported by `rust-billing-engine/src/services/kamailio_cdr_sync.rs` (needs `KAMAILIO_DATABASE_URL`).
 `via=fs` rows are kept only for `scripts/validate_kamailio_cdrs.sh`.
+**Status (2026-10-25):** no route is direct — all Integratel inbound goes through FreeSWITCH-SBC
+(decision: simpler to operate). The canary (`dr_rules` 2071, `3157` → direct gw 960, live
+2026-10-24 02:44 → 2026-10-25 13:03) was removed; backup in `/root/dr_rule_2071_canary-*.sql`.
+The code stays: ticking *Enrutar directo* on a route re-enables it, and the app-number mirror
+keeps running so `fs_numbers` is ready. Gw 960 and divert rule 2070 (group 9100) are inert.
 
 **Trunk health (migration 018):** the monitoring collector (`backend/app/monitoring/service.py`,
 `KamailioCollector._probe_trunks`) sends SIP OPTIONS every 60s to each enabled `routing_trunks` row
