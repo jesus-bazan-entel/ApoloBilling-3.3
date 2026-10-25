@@ -38,30 +38,8 @@ export const compareLongLabel = (c: NocCompare): string =>
 export const pctChange = (now: number, before: number): number | null =>
   before > 0 ? (100 * (now - before)) / before : null
 
-// Hangup causes in operator language. Unknown causes fall back to the raw name.
-const CAUSE_LABELS: Record<string, string> = {
-  ORIGINATOR_CANCEL: 'Cancelada por quien llama',
-  NORMAL_CLEARING: 'Ocupado en ring paralelo',
-  CALL_REJECTED: 'Rechazada',
-  USER_BUSY: 'Ocupado',
-  NO_ANSWER: 'Sin respuesta',
-  NO_USER_RESPONSE: 'Sin respuesta del terminal',
-  UNALLOCATED_NUMBER: 'Número no asignado',
-  RECOVERY_ON_TIMER_EXPIRE: 'Timeout de señalización',
-  NORMAL_TEMPORARY_FAILURE: 'Falla temporal',
-  NETWORK_OUT_OF_ORDER: 'Red fuera de servicio',
-  DESTINATION_OUT_OF_ORDER: 'Destino fuera de servicio',
-  NORMAL_UNSPECIFIED: 'Normal, sin especificar',
-  SWITCH_CONGESTION: 'Congestión',
-  NORMAL_CIRCUIT_CONGESTION: 'Congestión de circuitos',
-  NO_ROUTE_DESTINATION: 'Sin ruta al destino',
-  INCOMPATIBLE_DESTINATION: 'Destino incompatible',
-  MEDIA_TIMEOUT: 'Timeout de media (RTP)',
-  SERVICE_UNAVAILABLE: 'Servicio no disponible',
-  USER_NOT_REGISTERED: 'Usuario no registrado',
-}
-
-export const causeLabel = (cause: string): string => CAUSE_LABELS[cause] ?? cause
+// Cause labels live in lib/callStatus so the CDR screen uses the same catalog
+export { causeLabel } from '../../lib/callStatus'
 
 export const CATEGORY_LABELS: Record<string, string> = {
   network: 'Red',

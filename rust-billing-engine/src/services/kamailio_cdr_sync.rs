@@ -11,6 +11,7 @@
 // The PG insert and the cursor advance (kamailio_cdr_sync_state) commit in the
 // same transaction, so each acc_cdrs row is imported exactly once.
 use crate::database::DbPool;
+use crate::services::cdr_generator::decode_sip_user;
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
 use std::str::FromStr;
@@ -155,8 +156,8 @@ impl KamailioCdrSync {
                      ON CONFLICT (call_uuid, start_time) DO NOTHING",
                     &[
                         &call_uuid,
-                        &cdr.src_user,
-                        &cdr.dst_user,
+                        &decode_sip_user(&cdr.src_user),
+                        &decode_sip_user(&cdr.dst_user),
                         &start_time,
                         &answer_time,
                         &end_time,

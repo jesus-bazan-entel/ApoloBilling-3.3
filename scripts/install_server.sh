@@ -1591,6 +1591,9 @@ EOF
     ln -sf /etc/nginx/sites-available/apolo-billing /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
 
+    # Don't publish the nginx version on error pages / Server header
+    echo 'server_tokens off;' > /etc/nginx/conf.d/apolo-security.conf
+
     nginx -t && systemctl reload nginx
 
     log_success "Nginx configured"

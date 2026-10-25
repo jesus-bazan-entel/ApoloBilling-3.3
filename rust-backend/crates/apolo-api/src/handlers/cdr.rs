@@ -13,7 +13,7 @@ use actix_web::{
 };
 use apolo_core::{
     error::AppError,
-    models::Cdr,
+    models::{AuditLogBuilder, Cdr},
     traits::{CdrListFilter, CdrRepository, PaginatedResponse, Repository},
     AppResult,
 };
@@ -61,9 +61,9 @@ pub async fn list_cdrs(
         query.callee
     );
 
-    // Parse date filters
-    let start_date = parse_start_date(&query.start_date);
-    let end_date = parse_end_date(&query.end_date);
+    // Parse date filters (an unparseable date is a 400, never "no filter")
+    let start_date = parse_start_date(&query.start_date)?;
+    let end_date = parse_end_date(&query.end_date)?;
 
     // Query with filters
     let (cdrs, total) = repo
@@ -143,27 +143,83 @@ pub async fn get_cdr(
 #[allow(clippy::too_many_lines)]
 #[instrument(skip(db, query))]
 pub async fn export_cdrs(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: Query<CdrExportParams>,
     db: Data<PgPool>,
 ) -> Result<HttpResponse> {
+    use chrono_tz::America::Lima;
+
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid export parameters: {}", e);
         AppError::Validation(e.to_string())
     })?;
 
+    // An export always has a bounded window: start_date is required, the end
+    // defaults to now (frozen here so later batches don't pick up new CDRs)
+    // and the window is capped, so a bad parameter can't dump the whole table.
+    let start = parse_start_date(&query.start_date)?.ok_or_else(|| {
+        AppError::Validation("start_date es obligatorio para exportar".to_string())
+    })?;
+    let end = parse_end_date(&query.end_date)?.unwrap_or_else(Utc::now);
+    if end < start {
+        return Err(AppError::Validation(
+            "end_date es anterior a start_date".to_string(),
+        )
+        .into());
+    }
+    if end - start > Duration::days(MAX_EXPORT_DAYS) + Duration::hours(1) {
+        return Err(AppError::Validation(format!(
+            "El export admite como máximo {} días por archivo",
+            MAX_EXPORT_DAYS
+        ))
+        .into());
+    }
+
+    let mut params = query.into_inner();
+    params.start_date = Some(start.to_rfc3339());
+    params.end_date = Some(end.to_rfc3339());
+
     info!(
-        "Starting CDR export: format={:?}, limit={}, account_id={:?}",
-        query.format, query.limit, query.account_id
+        "Starting CDR export: user={}, format={:?}, limit={}, start={}, end={}, direction={:?}",
+        user.username, params.format, params.limit, start, end, params.direction
     );
 
-    let format = query.format;
+    // Who exported what: the file itself stays plain CSV
+    if let Ok(audit) = AuditLogBuilder::default()
+        .username(user.username.clone())
+        .action("export")
+        .entity_type("cdrs")
+        .details(serde_json::json!({
+            "format": params.format.extension(),
+            "start_date": params.start_date,
+            "end_date": params.end_date,
+            "direction": params.direction.map(|d| d.as_str()),
+            "caller": params.caller,
+            "callee": params.callee,
+            "account_id": params.account_id,
+            "limit": params.limit,
+        }))
+        .build()
+    {
+        audit.insert(db.get_ref()).await;
+    }
+
+    let format = params.format;
     let pool = db.get_ref().clone();
 
-    // Build filename
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let filename = format!("cdrs_export_{}.{}", timestamp, format.extension());
+    // Filename = the exported window in Lima time (+ direction)
+    let lima = |dt: DateTime<Utc>| dt.with_timezone(&Lima).format("%Y%m%d-%H%M").to_string();
+    let filename = format!(
+        "cdrs_{}_{}{}.{}",
+        lima(start),
+        lima(end),
+        params
+            .direction
+            .map(|d| format!("_{}", d.as_str()))
+            .unwrap_or_default(),
+        format.extension()
+    );
 
     // Start streaming response
     let mut response = HttpResponse::Ok();
@@ -174,15 +230,15 @@ pub async fn export_cdrs(
 
     match format {
         ExportFormat::Csv => {
-            let stream = create_csv_stream(pool, query.into_inner()).await?;
+            let stream = create_csv_stream(pool, params).await?;
             Ok(response.streaming(stream))
         }
         ExportFormat::Json => {
-            let stream = create_json_stream(pool, query.into_inner()).await?;
+            let stream = create_json_stream(pool, params).await?;
             Ok(response.streaming(stream))
         }
         ExportFormat::Jsonl => {
-            let stream = create_jsonl_stream(pool, query.into_inner()).await?;
+            let stream = create_jsonl_stream(pool, params).await?;
             Ok(response.streaming(stream))
         }
     }
@@ -283,8 +339,8 @@ async fn create_csv_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    parse_start_date(&params.start_date),
-                    parse_end_date(&params.end_date),
+                    parse_start_date(&params.start_date).unwrap_or(None),
+                    parse_end_date(&params.end_date).unwrap_or(None),
                     &CdrListFilter {
                         direction: params.direction.map(|d| d.as_str().to_string()),
                         ..Default::default()
@@ -301,7 +357,8 @@ async fn create_csv_stream(
                 }
             };
 
-            if cdrs.is_empty() {
+            // An empty export still gets its header
+            if cdrs.is_empty() && offset > 0 {
                 return None;
             }
 
@@ -312,10 +369,7 @@ async fn create_csv_stream(
 
             // Write header on first batch
             if offset == 0 {
-                if let Err(e) = writeln!(
-                    &mut csv_data,
-                    "id,call_uuid,account_id,caller,callee,destination,start_time,answer_time,end_time,duration,billsec,hangup_cause,direction"
-                ) {
+                if let Err(e) = writeln!(&mut csv_data, "{}", CSV_HEADER) {
                     error!("Error writing CSV header: {}", e);
                     return None;
                 }
@@ -323,24 +377,31 @@ async fn create_csv_stream(
 
             // Write rows
             for cdr in cdrs {
-                let row = CdrExportRow::from(cdr);
-                if let Err(e) = writeln!(
-                    &mut csv_data,
-                    "{},{},{},{},{},{},{},{},{},{},{},{},{}",
-                    row.id,
-                    row.call_uuid,
-                    row.account_id,
-                    row.caller,
-                    row.callee,
-                    row.destination,
-                    row.start_time,
-                    row.answer_time,
-                    row.end_time,
-                    row.duration,
-                    row.billsec,
-                    row.hangup_cause,
-                    row.direction
-                ) {
+                let lima_time = |dt: Option<DateTime<Utc>>| {
+                    dt.map(|t| {
+                        t.with_timezone(&chrono_tz::America::Lima)
+                            .format("%Y-%m-%d %H:%M:%S")
+                            .to_string()
+                    })
+                    .unwrap_or_default()
+                };
+                let fields = [
+                    cdr.id.to_string(),
+                    cdr.call_uuid.clone(),
+                    cdr.account_id.map(|id| id.to_string()).unwrap_or_default(),
+                    cdr.caller_number.clone(),
+                    cdr.called_number.clone(),
+                    cdr.destination_prefix.clone().unwrap_or_default(),
+                    lima_time(Some(cdr.start_time)),
+                    lima_time(cdr.answer_time),
+                    lima_time(Some(cdr.end_time)),
+                    cdr.duration.to_string(),
+                    cdr.billsec.to_string(),
+                    cdr.hangup_cause.clone(),
+                    cdr.direction.clone(),
+                ];
+                let line = fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(",");
+                if let Err(e) = writeln!(&mut csv_data, "{}", line) {
                     error!("Error writing CSV row: {}", e);
                     return None;
                 }
@@ -384,8 +445,8 @@ async fn create_json_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    parse_start_date(&params.start_date),
-                    parse_end_date(&params.end_date),
+                    parse_start_date(&params.start_date).unwrap_or(None),
+                    parse_end_date(&params.end_date).unwrap_or(None),
                     &CdrListFilter {
                         direction: params.direction.map(|d| d.as_str().to_string()),
                         ..Default::default()
@@ -464,8 +525,8 @@ async fn create_jsonl_stream(
                     params.account_id,
                     params.caller.as_deref(),
                     params.callee.as_deref(),
-                    parse_start_date(&params.start_date),
-                    parse_end_date(&params.end_date),
+                    parse_start_date(&params.start_date).unwrap_or(None),
+                    parse_end_date(&params.end_date).unwrap_or(None),
                     &CdrListFilter {
                         direction: params.direction.map(|d| d.as_str().to_string()),
                         ..Default::default()
@@ -635,63 +696,121 @@ fn get_period_key(dt: &DateTime<Utc>, group_by: StatsGroupBy) -> (String, DateTi
     }
 }
 
-/// Parse optional date string to DateTime<Utc>
-/// Parse start date (beginning of day in Lima timezone)
-fn parse_start_date(date_str: &Option<String>) -> Option<DateTime<Utc>> {
-    use chrono_tz::America::Lima;
+/// Longest window a single export may cover
+const MAX_EXPORT_DAYS: i64 = 31;
 
-    let s = date_str.as_ref()?;
-    if s.is_empty() {
-        return None;
+/// CSV header; times are Lima local time (UTC-5, no DST)
+const CSV_HEADER: &str = "id,call_uuid,account_id,caller,callee,destination,start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,direction";
+
+/// RFC 4180 field: quoted when it holds a comma, quote or line break; values a
+/// spreadsheet would run as a formula (= + - @, tab, CR) are prefixed with '
+fn csv_field(value: &str) -> String {
+    let guarded = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{}", value)
+    } else {
+        value.to_string()
+    };
+    if guarded.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
     }
-
-    // Try parsing as ISO 8601 (RFC 3339)
-    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Some(dt.with_timezone(&Utc));
-    }
-
-    // Try parsing as simple date (start of day in Lima timezone)
-    if let Ok(naive) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        if let Some(naive_dt) = naive.and_hms_opt(0, 0, 0) {
-            // Parse date as Lima timezone, then convert to UTC for PostgreSQL
-            let lima_dt = Lima.from_local_datetime(&naive_dt).unwrap();
-            return Some(lima_dt.with_timezone(&Utc));
-        }
-    }
-
-    None
 }
 
-/// Parse end date (end of day in Lima timezone - 23:59:59)
-fn parse_end_date(date_str: &Option<String>) -> Option<DateTime<Utc>> {
+/// Parse a date filter: RFC 3339 with an explicit offset, or a bare
+/// `YYYY-MM-DD` read as a Lima calendar day (start or end of it). Anything else,
+/// including a timestamp without offset, is a 400 rather than "no filter".
+fn parse_date_bound(
+    name: &str,
+    date_str: &Option<String>,
+    end_of_day: bool,
+) -> std::result::Result<Option<DateTime<Utc>>, AppError> {
     use chrono_tz::America::Lima;
 
-    let s = date_str.as_ref()?;
-    if s.is_empty() {
-        return None;
-    }
+    let s = match date_str.as_deref().map(str::trim) {
+        None | Some("") => return Ok(None),
+        Some(s) => s,
+    };
 
-    // Try parsing as ISO 8601 (RFC 3339)
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
-        return Some(dt.with_timezone(&Utc));
+        return Ok(Some(dt.with_timezone(&Utc)));
     }
 
-    // Try parsing as simple date (END of day in Lima timezone - 23:59:59)
     if let Ok(naive) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        if let Some(naive_dt) = naive.and_hms_micro_opt(23, 59, 59, 999_999) {
-            // Parse date as Lima timezone, then convert to UTC for PostgreSQL
-            let lima_dt = Lima.from_local_datetime(&naive_dt).unwrap();
-            return Some(lima_dt.with_timezone(&Utc));
+        let naive_dt = if end_of_day {
+            naive.and_hms_micro_opt(23, 59, 59, 999_999)
+        } else {
+            naive.and_hms_opt(0, 0, 0)
+        };
+        // Lima has no DST, so local times are never ambiguous
+        if let Some(lima_dt) = naive_dt.and_then(|n| Lima.from_local_datetime(&n).single()) {
+            return Ok(Some(lima_dt.with_timezone(&Utc)));
         }
     }
 
-    None
+    Err(AppError::Validation(format!(
+        "{} inválida: '{}'. Use RFC 3339 con zona (2026-10-24T00:00:00-05:00) o YYYY-MM-DD (día en hora de Lima)",
+        name, s
+    )))
+}
+
+/// Parse start date (beginning of the day in Lima for a bare date)
+fn parse_start_date(
+    date_str: &Option<String>,
+) -> std::result::Result<Option<DateTime<Utc>>, AppError> {
+    parse_date_bound("start_date", date_str, false)
+}
+
+/// Parse end date (end of the day in Lima for a bare date)
+fn parse_end_date(
+    date_str: &Option<String>,
+) -> std::result::Result<Option<DateTime<Utc>>, AppError> {
+    parse_date_bound("end_date", date_str, true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use apolo_core::models::Cdr;
+
+    #[test]
+    fn test_csv_field_quotes_and_formula_guard() {
+        assert_eq!(csv_field("912345678"), "912345678");
+        assert_eq!(csv_field("+18505551234"), "'+18505551234");
+        assert_eq!(csv_field("=HYPERLINK(1)"), "'=HYPERLINK(1)");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_field(""), "");
+    }
+
+    #[test]
+    fn test_date_bounds_strict() {
+        let some = |s: &str| Some(s.to_string());
+        // Bare date = Lima calendar day
+        assert_eq!(
+            parse_start_date(&some("2026-10-24")).unwrap().unwrap().to_rfc3339(),
+            "2026-10-24T05:00:00+00:00"
+        );
+        assert_eq!(
+            parse_end_date(&some("2026-10-24")).unwrap().unwrap().to_rfc3339(),
+            "2026-10-25T04:59:59.999999+00:00"
+        );
+        // RFC 3339 with offset
+        assert_eq!(
+            parse_start_date(&some("2026-10-24T00:00:00.000-05:00"))
+                .unwrap()
+                .unwrap()
+                .to_rfc3339(),
+            "2026-10-24T05:00:00+00:00"
+        );
+        // Empty / missing = no bound
+        assert!(parse_start_date(&None).unwrap().is_none());
+        assert!(parse_start_date(&some("")).unwrap().is_none());
+        // Garbage or a timestamp without offset is rejected, never ignored
+        assert!(parse_start_date(&some("hola")).is_err());
+        assert!(parse_end_date(&some("2026-10-24T00:00:00")).is_err());
+        assert!(parse_end_date(&some("2026-13-40")).is_err());
+    }
 
     #[test]
     fn test_calculate_stats_empty() {

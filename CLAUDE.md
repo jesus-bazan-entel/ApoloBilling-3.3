@@ -248,8 +248,8 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/accounts/{id}` | GET/PUT/DELETE | Get/update (phone, status)/delete customer | Authenticated |
 | `/accounts/stats` | GET | Total / active customers | Authenticated |
 | `/provisioning` (`/bulk`) | POST | Customer + SIP device (individual / bulk) | Superadmin |
-| `/cdrs` | GET | List CDRs with pagination | Authenticated |
-| `/cdrs/export` | GET | Streaming export (CSV/JSON) | Authenticated |
+| `/cdrs` | GET | List CDRs with pagination; dates are RFC 3339 with offset or `YYYY-MM-DD` (Lima day), anything else is 400 | Authenticated |
+| `/cdrs/export` | GET | Streaming export (CSV/JSON); `start_date` required, ≤31 days, CSV times in Lima, RFC 4180 + formula guard, audited | Authenticated |
 | `/cdrs/stats` | GET | CDR statistics | Authenticated |
 | `/active-calls` | GET | List active calls | Authenticated |
 | `/stats/noc` | GET | NOC dashboard overview | Authenticated |

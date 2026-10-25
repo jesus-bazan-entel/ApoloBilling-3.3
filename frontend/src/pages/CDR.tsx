@@ -5,11 +5,13 @@ import { fetchCDRs, exportCDRs } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import QuickRangeBar from '../components/QuickRangeBar'
-import { FileText, Download, Search, Filter, X } from 'lucide-react'
+import { FileText, Download, Search, Filter, X, AlertTriangle } from 'lucide-react'
 import type { CDR, CDRFilters } from '../types'
+import { callOutcome } from '../lib/callStatus'
 import {
   DEFAULT_RANGE,
   describeRange,
+  formatLimaDateTime,
   isRangeKey,
   resolveRange,
   toApiTimestamp,
@@ -26,6 +28,8 @@ export default function CDRPage() {
   const [page, setPage] = useState(1)
   const [showFilters, setShowFilters] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const rawRange = searchParams.get('range')
@@ -85,21 +89,27 @@ export default function CDRPage() {
       return { ...result, rangeLabel: describeRange(resolved) }
     },
     placeholderData: keepPreviousData,
-    // New CDRs only appear in ranges that end "now"
-    refetchInterval: autoRefresh && openEnded ? 30_000 : false,
+    // New CDRs only appear in ranges that end "now", and only on page 1: on
+    // later pages a refresh would shift rows under the operator (skipped or
+    // repeated CDRs while paging)
+    refetchInterval: autoRefresh && openEnded && page === 1 ? 30_000 : false,
   })
 
   const handleExport = async () => {
+    setExporting(true)
+    setExportError(null)
     try {
-      const blob = await exportCDRs(buildFilters(Date.now()).apiFilters)
+      const { blob, filename } = await exportCDRs(buildFilters(Date.now()).apiFilters)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `cdr_export_${new Date().toISOString().split('T')[0]}.csv`
+      a.download = filename
       a.click()
       window.URL.revokeObjectURL(url)
     } catch (error) {
-      console.error('Export failed:', error)
+      setExportError(error instanceof Error ? error.message : 'No se pudo generar el export')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -107,16 +117,16 @@ export default function CDRPage() {
     {
       key: 'start_time',
       header: 'Fecha/Hora',
-      render: (cdr: CDR) => (
-        <div>
-          <div className="text-[var(--color-text-primary)]">
-            {new Date(cdr.start_time).toLocaleDateString('es-PE')}
+      // Lima time, like the filters and the CSV, whatever the PC's zone
+      render: (cdr: CDR) => {
+        const [date, time] = formatLimaDateTime(new Date(cdr.start_time))
+        return (
+          <div>
+            <div className="text-[var(--color-text-primary)]">{date}</div>
+            <div className="text-xs text-[var(--color-text-tertiary)]">{time}</div>
           </div>
-          <div className="text-xs text-[var(--color-text-tertiary)]">
-            {new Date(cdr.start_time).toLocaleTimeString('es-PE')}
-          </div>
-        </div>
-      ),
+        )
+      },
     },
     {
       key: 'caller',
@@ -173,23 +183,14 @@ export default function CDRPage() {
     {
       key: 'hangup_cause',
       header: 'Estado',
-      render: (cdr: CDR) => (
-        <Badge
-          variant={
-            cdr.hangup_cause === 'NORMAL_CLEARING'
-              ? 'success'
-              : cdr.hangup_cause === 'NO_ANSWER'
-              ? 'warning'
-              : 'error'
-          }
-        >
-          {cdr.hangup_cause === 'NORMAL_CLEARING'
-            ? 'Completada'
-            : cdr.hangup_cause === 'NO_ANSWER'
-            ? 'Sin respuesta'
-            : cdr.hangup_cause || 'Desconocido'}
-        </Badge>
-      ),
+      render: (cdr: CDR) => {
+        const outcome = callOutcome(cdr)
+        return (
+          <span title={cdr.hangup_cause}>
+            <Badge variant={outcome.variant}>{outcome.label}</Badge>
+          </span>
+        )
+      },
     },
   ]
 
@@ -240,13 +241,28 @@ export default function CDRPage() {
           </button>
           <button
             onClick={handleExport}
-            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            disabled={exporting}
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-wait"
           >
             <Download className="w-4 h-4 mr-2" />
-            Exportar CSV
+            {exporting ? 'Exportando…' : 'Exportar CSV'}
           </button>
         </div>
       </div>
+
+      {exportError && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+          <div className="flex items-start">
+            <AlertTriangle className="w-4 h-4 mr-2 mt-0.5 shrink-0" />
+            <span>
+              <strong>No se pudo exportar:</strong> {exportError}
+            </span>
+          </div>
+          <button onClick={() => setExportError(null)} aria-label="Cerrar">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <QuickRangeBar
         value={range}

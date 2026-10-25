@@ -169,10 +169,15 @@ export function formatLima(date: Date): string {
   return `${pad(t.d)}/${pad(t.m + 1)}/${t.y} ${pad(t.h)}:${pad(t.mi)}`
 }
 
-/** `19/10/2026 00:00 → ahora · GMT-5` */
+/** Instant → [`25/10/2026`, `14:03:27`] in Lima, for table cells. */
+export function formatLimaDateTime(date: Date): [string, string] {
+  const t = limaFields(date.getTime())
+  return [`${pad(t.d)}/${pad(t.m + 1)}/${t.y}`, `${pad(t.h)}:${pad(t.mi)}:${pad(t.s)}`]
+}
+
+/** `19/10/2026 00:00 → ahora · GMT-5`; a closed end shows the last second it includes. */
 export function describeRange(r: ResolvedRange): string {
   const from = r.start ? formatLima(r.start) : 'el inicio'
-  // A closed range ends 1 ms before its boundary: show the boundary minute
-  const to = r.end ? formatLima(new Date(r.end.getTime() + 1)) : 'ahora'
+  const to = r.end ? formatLimaDateTime(r.end).join(' ') : 'ahora'
   return `${from} → ${to} · GMT-5`
 }

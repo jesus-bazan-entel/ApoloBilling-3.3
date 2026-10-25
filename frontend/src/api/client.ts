@@ -163,62 +163,46 @@ export const fetchCDR = async (id: number): Promise<CDR> => {
   return data.data || data
 }
 
-export const exportCDRs = async (filters?: CDRFilters, format: 'csv' | 'json' = 'csv'): Promise<Blob> => {
+export interface CdrExportFile {
+  blob: Blob
+  filename: string
+}
+
+// The server does the whole file: bounded window (start_date required, max 31
+// days), Lima times with the zone in the header, RFC 4180 quoting, formula
+// guard, and a filename naming the exported window.
+export const exportCDRs = async (
+  filters?: CDRFilters,
+  format: 'csv' | 'json' = 'csv'
+): Promise<CdrExportFile> => {
   const params = new URLSearchParams()
   params.append('format', format)
-
-  // The export endpoint reads a bare YYYY-MM-DD as 00:00 UTC for both ends,
-  // so a single-day filter returned nothing. Send the full Lima day (UTC-5,
-  // no DST) explicitly, matching what the CDR list shows.
-  const limaDayBound = (key: string, value: string) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
-    if (key === 'start_date') return `${value}T00:00:00-05:00`
-    if (key === 'end_date') return `${value}T23:59:59-05:00`
-    return value
-  }
-
   if (filters) {
     Object.entries(filters).forEach(([key, value]) => {
-      if (value !== undefined && value !== '') {
-        params.append(key, limaDayBound(key, value.toString()))
-      }
+      if (value !== undefined && value !== '') params.append(key, value.toString())
     })
   }
 
-  const { data } = await api.get(`/cdrs/export?${params.toString()}`, {
-    responseType: 'blob',
-  })
-  if (format !== 'csv') return data
-  return new Blob([adjustCdrCsv(await data.text())], { type: 'text/csv;charset=utf-8' })
-}
-
-// The export endpoint returns times in UTC; convert them so the file matches
-// the CDR screen (direction is filtered server-side).
-const CSV_TIME_COLUMNS = ['start_time', 'answer_time', 'end_time']
-const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000 // Peru: UTC-5 all year
-
-const toLimaTime = (value: string): string => {
-  if (!value) return value
-  const ms = Date.parse(value)
-  if (Number.isNaN(ms)) return value
-  return new Date(ms + LIMA_OFFSET_MS).toISOString().slice(0, 19).replace('T', ' ')
-}
-
-export const adjustCdrCsv = (csv: string): string => {
-  const lines = csv.split('\n').filter((line) => line !== '')
-  if (lines.length === 0) return csv
-  const header = lines[0].split(',')
-  const col = (name: string) => header.indexOf(name)
-  const timeCols = CSV_TIME_COLUMNS.map(col).filter((i) => i >= 0)
-
-  const rows = lines.slice(1).map((line) => {
-    const cells = line.split(',')
-    timeCols.forEach((i) => {
-      cells[i] = toLimaTime(cells[i])
-    })
-    return cells.join(',')
-  })
-  return [header.join(','), ...rows].join('\n') + '\n'
+  try {
+    const response = await api.get(`/cdrs/export?${params.toString()}`, { responseType: 'blob' })
+    const disposition: string = response.headers['content-disposition'] ?? ''
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `cdrs_export.${format}`
+    return { blob: response.data, filename }
+  } catch (error) {
+    // With responseType blob the JSON error body arrives as a Blob too
+    const data = (error as { response?: { data?: unknown } }).response?.data
+    if (data instanceof Blob) {
+      let message: string | undefined
+      try {
+        const body = JSON.parse(await data.text())
+        message = body.message ?? body.error?.message ?? body.error
+      } catch {
+        // not JSON: keep the generic message
+      }
+      throw new Error(typeof message === 'string' ? message : 'No se pudo generar el export')
+    }
+    throw error
+  }
 }
 
 export const fetchCDRStats = async (filters?: CDRFilters): Promise<{

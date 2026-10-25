@@ -53,8 +53,8 @@ impl CdrGenerator {
                  RETURNING id",
                 &[
                     &event.uuid,
-                    &event.caller,
-                    &event.callee,
+                    &decode_sip_user(&event.caller),
+                    &decode_sip_user(&event.callee),
                     &event.start_time,
                     &event.answer_time,
                     &event.end_time,
@@ -77,5 +77,50 @@ impl CdrGenerator {
         );
 
         Ok(cdr_id)
+    }
+}
+
+/// Percent-decode a SIP URI user part. Carriers send E.164 callers as
+/// `%2B1850…` in the From URI and FreeSWITCH passes them through verbatim, so
+/// CDRs stored `%2B` instead of `+`. Invalid escapes, control characters
+/// (`%0A`…) and non-UTF-8 results are kept as received.
+pub fn decode_sip_user(user: &str) -> String {
+    if !user.contains('%') {
+        return user.to_string();
+    }
+    let bytes = user.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
+            let decoded = hex.and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(b) = decoded.filter(|b| !b.is_ascii_control()) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| user.to_string())
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::decode_sip_user;
+
+    #[test]
+    fn decodes_percent_escapes() {
+        assert_eq!(decode_sip_user("%2B18505551234"), "+18505551234");
+        assert_eq!(decode_sip_user("912345678"), "912345678");
+        assert_eq!(decode_sip_user("%2b1"), "+1");
+        // Broken escapes are left alone
+        assert_eq!(decode_sip_user("50%"), "50%");
+        assert_eq!(decode_sip_user("%ZZ12"), "%ZZ12");
+        assert_eq!(decode_sip_user("%2"), "%2");
+        // Control characters stay escaped
+        assert_eq!(decode_sip_user("(01)%20215-8100%0A"), "(01) 215-8100%0A");
     }
 }
