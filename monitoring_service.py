@@ -176,7 +176,7 @@ async def get_overview(db: Session = Depends(get_db)):
         elif cp > 70 or m.slow_queries > 5 or m.innodb_deadlocks > 1: st = "degraded"
         return {
             "connections_used": m.threads_connected, "connections_max": mc,
-            "connection_usage_percent": round(cp, 2), "queries_per_second": round(m.queries_per_second, 2),
+            "connection_usage_percent": round(cp, 2), "queries_per_second": round(m.queries_per_second or 0, 2),
             "slow_queries_per_minute": m.slow_queries, "buffer_pool_usage_percent": round(bp_p, 2),
             "replication_lag_seconds": m.seconds_behind_master, "deadlocks_per_minute": m.innodb_deadlocks,
             "status": st, "last_update": m.timestamp.isoformat()
@@ -247,7 +247,7 @@ async def get_timeseries(
         getattr(Model, metric)
     ).filter(Model.timestamp >= start).order_by(Model.timestamp).all()
     
-    data = [{"timestamp": r[0].isoformat(), "value": r[1]} for r in results]
+    data = [{"timestamp": r[0].isoformat(), "value": r[1]} for r in results if r[1] is not None]
     
     units = {
         "active_calls": "calls", "active_sessions": "sessions", "active_dialogs": "dialogs",

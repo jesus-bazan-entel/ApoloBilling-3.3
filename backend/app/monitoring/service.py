@@ -760,6 +760,9 @@ class MariaDBCollector:
             'database': 'kamailio',
             'connection_timeout': 3
         }
+        # Previous (Questions, Uptime) sample: QPS is their delta, not the
+        # running total since MariaDB started
+        self.last_questions = None
     
     def collect(self) -> CollectorResult:
         try:
@@ -801,6 +804,14 @@ class MariaDBCollector:
             print(f"MariaDB collection error: {e}")
             return CollectorResult(success=False, data={}, error=str(e))
     
+    def _qps(self, questions: int, uptime: int) -> Optional[float]:
+        """Questions/s since the previous sample; None on the first sample or
+        after a MariaDB restart (counter reset)"""
+        prev, self.last_questions = self.last_questions, (questions, uptime)
+        if not prev or uptime <= prev[1] or questions < prev[0]:
+            return None
+        return (questions - prev[0]) / (uptime - prev[1])
+
     def _parse_metrics(self, raw: Dict) -> Dict[str, Any]:
         s = raw.get("status", {})
         v = raw.get("variables", {})
@@ -842,7 +853,7 @@ class MariaDBCollector:
             "connection_errors": get_int("Connection_errors_total"),
             "questions": get_int("Questions"),
             "slow_queries": get_int("Slow_queries"),
-            "queries_per_second": get_int("Questions") / 60.0,
+            "queries_per_second": self._qps(get_int("Questions"), get_int("Uptime")),
             "innodb_buffer_pool_used_mb": pages_data * page_size / (1024 * 1024),
             "innodb_buffer_pool_free_mb": pages_free * page_size / (1024 * 1024),
             "innodb_buffer_pool_pages_dirty": get_int("Innodb_buffer_pool_pages_dirty"),

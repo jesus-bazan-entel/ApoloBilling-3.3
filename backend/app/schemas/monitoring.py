@@ -140,7 +140,7 @@ class MariaDBMetricsBase(BaseModel):
     connection_errors: int = 0
     questions: int = 0
     slow_queries: int = 0
-    queries_per_second: float = 0.0
+    queries_per_second: Optional[float] = None
     innodb_buffer_pool_used_mb: float = 0.0
     innodb_buffer_pool_free_mb: float = 0.0
     innodb_buffer_pool_pages_dirty: int = 0
