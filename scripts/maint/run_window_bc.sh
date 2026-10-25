@@ -6,9 +6,9 @@
 # "Ventana de mantenimiento: reinicio seguro de Kamailio y FreeSWITCH":
 #   B. Kamailio: install the repo kamailio.cfg (direct-path PAI fix) with
 #      restart_kamailio_safe.sh.
-#   C. FreeSWITCH: restart_freeswitch_safe.sh --timerfd (RTP range 20002-32768,
-#      loglevel info, mod_timerfd). Run with an operator on hand for test calls:
-#      a timer problem shows up as audio, which the script cannot detect.
+#   C. FreeSWITCH: restart_freeswitch_safe.sh (RTP range 20002-32768, loglevel
+#      info). No --timerfd: on 2026-10-25 it raised calls with >1% RTP loss from
+#      3% to 30% and was rolled back.
 #
 # PRD rules enforced here:
 #   - Kamailio goes only if its pending diff is exactly the PAI fix (guard).
@@ -58,7 +58,7 @@ rm -f "$CHECK"
 
 #--- Phase C -----------------------------------------------------------------
 log "Phase C: FreeSWITCH"
-if ! "$MAINT/restart_freeswitch_safe.sh" --yes --timerfd; then
+if ! "$MAINT/restart_freeswitch_safe.sh" --yes; then
     finish "Phase C FAILED (aborted or rolled back); Kamailio phase B result stands" 1
 fi
 
