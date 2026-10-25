@@ -10,13 +10,9 @@ const STATUS_COLOR: Record<StatusLevel, string> = {
 
 const STATUS_LABEL: Record<StatusLevel, string> = { good: 'OK', warning: 'Vigilar', critical: 'Crítico' }
 
-/** FreeSWITCH (without timerfd) stamps channel times on its 20 ms tick */
-const FS_CLOCK_MS = 20
-
-/** Level for a value where lower is better (jitter, loss) or higher is better (MOS) */
-const level = (v: number | null, good: number, warn: number, higherIsBetter = false): StatusLevel | null => {
+/** Level for a value where lower is better */
+const level = (v: number | null, good: number, warn: number): StatusLevel | null => {
   if (v == null) return null
-  if (higherIsBetter) return v >= good ? 'good' : v >= warn ? 'warning' : 'critical'
   return v <= good ? 'good' : v <= warn ? 'warning' : 'critical'
 }
 
@@ -66,76 +62,36 @@ function Metric({
   )
 }
 
-/** Media quality (RTPEngine) and signalling headroom (CPS) */
+/**
+ * Media-path health (RTPEngine packet counters) and signalling headroom (CPS).
+ * MOS, jitter, loss and PDD were removed: none of them measured anything real
+ * here (RTPEngine kernel mode never parses RTCP, FreeSWITCH's MOS sits at its
+ * 4.5 ceiling, its skip count is not network loss, the next hop answers 18x
+ * within one 20 ms clock tick).
+ */
 const hm = (iso: string) => new Date(iso).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })
 
 export default function QualityPanel({ quality, capacity }: { quality: NocQuality; capacity: NocCapacity }) {
-  const fs = quality.media_source === 'freeswitch'
-  const source = fs
-    ? 'MOS y pérdida: FreeSWITCH, llamadas terminadas en los últimos 15 min · jitter y audio en un sentido: RTPEngine'
-    : !quality.as_of
-      ? 'Sin datos del colector de RTPEngine'
-      : quality.window_minutes === 15
-        ? `Media: RTPEngine, últimos 15 min (hasta las ${hm(quality.as_of)})`
-        : `Media: RTPEngine, hora ${quality.window_start ? hm(quality.window_start) : ''}–${hm(quality.as_of)} (sin muestras recientes)`
-  const unit = fs ? 'llamadas' : 'muestras RTCP'
+  const source = !quality.as_of
+    ? 'Sin datos del colector de RTPEngine'
+    : quality.window_minutes === 15
+      ? `Media: RTPEngine, últimos 15 min (hasta las ${hm(quality.as_of)})`
+      : `Media: RTPEngine, hora ${quality.window_start ? hm(quality.window_start) : ''}–${hm(quality.as_of)} (sin muestras recientes)`
   const oneSidedPct =
     quality.one_sided_sessions != null && quality.active_sessions
       ? (100 * quality.one_sided_sessions) / quality.active_sessions
       : null
   const cpsUse = capacity.max_cps ? (100 * capacity.peak_cps_last_hour) / capacity.max_cps : null
   const noDirection = !quality.sessions_checked
-  const noRtcp =
-    quality.mos_samples === 0
-      ? ' Sin datos: RTPEngine reenvía el RTCP en el módulo kernel y no lo analiza (su contador no avanza), y aún no hay llamadas con medición de FreeSWITCH en la ventana.'
-      : ''
-  const pddText = (ms: number) => (ms < FS_CLOCK_MS ? `< ${FS_CLOCK_MS} ms` : ms < 1000 ? `${fmtInt(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
   return (
     <div className="bg-[var(--color-bg-card)] rounded-xl border border-[var(--color-border-primary)] p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Calidad de voz y capacidad</h2>
+        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Media y capacidad</h2>
         <span className="text-xs text-[var(--color-text-tertiary)]">{source}</span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mt-4">
-        <Metric
-          label="MOS"
-          value={quality.mos == null ? '—' : quality.mos.toFixed(2)}
-          noData={quality.mos == null}
-          status={level(quality.mos, 4.0, 3.6, true)}
-          sample={`n=${fmtInt(quality.mos_samples)} ${unit}${fs && quality.poor_calls ? ` · ${fmtInt(quality.poor_calls)} < 3,6` : ''}`}
-          hint={
-            fs
-              ? 'Mean Opinion Score que FreeSWITCH estima (máx. 4,5) con el audio que recibe en cada tramo de la llamada; por llamada se toma el peor tramo y aquí se promedian las llamadas terminadas en los últimos 15 min. ≥4,0 bueno; <3,6 los usuarios lo notan. Las llamadas directas Kamailio → troncal no pasan por FreeSWITCH y no entran.'
-              : `Mean Opinion Score estimado por RTPEngine (1–5) a partir de los informes RTCP recibidos en la ventana. ≥4,0 bueno; <3,6 los usuarios lo notan.${noRtcp}`
-          }
-        />
-        <Metric
-          label="Jitter"
-          value={quality.jitter_ms == null ? '—' : quality.jitter_ms.toFixed(0)}
-          unit={quality.jitter_ms == null ? undefined : 'ms'}
-          noData={quality.jitter_ms == null}
-          status={level(quality.jitter_ms, 30, 50)}
-          sample={`n=${fmtInt(quality.jitter_samples)} muestras RTCP`}
-          hint={`Variación del retardo de los paquetes RTP reportada por RTCP en la ventana. ≤30 ms bueno; >50 ms causa cortes.${
-            quality.jitter_samples === 0
-              ? ' Sin datos: RTPEngine reenvía el RTCP en el módulo kernel y no lo analiza, y FreeSWITCH no entrega un jitter en ms (lo incorpora en su MOS).'
-              : ''
-          }`}
-        />
-        <Metric
-          label="Pérdida de paquetes"
-          value={quality.packet_loss_pct == null ? '—' : `${quality.packet_loss_pct.toFixed(2)}%`}
-          noData={quality.packet_loss_pct == null}
-          status={level(quality.packet_loss_pct, 1, 3)}
-          sample={`n=${fmtInt(quality.packet_loss_samples)} ${unit}`}
-          hint={
-            fs
-              ? 'Paquetes RTP que faltaron en la secuencia recibida por FreeSWITCH (peor tramo de cada llamada), promedio de las llamadas terminadas en los últimos 15 min. ≤1% bueno; >3% audio entrecortado.'
-              : `Pérdida de paquetes RTP reportada por RTCP, promedio de la ventana. ≤1% bueno; >3% audio entrecortado.${noRtcp}`
-          }
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
         <Metric
           label="Audio en un sentido"
           value={oneSidedPct == null ? '—' : `${oneSidedPct.toFixed(1)}%`}
@@ -154,14 +110,6 @@ export default function QualityPanel({ quality, capacity }: { quality: NocQualit
           hint={`Máximo de llamadas iniciadas en un mismo segundo, según los CDR. Promedio: ${capacity.avg_cps_last_hour.toFixed(2)} CPS.${
             capacity.max_cps ? '' : ' Define el límite del SBC/troncal en system_settings.noc_max_cps.'
           }`}
-        />
-        <Metric
-          label="PDD al siguiente salto"
-          value={quality.pdd_p50_ms == null ? '—' : pddText(quality.pdd_p50_ms)}
-          unit={quality.pdd_p95_ms == null ? undefined : `mediana · p95 ${pddText(quality.pdd_p95_ms)}`}
-          noData={quality.pdd_samples === 0}
-          sample={`n=${fmtInt(quality.pdd_samples)} llamadas · solo informativo`}
-          hint={`Del INVITE que recibe FreeSWITCH al primer 180/183 que devuelve el siguiente salto, en las llamadas de la última hora vía FreeSWITCH. Hoy el siguiente salto es casi siempre FreeSWITCH Legado, que responde 180/183 al instante con su propio ringback: por eso da menos de ${FS_CLOCK_MS} ms (la resolución del reloj de FreeSWITCH). No es el PDD de la red de destino, que queda detrás de Legado y no se ve desde este SBC; por eso no lleva semáforo. Las llamadas directas Kamailio → troncal no traen este dato.`}
         />
       </div>
       <p className="text-[11px] text-[var(--color-text-tertiary)] mt-4">

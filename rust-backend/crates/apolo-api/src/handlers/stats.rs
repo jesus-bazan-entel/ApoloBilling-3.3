@@ -239,39 +239,18 @@ async fn noc_capacity(
     })
 }
 
-/// RTPEngine media quality over the last 15 minutes of the monitoring
-/// collector's 1-minute samples. MOS, jitter and loss average only the RTCP
-/// samples RTPEngine took inside the window (difference of its running sums
-/// and sample counts between the first and last sample): its own *_average
-/// fields cover its whole uptime and stay frozen when no RTCP reaches
-/// userspace, which must read as "no data", not as a good score. The hourly
-/// rollup (it lags up to two hours) is only a fallback for session counts.
-/// Never fails the overview: the tables belong to the collector.
+/// RTPEngine media-direction health over the last 15 minutes of the
+/// monitoring collector's 1-minute samples; the hourly rollup (it lags up to
+/// two hours) is the fallback. Never fails the overview: the tables belong to
+/// the collector.
 async fn noc_quality(pool: &PgPool) -> NocQuality {
     let mut q = NocQuality {
         window_start: None,
         as_of: None,
         window_minutes: 15,
-        mos: None,
-        mos_samples: 0,
-        media_source: None,
-        poor_calls: None,
-        jitter_ms: None,
-        jitter_samples: 0,
-        packet_loss_pct: None,
-        packet_loss_samples: 0,
         one_sided_sessions: None,
         sessions_checked: None,
         active_sessions: None,
-        pdd_p50_ms: None,
-        pdd_p95_ms: None,
-        pdd_samples: 0,
-    };
-    // (sum delta, sample delta) -> (average, samples); a counter reset
-    // (RTPEngine restart inside the window) gives a negative delta
-    let windowed = |sum: Option<f64>, n: Option<i64>| match (sum, n) {
-        (Some(sum), Some(n)) if n > 0 && sum >= 0.0 => (Some(sum / n as f64), n),
-        _ => (None, 0),
     };
 
     let live = sqlx::query(
@@ -280,32 +259,14 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
             SELECT "timestamp" AS ts, raw_data, one_sided_sessions, active_sessions
             FROM monitoring_rtpengine_metrics
             WHERE "timestamp" >= (now() AT TIME ZONE 'UTC') - INTERVAL '15 minutes'
-        ),
-        c AS (
-            SELECT ts,
-                   (raw_data #>> '{ng_mos,mos_total}')::FLOAT8 AS mos_sum,
-                   (raw_data #>> '{ng_mos,mos_samples_total}')::BIGINT AS mos_n,
-                   (raw_data #>> '{ng_voip,jitter_total}')::FLOAT8 AS jitter_sum,
-                   (raw_data #>> '{ng_voip,jitter_samples_total}')::BIGINT AS jitter_n,
-                   (raw_data #>> '{ng_voip,packetloss_total}')::FLOAT8 AS loss_sum,
-                   (raw_data #>> '{ng_voip,packetloss_samples_total}')::BIGINT AS loss_n
-            FROM w
-            WHERE raw_data #> '{ng_mos,mos_total}' IS NOT NULL
-        ),
-        f AS (SELECT * FROM c ORDER BY ts LIMIT 1),
-        l AS (SELECT * FROM c ORDER BY ts DESC LIMIT 1)
-        SELECT (SELECT MIN(ts) FROM w) AT TIME ZONE 'UTC' AS window_start,
-               (SELECT MAX(ts) FROM w) AT TIME ZONE 'UTC' AS as_of,
-               (SELECT AVG(one_sided_sessions) FROM w)::FLOAT8 AS one_sided,
-               (SELECT AVG(active_sessions) FROM w)::FLOAT8 AS active,
+        )
+        SELECT MIN(ts) AT TIME ZONE 'UTC' AS window_start,
+               MAX(ts) AT TIME ZONE 'UTC' AS as_of,
+               AVG(one_sided_sessions)::FLOAT8 AS one_sided,
+               AVG(active_sessions)::FLOAT8 AS active,
                (SELECT (raw_data ->> 'ng_direction_checked')::BIGINT FROM w
-                ORDER BY ts DESC LIMIT 1) AS checked,
-               l.mos_sum - f.mos_sum AS mos_sum, l.mos_n - f.mos_n AS mos_n,
-               l.jitter_sum - f.jitter_sum AS jitter_sum, l.jitter_n - f.jitter_n AS jitter_n,
-               l.loss_sum - f.loss_sum AS loss_sum, l.loss_n - f.loss_n AS loss_n
-        FROM (SELECT 1) AS one
-        LEFT JOIN f ON true
-        LEFT JOIN l ON true
+                ORDER BY ts DESC LIMIT 1) AS checked
+        FROM w
         "#,
     )
     .fetch_one(pool)
@@ -315,10 +276,6 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
         Ok(row) if row.get::<Option<DateTime<Utc>>, _>("as_of").is_some() => {
             q.window_start = row.get("window_start");
             q.as_of = row.get("as_of");
-            (q.mos, q.mos_samples) = windowed(row.get("mos_sum"), row.get("mos_n"));
-            (q.jitter_ms, q.jitter_samples) = windowed(row.get("jitter_sum"), row.get("jitter_n"));
-            (q.packet_loss_pct, q.packet_loss_samples) =
-                windowed(row.get("loss_sum"), row.get("loss_n"));
             q.one_sided_sessions = row.get("one_sided");
             q.sessions_checked = row.get("checked");
             q.active_sessions = row.get("active");
@@ -357,60 +314,6 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
         }
     }
 
-    if q.mos_samples > 0 {
-        q.media_source = Some("rtpengine".to_string());
-    } else {
-        // RTPEngine forwards RTCP in kernel and never parses it: fall back to
-        // what FreeSWITCH measured on each call's legs (migration 021)
-        match sqlx::query(
-            r#"
-            SELECT AVG(mos)::FLOAT8 AS mos, COUNT(mos)::BIGINT AS n,
-                   AVG(rtp_loss_pct)::FLOAT8 AS loss, COUNT(rtp_loss_pct)::BIGINT AS loss_n,
-                   COUNT(*) FILTER (WHERE mos < 3.6)::BIGINT AS poor
-            FROM cdrs
-            WHERE start_time >= now() - INTERVAL '1 day'
-              AND end_time >= now() - INTERVAL '15 minutes'
-              AND mos IS NOT NULL
-            "#,
-        )
-        .fetch_one(pool)
-        .await
-        {
-            Ok(row) if row.get::<i64, _>("n") > 0 => {
-                q.media_source = Some("freeswitch".to_string());
-                q.mos = row.get("mos");
-                q.mos_samples = row.get("n");
-                q.packet_loss_pct = row.get("loss");
-                q.packet_loss_samples = row.get("loss_n");
-                q.poor_calls = row.get("poor");
-            }
-            Ok(_) => {}
-            Err(e) => warn!(
-                "NOC FreeSWITCH media quality unavailable (migration 021 applied?): {}",
-                e
-            ),
-        }
-    }
-
-    match sqlx::query(
-        r#"
-        SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY pdd_ms) AS p50,
-               PERCENTILE_DISC(0.95) WITHIN GROUP (ORDER BY pdd_ms) AS p95,
-               COUNT(pdd_ms)::BIGINT AS samples
-        FROM cdrs
-        WHERE start_time >= now() - INTERVAL '1 hour' AND pdd_ms IS NOT NULL
-        "#,
-    )
-    .fetch_one(pool)
-    .await
-    {
-        Ok(row) => {
-            q.pdd_p50_ms = row.get("p50");
-            q.pdd_p95_ms = row.get("p95");
-            q.pdd_samples = row.get("samples");
-        }
-        Err(e) => warn!("NOC PDD unavailable (migration 020 applied?): {}", e),
-    }
     q
 }
 

@@ -223,10 +223,21 @@ The engine (`rust-billing-engine`) only records, it never authorizes or rejects 
 2. **CHANNEL_ANSWER** (a-leg) → `active_calls.answer_time` / `status = 'answered'`
 3. **CHANNEL_HANGUP_COMPLETE** → b-legs: their first 180/183 gives the PDD of their a-leg, their `rtp_audio_in_*` stats its media quality; a-leg: row removed from `active_calls`, CDR written by `CdrGenerator` (fastest PDD, worst MOS/loss of all legs)
 
-PDD caveat: the next hop is almost always FS Legado, which answers 180/183 within one 20 ms FreeSWITCH tick, so `pdd_ms` is ~0–20 ms (PDD to the next hop, not the destination network's).
+PDD caveat: the next hop is almost always FS Legado, which answers 180/183 within one 20 ms FreeSWITCH tick, so `pdd_ms` is ~0–20 ms (PDD to the next hop, not the destination network's). Not shown on the dashboard since 2026-10-25 (see *NOC quality indicators*).
 4. Calls routed Kamailio → trunk directly (no FreeSWITCH) get their CDRs from `kamailio_cdr_sync.rs`
 
 Direction comes from FreeSWITCH's native headers (`Call-Direction`…), with the context as fallback.
+
+### NOC quality indicators
+
+Removed from the dashboard on 2026-10-25 because none of them measured anything real here (the
+engine still writes `cdrs.pdd_ms`/`mos`/`rtp_loss_pct`):
+- **MOS / jitter / loss from RTPEngine**: kernel mode (`table = 0`) forwards RTCP without parsing it, so its counters never move.
+- **MOS from FreeSWITCH** (`rtp_audio_in_mos`): `R = int((recved − flaws)/recved·100)`, `MOS = 1 + 0.035R + 7e-6·R(R−60)(100−R)` (`switch_rtp.c` `do_mos`). With no sequence gaps it's exactly 4.50 (88% of calls); it only drops below 3.6 at ~30% flawed packets. No codec, delay or jitter term.
+- **"Loss" = `in_skip_packet_count`**: counts reads where FreeSWITCH found no packet and generated CNG (silence, timer phase), not network loss; it tripled with mod_timerfd. Real seq-gap loss would be `in_flaw_total`.
+- **PDD**: INVITE → next hop's first 180/183, quantised to FreeSWITCH's 20 ms clock (values 0/19/20 ms); the next hop (FS Legado) rings back instantly, so the destination network's PDD isn't visible from this SBC.
+
+The quality panel keeps *Audio en un sentido* (RTPEngine per-session packet counters) and *CPS pico*.
 
 ## API Endpoints (Port 8000)
 
@@ -409,7 +420,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 018_monitoring_trunk_health.sql | `trunks_online` / `trunks_total` on `monitoring_kamailio_metrics` for the *Trunk Health* card (SIP OPTIONS via Kamailio) |
 | 019_noc_events.sql | `noc_events` — incident/campaign/migration marks on the dashboard traffic chart (`POST/DELETE /stats/noc/events`, admin+). Dashboard thresholds/capacity are optional `system_settings` keys: `noc_asr_warn/crit`, `noc_ner_warn/crit`, `noc_min_range_attempts`, `noc_max_channels`, `noc_max_cps` |
 | 020_noc_live_quality_and_pdd.sql | `cdrs.pdd_ms` (INVITE → first 180/183, written by the billing engine from FS `*_uepoch` vars; NULL on direct Kamailio CDRs) + SELECT on `monitoring_rtpengine_metrics`/`monitoring_kamailio_metrics` for the backend role (dashboard quality = last 15 min of 1-min samples) |
-| 021_cdr_media_quality.sql | `cdrs.mos` / `cdrs.rtp_loss_pct`: worst leg's FreeSWITCH-measured MOS and received-RTP loss (`rtp_audio_in_mos`, `skip_packet_count / media_packet_count`), written by the engine. The dashboard uses them for MOS/loss because RTPEngine (kernel mode, `table = 0`) forwards RTCP in kernel and never parses it: its MOS/jitter counters are frozen (NG `statistics` `mos_samples_total` doesn't move). Jitter stays RTPEngine-only ("Sin datos") |
+| 021_cdr_media_quality.sql | `cdrs.mos` / `cdrs.rtp_loss_pct`: worst leg's FreeSWITCH-measured MOS and received-RTP loss (`rtp_audio_in_mos`, `skip_packet_count / media_packet_count`), written by the engine. Still written, but no longer on the dashboard (see *NOC quality indicators*) |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 

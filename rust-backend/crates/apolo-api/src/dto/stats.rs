@@ -109,41 +109,24 @@ pub struct NocCapacity {
     pub avg_cps_last_hour: f64,
 }
 
-/// Media quality as RTPEngine reports it, over a recent window of the
-/// monitoring collector's samples, plus PDD from the CDRs
+/// Media-path health from RTPEngine's per-session packet counters, over a
+/// recent window of the monitoring collector's samples. MOS, jitter, loss and
+/// PDD were dropped (2026-10-25): RTPEngine in kernel mode never parses RTCP,
+/// FreeSWITCH's MOS sits at its 4.5 ceiling, its skip count is not network
+/// loss and the next hop answers 18x within one 20 ms clock tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NocQuality {
-    /// Start of the window the media figures cover
+    /// Start of the window the figures cover
     pub window_start: Option<DateTime<Utc>>,
     /// Newest sample in the window
     pub as_of: Option<DateTime<Utc>>,
     /// 15 (1-minute samples) or 60 (hourly rollup fallback)
     pub window_minutes: i32,
-    /// Averages of the RTCP samples RTPEngine took within the window; None
-    /// when it took none (the *_samples count says how many). When RTPEngine
-    /// has no RTCP, MOS and loss come from FreeSWITCH's per-call stats of
-    /// the calls that ended in the window (`media_source`, samples = calls)
-    pub mos: Option<f64>,
-    pub mos_samples: i64,
-    /// "rtpengine" (RTCP) or "freeswitch" (per call) for MOS and loss
-    pub media_source: Option<String>,
-    /// Calls with MOS below the critical threshold (FreeSWITCH source only)
-    pub poor_calls: Option<i64>,
-    pub jitter_ms: Option<f64>,
-    pub jitter_samples: i64,
-    /// Average RTCP-reported packet loss within the window, in percent
-    pub packet_loss_pct: Option<f64>,
-    pub packet_loss_samples: i64,
     /// Sessions past ringing with media missing in one or both directions
     pub one_sided_sessions: Option<f64>,
     /// Sessions whose media direction was checked (latest sample)
     pub sessions_checked: Option<i64>,
     pub active_sessions: Option<f64>,
-    /// INVITE to the next hop's first 180/183 for calls started in the last
-    /// hour (FreeSWITCH path; FreeSWITCH timestamps have 20 ms resolution)
-    pub pdd_p50_ms: Option<i32>,
-    pub pdd_p95_ms: Option<i32>,
-    pub pdd_samples: i64,
 }
 
 /// Chart annotation (incident, campaign, maintenance, route migration...)
