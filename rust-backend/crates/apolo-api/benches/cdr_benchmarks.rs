@@ -41,6 +41,9 @@ fn create_mock_cdr(id: i64, answered: bool) -> Cdr {
         caller_e164: None,
         sip_code: None,
         source_ip: None,
+        egress_number: None,
+        egress_ip: None,
+        egress_gateway: None,
     }
 }
 

@@ -81,6 +81,15 @@ pub struct Cdr {
 
     /// IP that sent the INVITE to FreeSWITCH
     pub source_ip: Option<String>,
+
+    /// Number sent to the next hop (b-leg); None ip = rebuilt from dialplan
+    pub egress_number: Option<String>,
+
+    /// Next hop IP of the egress b-leg
+    pub egress_ip: Option<String>,
+
+    /// FreeSWITCH gateway of the egress b-leg
+    pub egress_gateway: Option<String>,
 }
 
 impl Cdr {
@@ -149,6 +158,9 @@ impl Default for Cdr {
             caller_e164: None,
             sip_code: None,
             source_ip: None,
+            egress_number: None,
+            egress_ip: None,
+            egress_gateway: None,
         }
     }
 }

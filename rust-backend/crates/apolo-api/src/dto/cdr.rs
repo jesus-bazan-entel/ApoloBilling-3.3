@@ -270,6 +270,13 @@ pub struct CdrResponse {
     /// IP that sent the INVITE
     pub source_ip: Option<String>,
 
+    /// Number the call left the SBC with (b-leg To user), its next hop IP
+    /// and gateway; an egress_number without egress_ip was rebuilt from the
+    /// dialplan (history before 2026-10-25)
+    pub egress_number: Option<String>,
+    pub egress_ip: Option<String>,
+    pub egress_gateway: Option<String>,
+
     /// Customer number / name (filled by the handler)
     pub account_number: Option<String>,
     pub account_name: Option<String>,
@@ -296,6 +303,9 @@ impl From<apolo_core::models::Cdr> for CdrResponse {
             caller_e164: cdr.caller_e164,
             sip_code: cdr.sip_code,
             source_ip: cdr.source_ip,
+            egress_number: cdr.egress_number,
+            egress_ip: cdr.egress_ip,
+            egress_gateway: cdr.egress_gateway,
             account_number: None,
             account_name: None,
         }

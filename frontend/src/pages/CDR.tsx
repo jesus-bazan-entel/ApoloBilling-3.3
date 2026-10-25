@@ -160,16 +160,17 @@ export default function CDRPage() {
         )
       },
     },
+    // Origen / Destino: exactly as received in the INVITE (From user / R-URI
+    // user), which is what the carrier's CDR shows; E.164 underneath
     {
       key: 'caller',
-      header: 'Origen',
+      header: 'Origen (INVITE)',
       render: (cdr: CDR) => {
         const raw = cdr.caller || cdr.caller_number || ''
-        const shown = cdr.caller_e164 || raw || '-'
         return (
           <div className="whitespace-nowrap" title={cdr.source_ip ? `INVITE desde ${cdr.source_ip}` : undefined}>
-            <div className="font-mono text-[var(--color-text-primary)]">{shown}</div>
-            {raw && raw !== shown && <div className={`${sub} font-mono`}>recibido: {raw}</div>}
+            <div className="font-mono text-[var(--color-text-primary)]">{raw || '-'}</div>
+            {cdr.caller_e164 && cdr.caller_e164 !== raw && <div className={`${sub} font-mono`}>{cdr.caller_e164}</div>}
             {!cdr.caller_e164 && raw && <div className="text-xs text-amber-600">no es un número E.164</div>}
           </div>
         )
@@ -177,14 +178,44 @@ export default function CDRPage() {
     },
     {
       key: 'callee',
-      header: 'Destino',
+      header: 'Destino (INVITE)',
       render: (cdr: CDR) => {
         const raw = cdr.callee || cdr.callee_number || ''
-        const shown = cdr.destination || raw || '-'
         return (
           <div className="whitespace-nowrap">
-            <div className="font-mono text-[var(--color-text-secondary)]">{shown}</div>
-            {raw && raw !== shown && <div className={`${sub} font-mono`}>marcado: {raw}</div>}
+            <div className="font-mono text-[var(--color-text-primary)]">{raw || '-'}</div>
+            {cdr.destination && cdr.destination !== raw && <div className={`${sub} font-mono`}>{cdr.destination}</div>}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'egress_number',
+      header: 'Salida del SBC',
+      render: (cdr: CDR) => {
+        if (!cdr.egress_number) {
+          return (
+            <span className={sub} title="Sin tramo de salida registrado (no se llegó a puentear, o CDR anterior al 25/10/2026)">
+              —
+            </span>
+          )
+        }
+        const observed = !!cdr.egress_ip
+        const changed = cdr.egress_number !== (cdr.callee || cdr.callee_number)
+        return (
+          <div
+            className="whitespace-nowrap"
+            title={
+              observed
+                ? `INVITE de salida a ${cdr.egress_ip}${cdr.egress_gateway ? ` (gateway ${cdr.egress_gateway})` : ''}`
+                : 'Reconstruido con la regla del dialplan (CDR anterior al registro del tramo de salida)'
+            }
+          >
+            <div className={`font-mono ${changed ? 'text-[#d8450b]' : 'text-[var(--color-text-secondary)]'}`}>
+              {changed && '→ '}
+              {cdr.egress_number}
+            </div>
+            <div className={sub}>{observed ? cdr.egress_gateway || cdr.egress_ip : 'según dialplan'}</div>
           </div>
         )
       },

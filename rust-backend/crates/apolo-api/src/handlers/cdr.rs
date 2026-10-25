@@ -261,6 +261,7 @@ fn mask_response(r: &mut CdrResponse) {
     r.callee = mask_number(&r.callee);
     r.caller_e164 = r.caller_e164.as_deref().map(mask_number);
     r.destination = r.destination.as_deref().map(mask_number);
+    r.egress_number = r.egress_number.as_deref().map(mask_number);
 }
 
 /// Get a single CDR by ID
@@ -581,6 +582,9 @@ fn csv_line(cdr: &CdrResponse) -> String {
         cdr.sip_code.map(|c| c.to_string()).unwrap_or_default(),
         cdr.direction.clone(),
         opt(&cdr.source_ip),
+        opt(&cdr.egress_number),
+        opt(&cdr.egress_gateway),
+        opt(&cdr.egress_ip),
     ];
     let mut line = fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(",");
     line.push('\n');
@@ -798,7 +802,7 @@ fn get_period_key(dt: &DateTime<Utc>, group_by: StatsGroupBy) -> (String, DateTi
 const MAX_EXPORT_DAYS: i64 = 31;
 
 /// CSV header; times are Lima local time (UTC-5, no DST)
-const CSV_HEADER: &str = "id,call_uuid,account_id,customer,caller,caller (E.164),callee,destination (E.164),start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,sip_code,direction,source_ip";
+const CSV_HEADER: &str = "id,call_uuid,account_id,customer,caller,caller (E.164),callee,destination (E.164),start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,sip_code,direction,source_ip,egress_number,egress_gateway,egress_ip";
 
 /// RFC 4180 field: quoted when it holds a comma, quote or line break; values a
 /// spreadsheet would run as a formula (= + - @, tab, CR) are prefixed with '.

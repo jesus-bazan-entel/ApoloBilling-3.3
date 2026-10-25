@@ -183,7 +183,7 @@ Core tables in `apolo_billing` database:
 
 ### Customers & Calls
 - `accounts` - Customers ("Clientes": number, name, status, COD_PED, location). `status` ≠ active blocks the customer's SIP REGISTER. Billing columns (balance, credit_limit, plan_id, account_type) are unused
-- `cdrs` - Call detail records (duration, billsec, hangup cause, `pdd_ms`, `mos`, `rtp_loss_pct`); partitioned monthly. `caller_number`/`called_number` = as exchanged with the carrier (percent-decoded, `called_number` keeps Integratel's `31`+2-digit routing prefix); `destination_prefix` (API/CSV `destination`) = routed destination in E.164; `account_id` = customer whose `sip_devices.sip_username` is the routed destination (inbound) or caller (outbound), NULL for FS Legado customers (~94% of inbound) — migration 023
+- `cdrs` - Call detail records (duration, billsec, hangup cause, `pdd_ms`, `mos`, `rtp_loss_pct`); partitioned monthly. `caller_number`/`called_number` = exactly as received in the INVITE (From user / R-URI user, percent-decoded; `called_number` keeps Integratel's `31`+2-digit routing prefix) — the CDR screen shows these first; `egress_number` = the number the call left the SBC with (migration 025); `destination_prefix` (API/CSV `destination`) = routed destination in E.164; `account_id` = customer whose `sip_devices.sip_username` is the routed destination (inbound) or caller (outbound), NULL for FS Legado customers (~94% of inbound) — migration 023
 - `active_calls` - Currently ongoing calls
 - `noc_events` - Dashboard chart marks (migration 019)
 
@@ -410,6 +410,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 022_drop_internal_routes.sql | Drops `internal_routes` / `system_endpoints` (the *Rutas Internas* module, removed 2026-10-25; backup in `/root/internal_routes-backup-*.sql`) |
 | 023_cdr_destination_e164_account.sql | `cdrs.destination_prefix` repurposed as the routed destination in E.164 + `account_id` from `sip_devices` (SQL mirrors `apolo_routed_number`/`apolo_e164` of the engine's `numbering.rs`); backfills October 2026 (`SET statement_timeout = 0`, ~1 min) |
 | 024_cdr_audit_fields.sql | `cdrs.sip_code` (final SIP status to the caller: `sip_term_status`, else 200 if answered, else the relayed `sip:NNN`), `caller_e164` (international CLIs without `+` read as international) and `source_ip` (`sip_network_ip`), written from 2026-10-25 18:35; `apolo_e164` adds Lima 7-digit numbers; backfills `caller_e164` for October |
+| 025_cdr_egress.sql | `cdrs.egress_number` / `egress_ip` / `egress_gateway`: where the call left the SBC, from the b-leg (`sip_to_user`, `sip_network_ip`, `sip_gateway_name`; parallel ring keeps the answered leg, else the first), written from 2026-10-25 18:55. October inbound DIDs backfilled with the number only (`${destination_number:4}` of the dialplan); `egress_ip` NULL marks those as rebuilt |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 

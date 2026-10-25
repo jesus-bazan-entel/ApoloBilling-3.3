@@ -41,7 +41,8 @@ const CDR_SELECT_COLUMNS: &str = r#"
     hangup_cause, direction,
     freeswitch_server_id, reservation_id,
     created_at, processed_at,
-    caller_e164, sip_code, source_ip
+    caller_e164, sip_code, source_ip,
+    egress_number, egress_ip, egress_gateway
 "#;
 
 #[async_trait]
@@ -555,6 +556,9 @@ struct CdrRow {
     caller_e164: Option<String>,
     sip_code: Option<i16>,
     source_ip: Option<String>,
+    egress_number: Option<String>,
+    egress_ip: Option<String>,
+    egress_gateway: Option<String>,
 }
 
 impl From<CdrRow> for Cdr {
@@ -583,6 +587,9 @@ impl From<CdrRow> for Cdr {
             caller_e164: row.caller_e164,
             sip_code: row.sip_code,
             source_ip: row.source_ip,
+            egress_number: row.egress_number,
+            egress_ip: row.egress_ip,
+            egress_gateway: row.egress_gateway,
         }
     }
 }
@@ -618,6 +625,9 @@ mod tests {
             caller_e164: None,
             sip_code: None,
             source_ip: None,
+            egress_number: None,
+            egress_ip: None,
+            egress_gateway: None,
         };
 
         let cdr: Cdr = row.into();

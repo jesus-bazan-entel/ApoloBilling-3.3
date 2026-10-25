@@ -71,6 +71,10 @@ export interface CDR {
   sip_code?: number | null
   /** IP that sent the INVITE to FreeSWITCH */
   source_ip?: string | null
+  /** Number the call left the SBC with (b-leg To user); no egress_ip = rebuilt from the dialplan */
+  egress_number?: string | null
+  egress_ip?: string | null
+  egress_gateway?: string | null
   account_number?: string | null
   account_name?: string | null
 }

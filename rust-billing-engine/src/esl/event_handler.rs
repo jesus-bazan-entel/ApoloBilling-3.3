@@ -25,12 +25,45 @@ pub struct EventHandler {
 /// b-leg metrics whose a-leg never hung up here are dropped after this long
 const PENDING_BLEG_TTL: Duration = Duration::from_secs(600);
 
-/// What a call's legs report, merged into its CDR: fastest PDD, worst media
-#[derive(Debug, Clone, Copy, Default)]
+/// What a call's legs report, merged into its CDR: fastest PDD, worst media,
+/// and where the call left the SBC (the answered b-leg, else the first one)
+#[derive(Debug, Clone, Default)]
 struct LegMetrics {
     pdd_ms: Option<i32>,
     mos: Option<f32>,
     loss_pct: Option<f32>,
+    egress: Option<Egress>,
+}
+
+/// Outgoing side of the bridge, as FreeSWITCH sent it
+#[derive(Debug, Clone, PartialEq)]
+pub struct Egress {
+    /// User part of the INVITE's To sent to the next hop (`sip_to_user`)
+    pub number: String,
+    /// Next hop's IP (`sip_network_ip`)
+    pub ip: Option<String>,
+    /// FreeSWITCH gateway used, if any (`sip_gateway_name`)
+    pub gateway: Option<String>,
+    answered: bool,
+}
+
+impl Egress {
+    fn of(event: &EslEvent) -> Option<Self> {
+        let number = event
+            .get_header("variable_sip_to_user")
+            .or_else(|| event.get_header("Caller-Destination-Number"))
+            .filter(|n| !n.is_empty())?
+            .clone();
+        let non_empty = |key: &str| event.get_header(key).filter(|v| !v.is_empty()).cloned();
+        Some(Self {
+            number,
+            ip: non_empty("variable_sip_network_ip"),
+            gateway: non_empty("variable_sip_gateway_name"),
+            answered: event
+                .get_header("variable_answer_epoch")
+                .is_some_and(|e| e.trim() != "0" && !e.trim().is_empty()),
+        })
+    }
 }
 
 impl LegMetrics {
@@ -40,11 +73,12 @@ impl LegMetrics {
             pdd_ms: if with_pdd { event.pdd_ms() } else { None },
             mos: media.map(|(mos, _)| mos),
             loss_pct: media.map(|(_, loss)| loss),
+            egress: None,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.pdd_ms.is_none() && self.mos.is_none() && self.loss_pct.is_none()
+        self.pdd_ms.is_none() && self.mos.is_none() && self.loss_pct.is_none() && self.egress.is_none()
     }
 
     fn merge(self, other: Self) -> Self {
@@ -58,6 +92,10 @@ impl LegMetrics {
             pdd_ms: pick(self.pdd_ms, other.pdd_ms, |a, b| a <= b),
             mos: pick(self.mos, other.mos, |a, b| a <= b),
             loss_pct: pick(self.loss_pct, other.loss_pct, |a, b| a >= b),
+            egress: match (self.egress, other.egress) {
+                (Some(a), Some(b)) => Some(if b.answered && !a.answered { b } else { a }),
+                (a, b) => a.or(b),
+            },
         }
     }
 }
@@ -169,7 +207,10 @@ impl EventHandler {
     /// the a-leg CDR is not written yet, otherwise applied to the CDR directly
     /// (LEAST/GREATEST ignore NULLs: fastest PDD, worst MOS and loss win).
     async fn record_bleg_metrics(&self, event: &EslEvent) {
-        let metrics = LegMetrics::of(event, true);
+        let metrics = LegMetrics {
+            egress: Egress::of(event),
+            ..LegMetrics::of(event, true)
+        };
         let Some(a_uuid) = event
             .get_header("Other-Leg-Unique-ID")
             .or_else(|| event.get_header("variable_originating_leg_uuid"))
@@ -181,13 +222,29 @@ impl EventHandler {
             return;
         }
 
+        // The a-leg's CDR may already be written: the answered b-leg (or the
+        // first one, if none answered) sets its egress
+        let egress = metrics.egress.as_ref();
+        let (eg_number, eg_ip, eg_gateway, eg_answered) = (
+            egress.map(|e| e.number.clone()),
+            egress.and_then(|e| e.ip.clone()),
+            egress.and_then(|e| e.gateway.clone()),
+            egress.is_some_and(|e| e.answered),
+        );
         if let Ok(client) = self.db_pool.get().await {
             match client
                 .execute(
                     "UPDATE cdrs SET pdd_ms = LEAST(pdd_ms, $2), mos = LEAST(mos, $3),
-                                     rtp_loss_pct = GREATEST(rtp_loss_pct, $4)
+                                     rtp_loss_pct = GREATEST(rtp_loss_pct, $4),
+                                     egress_number = CASE WHEN $5::text IS NOT NULL
+                                         AND (egress_number IS NULL OR $8) THEN $5 ELSE egress_number END,
+                                     egress_ip = CASE WHEN $5::text IS NOT NULL
+                                         AND (egress_number IS NULL OR $8) THEN $6 ELSE egress_ip END,
+                                     egress_gateway = CASE WHEN $5::text IS NOT NULL
+                                         AND (egress_number IS NULL OR $8) THEN $7 ELSE egress_gateway END
                      WHERE call_uuid = $1 AND start_time > now() - INTERVAL '1 day'",
-                    &[&a_uuid, &metrics.pdd_ms, &metrics.mos, &metrics.loss_pct],
+                    &[&a_uuid, &metrics.pdd_ms, &metrics.mos, &metrics.loss_pct,
+                      &eg_number, &eg_ip, &eg_gateway, &eg_answered],
                 )
                 .await
             {
@@ -199,10 +256,10 @@ impl EventHandler {
 
         let mut pending = self.pending_bleg.lock().unwrap_or_else(|e| e.into_inner());
         pending.retain(|_, (_, at)| at.elapsed() < PENDING_BLEG_TTL);
-        pending
+        let entry = pending
             .entry(a_uuid)
-            .and_modify(|(m, _)| *m = m.merge(metrics))
-            .or_insert((metrics, Instant::now()));
+            .or_insert_with(|| (LegMetrics::default(), Instant::now()));
+        entry.0 = std::mem::take(&mut entry.0).merge(metrics);
     }
 
     fn take_pending_bleg(&self, a_uuid: &str) -> LegMetrics {
@@ -285,6 +342,7 @@ impl EventHandler {
             transformed_number: event.get_header("variable_transformed_number").cloned(),
             sip_code: final_sip_code(event),
             source_ip: event.get_header("variable_sip_network_ip").cloned(),
+            egress: legs.egress.clone(),
             pdd_ms: legs.pdd_ms,
             mos: legs.mos,
             rtp_loss_pct: legs.loss_pct,
@@ -427,5 +485,48 @@ mod direction_tests {
         let ev = leg("sofia/internal/957185999@10.118.0.4", "from-pbx", "");
         assert_eq!(sbc_direction(&ev).0, "inbound");
         assert_eq!(sbc_direction(&EslEvent::default()).0, "inbound");
+    }
+}
+
+#[cfg(test)]
+mod egress_tests {
+    use super::*;
+
+    fn bleg(to: &str, ip: &str, gw: &str, answer_epoch: &str) -> EslEvent {
+        let headers = [
+            ("variable_sip_to_user", to),
+            ("variable_sip_network_ip", ip),
+            ("variable_sip_gateway_name", gw),
+            ("variable_answer_epoch", answer_epoch),
+        ]
+        .iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        EslEvent { headers, ..Default::default() }
+    }
+
+    fn legs(ev: &EslEvent) -> LegMetrics {
+        LegMetrics { egress: Egress::of(ev), ..Default::default() }
+    }
+
+    #[test]
+    fn egress_from_bleg() {
+        let e = Egress::of(&bleg("19020370", "10.118.0.4", "freeswitch-legado", "1792972133")).unwrap();
+        assert_eq!(e.number, "19020370");
+        assert_eq!(e.ip.as_deref(), Some("10.118.0.4"));
+        assert_eq!(e.gateway.as_deref(), Some("freeswitch-legado"));
+        assert!(Egress::of(&EslEvent::default()).is_none());
+    }
+
+    #[test]
+    fn parallel_ring_keeps_the_answered_leg() {
+        let legado = legs(&bleg("17473046", "10.118.0.4", "freeswitch-legado", "0"));
+        let app = legs(&bleg("17473046", "45.5.68.242", "", "1792972133"));
+        let merged = legado.clone().merge(app.clone());
+        assert_eq!(merged.egress.unwrap().ip.as_deref(), Some("45.5.68.242"));
+        // Nobody answered: the first leg stays
+        let unanswered = legs(&bleg("17473046", "45.5.68.242", "", "0"));
+        assert_eq!(legado.merge(unanswered).egress.unwrap().ip.as_deref(), Some("10.118.0.4"));
     }
 }

@@ -33,6 +33,8 @@ pub struct HangupEvent {
     pub sip_code: Option<i16>,
     /// IP that sent the INVITE (`sip_network_ip`)
     pub source_ip: Option<String>,
+    /// Where the call left the SBC (b-leg), if a b-leg was seen already
+    pub egress: Option<crate::esl::event_handler::Egress>,
     /// Post-Dial Delay (INVITE → first 180/183) in ms
     pub pdd_ms: Option<i32>,
     /// Worst leg's FreeSWITCH-estimated MOS and received-RTP loss percent
@@ -65,9 +67,9 @@ impl CdrGenerator {
                      (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
                       duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms,
                       mos, rtp_loss_pct, destination_prefix, account_id, caller_e164, sip_code,
-                      source_ip)
+                      source_ip, egress_number, egress_ip, egress_gateway)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                             {}, $17, $18, $19)
+                             {}, $17, $18, $19, $20, $21, $22)
                      RETURNING id",
                     customer_account_sql(16)
                 ),
@@ -91,6 +93,9 @@ impl CdrGenerator {
                     &caller_to_e164(&caller),
                     &event.sip_code,
                     &event.source_ip,
+                    &event.egress.as_ref().map(|e| e.number.clone()),
+                    &event.egress.as_ref().and_then(|e| e.ip.clone()),
+                    &event.egress.as_ref().and_then(|e| e.gateway.clone()),
                 ],
             )
             .await?;
