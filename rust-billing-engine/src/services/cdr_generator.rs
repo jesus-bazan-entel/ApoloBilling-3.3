@@ -26,6 +26,9 @@ pub struct HangupEvent {
     pub server_id: String,
     /// Post-Dial Delay (INVITE → first 180/183) in ms
     pub pdd_ms: Option<i32>,
+    /// Worst leg's FreeSWITCH-estimated MOS and received-RTP loss percent
+    pub mos: Option<f32>,
+    pub rtp_loss_pct: Option<f32>,
 }
 
 impl CdrGenerator {
@@ -44,8 +47,9 @@ impl CdrGenerator {
             .query_one(
                 "INSERT INTO cdrs
                  (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
-                  duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                  duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms,
+                  mos, rtp_loss_pct)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                  RETURNING id",
                 &[
                     &event.uuid,
@@ -60,6 +64,8 @@ impl CdrGenerator {
                     &event.direction,
                     &event.server_id,
                     &event.pdd_ms,
+                    &event.mos,
+                    &event.rtp_loss_pct,
                 ],
             )
             .await?;

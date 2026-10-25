@@ -62,6 +62,9 @@ pub struct NocCause {
     pub today: i64,
     /// Comparison day up to the same time of day
     pub compare: i64,
+    /// Of `today`, CDRs imported from Kamailio (direct routing): their cause
+    /// comes from the real SIP final code, FreeSWITCH's from Q.850
+    pub today_direct: i64,
 }
 
 /// Traffic of one called-number prefix through one path
@@ -116,15 +119,28 @@ pub struct NocQuality {
     pub as_of: Option<DateTime<Utc>>,
     /// 15 (1-minute samples) or 60 (hourly rollup fallback)
     pub window_minutes: i32,
-    /// RTPEngine's running averages (since it started), latest sample
+    /// Averages of the RTCP samples RTPEngine took within the window; None
+    /// when it took none (the *_samples count says how many). When RTPEngine
+    /// has no RTCP, MOS and loss come from FreeSWITCH's per-call stats of
+    /// the calls that ended in the window (`media_source`, samples = calls)
     pub mos: Option<f64>,
+    pub mos_samples: i64,
+    /// "rtpengine" (RTCP) or "freeswitch" (per call) for MOS and loss
+    pub media_source: Option<String>,
+    /// Calls with MOS below the critical threshold (FreeSWITCH source only)
+    pub poor_calls: Option<i64>,
     pub jitter_ms: Option<f64>,
-    /// Lost / relayed packets within the window, in percent
+    pub jitter_samples: i64,
+    /// Average RTCP-reported packet loss within the window, in percent
     pub packet_loss_pct: Option<f64>,
+    pub packet_loss_samples: i64,
     /// Sessions past ringing with media missing in one or both directions
     pub one_sided_sessions: Option<f64>,
+    /// Sessions whose media direction was checked (latest sample)
+    pub sessions_checked: Option<i64>,
     pub active_sessions: Option<f64>,
-    /// Post-Dial Delay of calls started in the last hour (FreeSWITCH path)
+    /// INVITE to the next hop's first 180/183 for calls started in the last
+    /// hour (FreeSWITCH path; FreeSWITCH timestamps have 20 ms resolution)
     pub pdd_p50_ms: Option<i32>,
     pub pdd_p95_ms: Option<i32>,
     pub pdd_samples: i64,
@@ -169,6 +185,9 @@ pub struct NocOverviewResponse {
     pub thresholds: NocThresholds,
     pub capacity: NocCapacity,
     pub quality: NocQuality,
+    /// First direct-routing (Kamailio) CDR since the comparison day: causes
+    /// only that source reports have no comparison base before it
+    pub direct_cdrs_since: Option<DateTime<Utc>>,
     /// Annotations overlapping today or the comparison day
     pub events: Vec<NocEvent>,
 }

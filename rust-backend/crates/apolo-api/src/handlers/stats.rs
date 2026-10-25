@@ -24,6 +24,10 @@ fn dashboard_timezone() -> String {
     std::env::var("DASHBOARD_TIMEZONE").unwrap_or_else(|_| "America/Lima".to_string())
 }
 
+/// `cdrs.freeswitch_server_id` of CDRs imported from Kamailio's dialog CDRs
+/// (direct inbound routing, rust-billing-engine kamailio_cdr_sync)
+const DIRECT_CDR_SOURCE: &str = "kamailio";
+
 const SLOT_MINUTES: i32 = 15;
 const SLOTS_PER_DAY: i32 = 24 * 60 / SLOT_MINUTES;
 
@@ -236,42 +240,72 @@ async fn noc_capacity(
 }
 
 /// RTPEngine media quality over the last 15 minutes of the monitoring
-/// collector's 1-minute samples (the hourly rollup is only a fallback: it
-/// lags up to two hours). MOS and jitter are RTPEngine's own running
-/// averages; packet loss is the share of relayed packets lost in the window
-/// (both are counters). Never fails the overview: the tables belong to the
-/// collector.
+/// collector's 1-minute samples. MOS, jitter and loss average only the RTCP
+/// samples RTPEngine took inside the window (difference of its running sums
+/// and sample counts between the first and last sample): its own *_average
+/// fields cover its whole uptime and stay frozen when no RTCP reaches
+/// userspace, which must read as "no data", not as a good score. The hourly
+/// rollup (it lags up to two hours) is only a fallback for session counts.
+/// Never fails the overview: the tables belong to the collector.
 async fn noc_quality(pool: &PgPool) -> NocQuality {
     let mut q = NocQuality {
         window_start: None,
         as_of: None,
         window_minutes: 15,
         mos: None,
+        mos_samples: 0,
+        media_source: None,
+        poor_calls: None,
         jitter_ms: None,
+        jitter_samples: 0,
         packet_loss_pct: None,
+        packet_loss_samples: 0,
         one_sided_sessions: None,
+        sessions_checked: None,
         active_sessions: None,
         pdd_p50_ms: None,
         pdd_p95_ms: None,
         pdd_samples: 0,
     };
-    let loss = |lost: Option<f64>, sent: Option<f64>| match (lost, sent) {
-        (Some(lost), Some(sent)) if sent > 0.0 => Some(100.0 * lost / sent),
-        _ => None,
+    // (sum delta, sample delta) -> (average, samples); a counter reset
+    // (RTPEngine restart inside the window) gives a negative delta
+    let windowed = |sum: Option<f64>, n: Option<i64>| match (sum, n) {
+        (Some(sum), Some(n)) if n > 0 && sum >= 0.0 => (Some(sum / n as f64), n),
+        _ => (None, 0),
     };
 
     let live = sqlx::query(
         r#"
-        SELECT MIN("timestamp") AT TIME ZONE 'UTC' AS window_start,
-               MAX("timestamp") AT TIME ZONE 'UTC' AS as_of,
-               (ARRAY_AGG(mos_avg ORDER BY "timestamp" DESC))[1] AS mos,
-               (ARRAY_AGG(jitter_avg_ms ORDER BY "timestamp" DESC))[1] AS jitter,
-               (MAX(packets_lost_in) - MIN(packets_lost_in))::FLOAT8 AS lost,
-               (MAX(packets_in) - MIN(packets_in))::FLOAT8 AS sent,
-               AVG(one_sided_sessions)::FLOAT8 AS one_sided,
-               AVG(active_sessions)::FLOAT8 AS active
-        FROM monitoring_rtpengine_metrics
-        WHERE "timestamp" >= (now() AT TIME ZONE 'UTC') - INTERVAL '15 minutes'
+        WITH w AS (
+            SELECT "timestamp" AS ts, raw_data, one_sided_sessions, active_sessions
+            FROM monitoring_rtpengine_metrics
+            WHERE "timestamp" >= (now() AT TIME ZONE 'UTC') - INTERVAL '15 minutes'
+        ),
+        c AS (
+            SELECT ts,
+                   (raw_data #>> '{ng_mos,mos_total}')::FLOAT8 AS mos_sum,
+                   (raw_data #>> '{ng_mos,mos_samples_total}')::BIGINT AS mos_n,
+                   (raw_data #>> '{ng_voip,jitter_total}')::FLOAT8 AS jitter_sum,
+                   (raw_data #>> '{ng_voip,jitter_samples_total}')::BIGINT AS jitter_n,
+                   (raw_data #>> '{ng_voip,packetloss_total}')::FLOAT8 AS loss_sum,
+                   (raw_data #>> '{ng_voip,packetloss_samples_total}')::BIGINT AS loss_n
+            FROM w
+            WHERE raw_data #> '{ng_mos,mos_total}' IS NOT NULL
+        ),
+        f AS (SELECT * FROM c ORDER BY ts LIMIT 1),
+        l AS (SELECT * FROM c ORDER BY ts DESC LIMIT 1)
+        SELECT (SELECT MIN(ts) FROM w) AT TIME ZONE 'UTC' AS window_start,
+               (SELECT MAX(ts) FROM w) AT TIME ZONE 'UTC' AS as_of,
+               (SELECT AVG(one_sided_sessions) FROM w)::FLOAT8 AS one_sided,
+               (SELECT AVG(active_sessions) FROM w)::FLOAT8 AS active,
+               (SELECT (raw_data ->> 'ng_direction_checked')::BIGINT FROM w
+                ORDER BY ts DESC LIMIT 1) AS checked,
+               l.mos_sum - f.mos_sum AS mos_sum, l.mos_n - f.mos_n AS mos_n,
+               l.jitter_sum - f.jitter_sum AS jitter_sum, l.jitter_n - f.jitter_n AS jitter_n,
+               l.loss_sum - f.loss_sum AS loss_sum, l.loss_n - f.loss_n AS loss_n
+        FROM (SELECT 1) AS one
+        LEFT JOIN f ON true
+        LEFT JOIN l ON true
         "#,
     )
     .fetch_one(pool)
@@ -281,10 +315,12 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
         Ok(row) if row.get::<Option<DateTime<Utc>>, _>("as_of").is_some() => {
             q.window_start = row.get("window_start");
             q.as_of = row.get("as_of");
-            q.mos = row.get("mos");
-            q.jitter_ms = row.get("jitter");
-            q.packet_loss_pct = loss(row.get("lost"), row.get("sent"));
+            (q.mos, q.mos_samples) = windowed(row.get("mos_sum"), row.get("mos_n"));
+            (q.jitter_ms, q.jitter_samples) = windowed(row.get("jitter_sum"), row.get("jitter_n"));
+            (q.packet_loss_pct, q.packet_loss_samples) =
+                windowed(row.get("loss_sum"), row.get("loss_n"));
             q.one_sided_sessions = row.get("one_sided");
+            q.sessions_checked = row.get("checked");
             q.active_sessions = row.get("active");
         }
         other => {
@@ -293,14 +329,12 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
             }
             let rows = sqlx::query(
                 r#"
-                SELECT metric, avg_value, max_value - min_value AS delta,
-                       bucket_start AT TIME ZONE 'UTC' AS bucket_start
+                SELECT metric, avg_value, bucket_start AT TIME ZONE 'UTC' AS bucket_start
                 FROM monitoring_kpi_hourly
                 WHERE component = 'rtpengine'
                   AND bucket_start = (SELECT MAX(bucket_start) FROM monitoring_kpi_hourly
                                       WHERE component = 'rtpengine')
-                  AND metric IN ('mos_avg', 'jitter_avg_ms', 'packets_lost_in', 'packets_in',
-                                 'one_sided_sessions', 'active_sessions')
+                  AND metric IN ('one_sided_sessions', 'active_sessions')
                 "#,
             )
             .fetch_all(pool)
@@ -310,25 +344,53 @@ async fn noc_quality(pool: &PgPool) -> NocQuality {
                 Vec::new()
             });
             let mut avg = HashMap::new();
-            let mut delta = HashMap::new();
             for row in rows {
                 let metric: String = row.get("metric");
                 q.window_start = row.get("bucket_start");
-                avg.insert(metric.clone(), row.get::<Option<f64>, _>("avg_value"));
-                delta.insert(metric, row.get::<Option<f64>, _>("delta"));
+                avg.insert(metric, row.get::<Option<f64>, _>("avg_value"));
             }
-            let get = |m: &HashMap<String, Option<f64>>, k: &str| m.get(k).copied().flatten();
+            let get = |k: &str| avg.get(k).copied().flatten();
             q.window_minutes = 60;
             q.as_of = q.window_start.map(|t| t + Duration::hours(1));
-            q.mos = get(&avg, "mos_avg");
-            q.jitter_ms = get(&avg, "jitter_avg_ms");
-            q.packet_loss_pct = loss(get(&delta, "packets_lost_in"), get(&delta, "packets_in"));
-            q.one_sided_sessions = get(&avg, "one_sided_sessions");
-            q.active_sessions = get(&avg, "active_sessions");
+            q.one_sided_sessions = get("one_sided_sessions");
+            q.active_sessions = get("active_sessions");
         }
     }
-    // 0 means RTPEngine had no samples yet, not a MOS of zero
-    q.mos = q.mos.filter(|v| *v > 0.0);
+
+    if q.mos_samples > 0 {
+        q.media_source = Some("rtpengine".to_string());
+    } else {
+        // RTPEngine forwards RTCP in kernel and never parses it: fall back to
+        // what FreeSWITCH measured on each call's legs (migration 021)
+        match sqlx::query(
+            r#"
+            SELECT AVG(mos)::FLOAT8 AS mos, COUNT(mos)::BIGINT AS n,
+                   AVG(rtp_loss_pct)::FLOAT8 AS loss, COUNT(rtp_loss_pct)::BIGINT AS loss_n,
+                   COUNT(*) FILTER (WHERE mos < 3.6)::BIGINT AS poor
+            FROM cdrs
+            WHERE start_time >= now() - INTERVAL '1 day'
+              AND end_time >= now() - INTERVAL '15 minutes'
+              AND mos IS NOT NULL
+            "#,
+        )
+        .fetch_one(pool)
+        .await
+        {
+            Ok(row) if row.get::<i64, _>("n") > 0 => {
+                q.media_source = Some("freeswitch".to_string());
+                q.mos = row.get("mos");
+                q.mos_samples = row.get("n");
+                q.packet_loss_pct = row.get("loss");
+                q.packet_loss_samples = row.get("loss_n");
+                q.poor_calls = row.get("poor");
+            }
+            Ok(_) => {}
+            Err(e) => warn!(
+                "NOC FreeSWITCH media quality unavailable (migration 021 applied?): {}",
+                e
+            ),
+        }
+    }
 
     match sqlx::query(
         r#"
@@ -447,7 +509,9 @@ pub async fn get_noc_overview(
         SELECT
             hangup_cause AS cause,
             COUNT(*) FILTER (WHERE start_time >= $1 AND start_time < $2)::BIGINT AS today,
-            COUNT(*) FILTER (WHERE start_time >= $3 AND start_time < $4)::BIGINT AS compare
+            COUNT(*) FILTER (WHERE start_time >= $3 AND start_time < $4)::BIGINT AS compare,
+            COUNT(*) FILTER (WHERE start_time >= $1 AND start_time < $2
+                             AND freeswitch_server_id = $5)::BIGINT AS today_direct
         FROM cdrs
         WHERE answer_time IS NULL
           AND hangup_cause IS NOT NULL
@@ -461,6 +525,7 @@ pub async fn get_noc_overview(
     .bind(now)
     .bind(compare_start)
     .bind(compare_same_time_end)
+    .bind(DIRECT_CDR_SOURCE)
     .fetch_all(pool)
     .await
     .map_err(|e| AppError::Database(format!("Failed to fetch NOC causes: {}", e)))?
@@ -472,9 +537,19 @@ pub async fn get_noc_overview(
             cause,
             today: row.get("today"),
             compare: row.get("compare"),
+            today_direct: row.get("today_direct"),
         }
     })
     .collect();
+
+    let direct_cdrs_since: Option<DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT MIN(start_time) FROM cdrs WHERE freeswitch_server_id = $1 AND start_time >= $2",
+    )
+    .bind(DIRECT_CDR_SOURCE)
+    .bind(compare_start)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Failed to fetch direct CDR start: {}", e)))?;
 
     let ranges = sqlx::query(
         r#"
@@ -572,6 +647,7 @@ pub async fn get_noc_overview(
             thresholds,
             capacity,
             quality,
+            direct_cdrs_since,
             events,
         })),
     )

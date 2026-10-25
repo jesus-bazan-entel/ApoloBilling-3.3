@@ -722,11 +722,17 @@ class RtpengineCollector:
                 "onewaystreams", "zerowaystreams",
             ) if k in tot
         }
-        metrics["raw_data"]["ng_mos"] = {k: mos.get(k) for k in ("mos_average", "mos_samples_total") if k in mos}
+        # *_average are lifetime averages since RTPEngine started; the running
+        # sums + sample counts let the dashboard average over its own window
+        # (and see when no RTCP sample arrived at all, e.g. kernel forwarding)
+        metrics["raw_data"]["ng_mos"] = {
+            k: mos.get(k) for k in ("mos_average", "mos_total", "mos_samples_total") if k in mos
+        }
         metrics["raw_data"]["ng_voip"] = {
             k: voip.get(k) for k in (
-                "jitter_average", "jitter_samples_total", "rtt_e2e_average",
-                "rtt_dsct_average", "packetloss_average", "packets_lost",
+                "jitter_average", "jitter_total", "jitter_samples_total", "rtt_e2e_average",
+                "rtt_dsct_average", "packetloss_average", "packetloss_total",
+                "packetloss_samples_total", "packets_lost",
             ) if k in voip
         }
         proxies = ctrl.get("proxies", []) if isinstance(ctrl, dict) else []

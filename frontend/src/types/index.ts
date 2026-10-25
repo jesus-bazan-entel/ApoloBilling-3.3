@@ -677,6 +677,8 @@ export interface NocCause {
   category: 'network' | 'user' | 'cancel' | 'other'
   today: number
   compare: number
+  /** Of today, CDRs imported from Kamailio (direct routing, real SIP code) */
+  today_direct: number
 }
 
 export interface NocRange {
@@ -710,11 +712,21 @@ export interface NocQuality {
   as_of: string | null
   /** 15 = live 1-minute samples, 60 = hourly rollup fallback */
   window_minutes: number
+  /** Averages of RTCP samples taken in the window; null when *_samples is 0 */
   mos: number | null
+  mos_samples: number
+  /** Source of MOS and loss: RTPEngine RTCP, or FreeSWITCH per-call stats */
+  media_source: 'rtpengine' | 'freeswitch' | null
+  /** Calls under MOS 3.6 (FreeSWITCH source) */
+  poor_calls: number | null
   jitter_ms: number | null
+  jitter_samples: number
   packet_loss_pct: number | null
+  packet_loss_samples: number
   /** Sessions past ringing with media missing in one or both directions */
   one_sided_sessions: number | null
+  /** Sessions whose media direction was checked (latest sample) */
+  sessions_checked: number | null
   active_sessions: number | null
   pdd_p50_ms: number | null
   pdd_p95_ms: number | null
@@ -751,5 +763,7 @@ export interface NocOverview {
   thresholds: NocThresholds
   capacity: NocCapacity
   quality: NocQuality
+  /** First direct-routing (Kamailio) CDR since the comparison day */
+  direct_cdrs_since: string | null
   events: NocEvent[]
 }

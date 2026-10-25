@@ -165,6 +165,16 @@ impl EslEvent {
         i32::try_from((progress - start) / 1000).ok().filter(|ms| *ms >= 0)
     }
 
+    /// What FreeSWITCH received on this leg: (MOS, packet loss %), from its
+    /// own jitter-buffer stats at hangup. None when the leg carried no media.
+    pub fn media_quality(&self) -> Option<(f32, f32)> {
+        let num = |h: &str| self.headers.get(h).and_then(|v| v.parse::<f64>().ok());
+        let received = num("variable_rtp_audio_in_media_packet_count").filter(|n| *n > 0.0)?;
+        let mos = num("variable_rtp_audio_in_mos").filter(|m| *m > 0.0)?;
+        let lost = num("variable_rtp_audio_in_skip_packet_count").unwrap_or(0.0).max(0.0);
+        Some((mos as f32, (100.0 * lost / (received + lost)) as f32))
+    }
+
     /// Get call end time
     pub fn end_time(&self) -> Option<DateTime<Utc>> {
         // Try variable_end_epoch first

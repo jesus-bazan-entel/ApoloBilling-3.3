@@ -15,15 +15,52 @@ pub struct EventHandler {
     server_id: String,
     cdr_generator: Arc<CdrGenerator>,
     db_pool: DbPool,
-    /// a-leg uuid → PDD (ms) from its b-legs, held until the a-leg's CDR is
+    /// a-leg uuid → metrics from its b-legs, held until the a-leg's CDR is
     /// written. The a-leg's own progress is FreeSWITCH's local Ring-Ready
     /// (~20 ms after the INVITE), so the real PDD comes from the b-leg: its
     /// first 180/183 from the destination. Parallel ring keeps the fastest leg.
-    pending_pdd: Arc<Mutex<HashMap<String, (i32, Instant)>>>,
+    pending_bleg: Arc<Mutex<HashMap<String, (LegMetrics, Instant)>>>,
 }
 
-/// b-leg PDDs whose a-leg never hung up here are dropped after this long
-const PENDING_PDD_TTL: Duration = Duration::from_secs(600);
+/// b-leg metrics whose a-leg never hung up here are dropped after this long
+const PENDING_BLEG_TTL: Duration = Duration::from_secs(600);
+
+/// What a call's legs report, merged into its CDR: fastest PDD, worst media
+#[derive(Debug, Clone, Copy, Default)]
+struct LegMetrics {
+    pdd_ms: Option<i32>,
+    mos: Option<f32>,
+    loss_pct: Option<f32>,
+}
+
+impl LegMetrics {
+    fn of(event: &EslEvent, with_pdd: bool) -> Self {
+        let media = event.media_quality();
+        Self {
+            pdd_ms: if with_pdd { event.pdd_ms() } else { None },
+            mos: media.map(|(mos, _)| mos),
+            loss_pct: media.map(|(_, loss)| loss),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pdd_ms.is_none() && self.mos.is_none() && self.loss_pct.is_none()
+    }
+
+    fn merge(self, other: Self) -> Self {
+        fn pick<T: PartialOrd + Copy>(a: Option<T>, b: Option<T>, keep_a: fn(T, T) -> bool) -> Option<T> {
+            match (a, b) {
+                (Some(a), Some(b)) => Some(if keep_a(a, b) { a } else { b }),
+                (a, b) => a.or(b),
+            }
+        }
+        Self {
+            pdd_ms: pick(self.pdd_ms, other.pdd_ms, |a, b| a <= b),
+            mos: pick(self.mos, other.mos, |a, b| a <= b),
+            loss_pct: pick(self.loss_pct, other.loss_pct, |a, b| a >= b),
+        }
+    }
+}
 
 impl EventHandler {
     pub fn new(server_id: String, cdr_generator: Arc<CdrGenerator>, db_pool: DbPool) -> Self {
@@ -31,7 +68,7 @@ impl EventHandler {
             server_id,
             cdr_generator,
             db_pool,
-            pending_pdd: Arc::default(),
+            pending_bleg: Arc::default(),
         }
     }
 
@@ -164,48 +201,53 @@ impl EventHandler {
         }
     }
 
-    /// Attach a b-leg's PDD to its a-leg: kept in memory if the a-leg CDR is
-    /// not written yet, otherwise applied to the CDR directly.
-    async fn record_bleg_pdd(&self, event: &EslEvent) {
-        let (Some(pdd), Some(a_uuid)) = (
-            event.pdd_ms(),
-            event
-                .get_header("Other-Leg-Unique-ID")
-                .or_else(|| event.get_header("variable_originating_leg_uuid"))
-                .cloned(),
-        ) else {
+    /// Attach a b-leg's PDD and media quality to its a-leg: kept in memory if
+    /// the a-leg CDR is not written yet, otherwise applied to the CDR directly
+    /// (LEAST/GREATEST ignore NULLs: fastest PDD, worst MOS and loss win).
+    async fn record_bleg_metrics(&self, event: &EslEvent) {
+        let metrics = LegMetrics::of(event, true);
+        let Some(a_uuid) = event
+            .get_header("Other-Leg-Unique-ID")
+            .or_else(|| event.get_header("variable_originating_leg_uuid"))
+            .cloned()
+        else {
             return;
         };
+        if metrics.is_empty() {
+            return;
+        }
 
         if let Ok(client) = self.db_pool.get().await {
             match client
                 .execute(
-                    "UPDATE cdrs SET pdd_ms = LEAST(COALESCE(pdd_ms, $2), $2)
+                    "UPDATE cdrs SET pdd_ms = LEAST(pdd_ms, $2), mos = LEAST(mos, $3),
+                                     rtp_loss_pct = GREATEST(rtp_loss_pct, $4)
                      WHERE call_uuid = $1 AND start_time > now() - INTERVAL '1 day'",
-                    &[&a_uuid, &pdd],
+                    &[&a_uuid, &metrics.pdd_ms, &metrics.mos, &metrics.loss_pct],
                 )
                 .await
             {
                 Ok(n) if n > 0 => return,
                 Ok(_) => {}
-                Err(e) => warn!("Could not store PDD for {}: {}", a_uuid, e),
+                Err(e) => warn!("Could not store b-leg metrics for {}: {}", a_uuid, e),
             }
         }
 
-        let mut pending = self.pending_pdd.lock().unwrap_or_else(|e| e.into_inner());
-        pending.retain(|_, (_, at)| at.elapsed() < PENDING_PDD_TTL);
+        let mut pending = self.pending_bleg.lock().unwrap_or_else(|e| e.into_inner());
+        pending.retain(|_, (_, at)| at.elapsed() < PENDING_BLEG_TTL);
         pending
             .entry(a_uuid)
-            .and_modify(|(ms, _)| *ms = (*ms).min(pdd))
-            .or_insert((pdd, Instant::now()));
+            .and_modify(|(m, _)| *m = m.merge(metrics))
+            .or_insert((metrics, Instant::now()));
     }
 
-    fn take_pending_pdd(&self, a_uuid: &str) -> Option<i32> {
-        self.pending_pdd
+    fn take_pending_bleg(&self, a_uuid: &str) -> LegMetrics {
+        self.pending_bleg
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(a_uuid)
-            .map(|(ms, _)| ms)
+            .map(|(m, _)| m)
+            .unwrap_or_default()
     }
 
     async fn handle_channel_hangup(&self, event: &EslEvent) {
@@ -222,7 +264,7 @@ impl EventHandler {
 
         if call_direction == "leg_b" || call_direction == "outbound" && event.get_header("Other-Leg-Unique-ID").is_some() {
             info!("⏭️  Skipping b-leg hangup: {} (direction: {})", uuid, call_direction);
-            self.record_bleg_pdd(event).await;
+            self.record_bleg_metrics(event).await;
             return;
         }
 
@@ -288,6 +330,10 @@ impl EventHandler {
             }
         }
 
+        // The a-leg's own progress is local Ring-Ready (not a PDD); its media
+        // stats are what FreeSWITCH received from the caller's side
+        let legs = self.take_pending_bleg(&uuid).merge(LegMetrics::of(event, false));
+
         // Generate CDR
         let hangup_event = crate::services::cdr_generator::HangupEvent {
             uuid: uuid.clone(),
@@ -301,7 +347,9 @@ impl EventHandler {
             hangup_cause,
             direction: direction.clone(),  // ✅ Dirección real
             server_id: self.server_id.clone(),
-            pdd_ms: self.take_pending_pdd(&uuid),
+            pdd_ms: legs.pdd_ms,
+            mos: legs.mos,
+            rtp_loss_pct: legs.loss_pct,
         };
 
         if let Err(e) = self.cdr_generator.generate_cdr(hangup_event).await {

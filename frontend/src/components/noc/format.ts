@@ -97,6 +97,8 @@ const CAUSE_SIP: Record<string, string> = {
   BEARERCAPABILITY_NOTAVAIL: '488',
   INTERWORKING: '500',
   NORMAL_UNSPECIFIED: '480',
+  // No explicit case in mod_sofia's hangup_cause_to_sip: falls to its 480 default
+  USER_NOT_REGISTERED: '480',
 }
 
 export const causeSipCode = (cause: string): string | null => CAUSE_SIP[cause] ?? null
@@ -107,6 +109,8 @@ export const CAUSE_NOTES: Record<string, string> = {
     'El siguiente salto respondió 408/504 o no respondió y venció el timer de transacción: falla de red, resta al NER.',
   NO_USER_RESPONSE: 'El destino respondió 480 (no disponible): decisión/estado del usuario, no resta al NER.',
   NO_ANSWER: 'Venció el tiempo de timbrado sin que contestaran: usuario, no resta al NER.',
+  USER_NOT_REGISTERED:
+    'El destino (o el ramal paralelo hacia la app) no tenía registro SIP vigente. FreeSWITCH no tiene un código propio para esta causa y responde 480: usuario, no resta al NER.',
   NORMAL_CLEARING:
     'Ring paralelo (Legado + app): Legado respondió 486 y la app no estaba registrada. FreeSWITCH contesta 486 al carrier pero guarda la causa Q.850 16.',
 }

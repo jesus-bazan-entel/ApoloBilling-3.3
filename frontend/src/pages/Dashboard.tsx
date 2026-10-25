@@ -123,11 +123,14 @@ export default function Dashboard() {
   // The API gives talk time at fetch; advance it locally between polls so it
   // ticks every second without trusting the browser's clock against the server's
   const sinceFetch = callsFetchedAt ? Math.max(0, Math.floor((now.getTime() - callsFetchedAt) / 1000)) : 0
-  const activeCalls = activeCallsData.map(call => ({
-    ...call,
-    id: call.call_uuid,
-    talk: call.status === 'answered' ? (call.duration_seconds ?? 0) + sinceFetch : null,
-  }))
+  // Newest first by start time (the "most recent" the table promises)
+  const activeCalls = activeCallsData
+    .map(call => ({
+      ...call,
+      id: call.call_uuid,
+      talk: call.status === 'answered' ? (call.duration_seconds ?? 0) + sinceFetch : null,
+    }))
+    .sort((a, b) => Date.parse(b.start_time) - Date.parse(a.start_time))
   // One definition everywhere: "in progress" = connected + still dialing/ringing
   const connected = activeCalls.filter(c => c.status === 'answered').length
   const dialing = activeCalls.length - connected
@@ -167,7 +170,7 @@ export default function Dashboard() {
           detail={liveBreakdown}
           status={chUse == null ? null : chUse >= 95 ? { level: 'critical', label: `${chUse.toFixed(0)}% uso` } : chUse >= 80 ? { level: 'warning', label: `${chUse.toFixed(0)}% uso` } : { level: 'good', label: `${chUse.toFixed(0)}% uso` }}
           trend={hourlyTrend(noc.series, 'concurrent')}
-          title={`En vivo: conectadas + marcando/timbrando.${peak ? ` Pico hoy (CDR, 15 min): ${fmtInt((peak.today as NocSlotValues).concurrent)} a las ${peak.label}.` : ''}${maxCh ? '' : ' Define la capacidad en system_settings.noc_max_channels.'}`}
+          title={`En vivo: conectadas + marcando/timbrando. Misma lectura que la tabla «Llamadas en curso»${callsFetchedAt ? ` (act. ${new Date(callsFetchedAt).toLocaleTimeString('es-PE', { hour12: false })})` : ''}; ambas se refrescan cada 5 s.${peak ? ` Pico hoy (CDR, 15 min): ${fmtInt((peak.today as NocSlotValues).concurrent)} a las ${peak.label}.` : ''}${maxCh ? '' : ' Define la capacidad en system_settings.noc_max_channels.'}`}
         />
         <KpiTile
           label="Intentos hoy"
@@ -255,8 +258,17 @@ export default function Dashboard() {
       ),
     },
     {
+      key: 'start_time',
+      header: 'Inicio',
+      render: (call: ActiveCall) => (
+        <span className="font-mono text-sm tabular-nums text-[var(--color-text-secondary)]">
+          {new Date(call.start_time).toLocaleTimeString('es-PE', { hour12: false })}
+        </span>
+      ),
+    },
+    {
       key: 'duration_seconds',
-      header: 'Duración',
+      header: 'Conversación',
       render: (call: LiveCall) => (
         <span className="font-mono text-sm tabular-nums">{call.talk == null ? '—' : fmtMmss(call.talk)}</span>
       ),
@@ -344,7 +356,12 @@ export default function Dashboard() {
           </div>
           <QualityPanel quality={noc.quality} capacity={noc.capacity} />
           <div className={`grid grid-cols-1 xl:grid-cols-2 gap-4 transition-opacity ${isPlaceholderData ? 'opacity-60' : ''}`}>
-            <CausesPanel causes={noc.causes} compare={noc.compare} />
+            <CausesPanel
+              causes={noc.causes}
+              compare={noc.compare}
+              directSince={noc.direct_cdrs_since}
+              compareEnd={new Date(Date.parse(noc.compare_day_start) + (Date.parse(noc.generated_at) - Date.parse(noc.day_start)))}
+            />
             <RangesTable
               ranges={noc.ranges}
               compare={noc.compare}
@@ -363,6 +380,7 @@ export default function Dashboard() {
             <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Llamadas en curso</h2>
             <span className="text-sm text-[var(--color-text-tertiary)] tabular-nums">
               {fmtInt(activeCalls.length)} · {liveBreakdown}
+              {callsFetchedAt > 0 && ` · act. ${new Date(callsFetchedAt).toLocaleTimeString('es-PE', { hour12: false })}`}
             </span>
           </div>
           {activeCalls.length > 0 && <Badge variant="success">En vivo</Badge>}
@@ -374,7 +392,7 @@ export default function Dashboard() {
         />
         {activeCalls.length > LIVE_ROWS && (
           <div className="flex items-center justify-between mt-3 text-xs text-[var(--color-text-tertiary)]">
-            <span>Mostrando las {LIVE_ROWS} más recientes de {fmtInt(activeCalls.length)}</span>
+            <span>Mostrando las {LIVE_ROWS} iniciadas más recientemente de {fmtInt(activeCalls.length)}</span>
             <Link to="/calls" className="inline-flex items-center gap-0.5 font-medium text-[var(--viz-today)] hover:underline">
               Ver todas en Llamadas Activas
               <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
