@@ -281,7 +281,7 @@ export default function Login() {
                   Iniciar sesión
                 </h2>
                 <p className="text-sm mt-1 font-medium" style={{ color: WIN.gray }}>
-                  Sistema de Facturación · Acceso dashboard
+                  Apolo SBC · Acceso al panel
                 </p>
               </div>
 

@@ -1,5 +1,4 @@
-// Account types based on PRD
-export type AccountType = 'prepaid' | 'postpaid' | 'PREPAID' | 'POSTPAID'
+// Customer (account) status: anything but active blocks the customer's SIP REGISTER
 export type AccountStatus = 'active' | 'suspended' | 'closed' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED'
 
 // User types
@@ -32,83 +31,19 @@ export interface AuditLog {
   created_at: string
 }
 
+/** Customer (subscriber) a SIP device belongs to */
 export interface Account {
   id: number
   account_number: string
   account_name?: string
   customer_phone?: string
-  account_type: AccountType
-  balance: number
-  credit_limit: number
-  currency?: string
   status: AccountStatus
-  max_concurrent_calls: number
-  available_balance?: number
-  plan_id?: number              // Plan used to create this account
-  consumed_credit?: number      // Postpago: crédito consumido (backend)
-  utilization_percent?: number  // Postpago: % de utilización (backend)
+  cod_ped?: string
+  departamento?: string
+  provincia?: string
+  distrito?: string
   created_at: string
   updated_at: string
-}
-
-// Plan types
-export interface Plan {
-  id: number
-  plan_name: string
-  plan_code: string
-  account_type: AccountType
-  initial_balance: number
-  credit_limit: number
-  max_concurrent_calls: number
-  description?: string
-  enabled: boolean
-  created_at: string
-  updated_at: string
-  created_by: string
-}
-
-// Account display information (for UI transformation)
-export interface AccountDisplayInfo {
-  currentBalance?: number       // Prepaid: saldo actual
-  consumedCredit?: number       // Postpago: crédito consumido
-  creditLimit?: number          // Postpago: límite total
-  availableCredit?: number      // Postpago: disponible para gastar
-  utilizationPercent?: number   // Postpago: 0-100%
-  displayValue: string          // Texto formateado para mostrar
-  isPrepaid: boolean
-  isLowBalance: boolean         // Alerta de saldo bajo
-  balanceColor: 'success' | 'warning' | 'error'  // Color según nivel
-}
-
-// Zone types
-export interface Zone {
-  id: number
-  zone_name: string
-  zone_code?: string
-  zone_type?: string
-  network_type?: string
-  region_name?: string
-  description?: string
-  enabled?: boolean
-  created_at?: string
-  updated_at?: string
-}
-
-export interface RateCard {
-  id: number
-  rate_name?: string
-  destination_prefix: string
-  destination_name: string
-  rate_per_minute: number
-  billing_increment: number
-  connection_fee: number
-  effective_start: string
-  effective_end: string | null
-  priority: number
-  is_effective?: boolean
-  rate_per_second?: number
-  created_at?: string
-  updated_at?: string
 }
 
 // CDR (Call Detail Record) - based on PRD schema
@@ -124,16 +59,10 @@ export interface CDR {
   end_time?: string
   duration: number
   billsec: number
-  total_cost?: number
-  cost?: number
-  rate?: number
   hangup_cause?: string
   direction: 'inbound' | 'outbound' | 'internal' | string
   destination?: string
   destination_prefix?: string
-  rate_per_minute?: number
-  zone_id?: number
-  zone_name?: string
   account_id?: number
   answered?: boolean
 }
@@ -153,78 +82,18 @@ export interface ActiveCall {
   status: 'dialing' | 'answered' | 'ringing' | 'active'
   account_id?: number
   destination_prefix?: string
-  rate_per_minute?: number
-  reserved_amount?: number
-  zone_name?: string
-  estimated_cost?: number
-  remaining_duration?: number
 }
 
-// Balance Reservation
-export interface Reservation {
-  id: string | number
-  account_id: number
-  call_uuid: string
-  reserved_amount: number
-  consumed_amount: number
-  released_amount: number
-  status: string
-  reservation_type: string
-  destination_prefix?: string
-  rate_per_minute: number
-  reserved_minutes?: number
-  created_at: string
-  updated_at?: string
-  expires_at: string
-}
-
-// Balance Transaction for audit
-export interface BalanceTransaction {
-  id: number
-  account_id: number
-  transaction_type: 'recharge' | 'deduction' | 'adjustment' | 'refund'
-  amount: number
-  balance_before: number
-  balance_after: number
-  description: string
-  created_at: string
-  created_by: string
-}
-
-// Dashboard Statistics - matches Rust backend DashboardStats
-export interface DashboardStats {
-  total_accounts: number
-  active_accounts: number
-  total_balance: number
+// Stats pushed over the WebSocket
+export interface WsStats {
   active_calls: number
-  active_reservations: number
-  cdrs_today: number
-  revenue_today: number
-  minutes_today: number
-  // Legacy fields for compatibility
-  reserved_amount?: number
-  calls_today?: number
-  calls_this_month?: number
-  revenue_this_month?: number
-}
-
-// Authorization Response from Rust engine
-export interface AuthResponse {
-  authorized: boolean
-  reason: string
-  uuid: string
-  account_id?: number
-  account_number?: string
-  reservation_id?: string
-  reserved_amount?: number
-  max_duration_seconds?: number
-  rate_per_minute?: number
+  calls_today: number
 }
 
 // WebSocket Message Types
 export interface WSMessage {
   type: 'active_calls' | 'call_start' | 'call_update' | 'call_end' | 'stats_update' | 'pong' | 'error'
-  data: ActiveCall | ActiveCall[] | DashboardStats | { message: string }
+  data: ActiveCall | ActiveCall[] | WsStats | { message: string }
 }
 
 // API Response wrapper - matches Rust backend ApiResponse
@@ -239,9 +108,6 @@ export interface ApiResponse<T> {
 export interface AccountStats {
   total_accounts: number
   active_accounts: number
-  prepaid_accounts: number
-  postpaid_accounts: number
-  total_balance: number | string
 }
 
 // Provisioning (account + SIP device, individual & bulk)
@@ -250,7 +116,8 @@ export interface ProvisionRequest {
   username: string
   password?: string
   domain?: string
-  plan_id: number
+  /** Simultaneous registrations for the SIP device (1–10, server default 2) */
+  max_registrations?: number
   cod_ped?: string
   departamento?: string
   provincia?: string
@@ -264,7 +131,7 @@ export interface ProvisionResult {
   sip_username: string
   sip_domain: string
   password: string
-  plan_id: number
+  max_registrations: number
 }
 
 export type BulkRowStatus = 'created' | 'skipped' | 'error'
@@ -306,9 +173,6 @@ export interface CDRFilters {
   direction?: string
   destination_prefix?: string
   account_id?: number
-  zone_id?: number
-  min_cost?: number
-  max_cost?: number
   min_duration?: number
   max_duration?: number
   hangup_cause?: string
@@ -793,7 +657,6 @@ export interface NocTotals {
   answered: number
   billsec: number
   network_failures: number
-  revenue: string | number
 }
 
 export interface NocSlotValues {
@@ -823,6 +686,50 @@ export interface NocRange {
   answered: number
   billsec: number
   compare_attempts: number
+  /** Attempts per local hour of today (24 values) */
+  hourly_attempts: number[]
+}
+
+export interface NocThresholds {
+  asr_warn: number
+  asr_crit: number
+  ner_warn: number
+  ner_crit: number
+  min_range_attempts: number
+}
+
+export interface NocCapacity {
+  max_channels: number | null
+  max_cps: number | null
+  peak_cps_last_hour: number
+  avg_cps_last_hour: number
+}
+
+export interface NocQuality {
+  window_start: string | null
+  as_of: string | null
+  /** 15 = live 1-minute samples, 60 = hourly rollup fallback */
+  window_minutes: number
+  mos: number | null
+  jitter_ms: number | null
+  packet_loss_pct: number | null
+  /** Sessions past ringing with media missing in one or both directions */
+  one_sided_sessions: number | null
+  active_sessions: number | null
+  pdd_p50_ms: number | null
+  pdd_p95_ms: number | null
+  pdd_samples: number
+}
+
+export type NocEventKind = 'incident' | 'campaign' | 'maintenance' | 'migration' | 'other'
+
+export interface NocEvent {
+  id: number
+  kind: NocEventKind
+  title: string
+  starts_at: string
+  ends_at: string | null
+  created_by: string | null
 }
 
 export interface NocOverview {
@@ -841,4 +748,8 @@ export interface NocOverview {
   series: NocSlot[]
   causes: NocCause[]
   ranges: NocRange[]
+  thresholds: NocThresholds
+  capacity: NocCapacity
+  quality: NocQuality
+  events: NocEvent[]
 }

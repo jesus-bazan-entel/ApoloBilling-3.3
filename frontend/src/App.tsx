@@ -6,10 +6,6 @@ import Dashboard from './pages/Dashboard'
 import ActiveCalls from './pages/ActiveCalls'
 import CDR from './pages/CDR'
 import Accounts from './pages/Accounts'
-import Balance from './pages/Balance'
-import Zones from './pages/Zones'
-import Rates from './pages/Rates'
-import Plans from './pages/Plans'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
 import UnifiedRouting from './pages/UnifiedRouting'
@@ -100,10 +96,6 @@ function AppRoutes() {
                 <Route path="/calls" element={<ActiveCalls />} />
                 <Route path="/cdr" element={<CDR />} />
                 <Route path="/accounts" element={<Accounts />} />
-                <Route path="/plans" element={<Plans />} />
-                <Route path="/balance" element={<Balance />} />
-                <Route path="/zones" element={<Zones />} />
-                <Route path="/rates" element={<Rates />} />
                 {/* Superadmin only routes */}
                 <Route
                   path="/users"

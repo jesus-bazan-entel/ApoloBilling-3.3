@@ -1,4 +1,4 @@
-//! ApoloBilling Rust Backend Server
+//! Apolo SBC Backend Server
 //!
 //! High-performance backend for handling CDR queries, exports, and statistics.
 //! Designed to handle millions of CDRs with efficient streaming exports.
@@ -7,10 +7,9 @@ use actix_cors::Cors;
 use actix_web::{http::header, middleware, web, App, HttpResponse, HttpServer};
 use apolo_api::handlers::{
     cdr, configure_accounts, configure_active_calls, configure_audit, configure_auth,
-    configure_dashboard, configure_dialplan, configure_freeswitch_directory,
+    configure_dialplan, configure_freeswitch_directory,
     configure_internal_routes, configure_kamailio_dialplan, configure_kamailio_endpoints,
-    configure_management, configure_plans, configure_provisioning, configure_rate_cards,
-    configure_rates, configure_reservations, configure_settings, configure_sip_devices,
+    configure_provisioning, configure_settings, configure_sip_devices,
     configure_stats,
     configure_unified_routing, configure_users, create_cdr, ws_handler,
 };
@@ -27,7 +26,7 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 async fn health_check() -> HttpResponse {
     HttpResponse::Ok().json(serde_json::json!({
         "status": "healthy",
-        "service": "apolo-billing-rust",
+        "service": "apolo-sbc-api",
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
@@ -38,8 +37,6 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/v1")
             // Health check
             .route("/health", web::get().to(health_check))
-            // Dashboard stats
-            .configure(configure_dashboard)
             // Statistics endpoints
             .configure(configure_stats)
             // Auth endpoints
@@ -50,18 +47,8 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
             .configure(configure_audit)
             // Account endpoints
             .configure(configure_accounts)
-            // Rate card endpoints
-            .configure(configure_rate_cards)
-            // Legacy rates endpoints
-            .configure(configure_rates)
-            // Plan endpoints
-            .configure(configure_plans)
             // Active calls endpoints
             .configure(configure_active_calls)
-            // Reservations endpoints
-            .configure(configure_reservations)
-            // Zone/Prefix/Tariff management endpoints
-            .configure(configure_management)
             // Dialplan FreeSWITCH management (superadmin only)
             .configure(configure_dialplan)
             // Kamailio Dialplan management (superadmin only)
@@ -124,7 +111,7 @@ async fn main() -> std::io::Result<()> {
     init_tracing();
 
     info!(
-        "Starting ApoloBilling Rust Backend v{}",
+        "Starting Apolo SBC backend v{}",
         env!("CARGO_PKG_VERSION")
     );
 

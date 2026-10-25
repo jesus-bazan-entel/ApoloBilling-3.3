@@ -1,181 +1,9 @@
 //! Statistics DTOs
 //!
-//! Data transfer objects for dashboard statistics endpoints.
+//! Data transfer objects for the NOC dashboard overview.
 
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-
-/// Hourly call statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HourlyCallStats {
-    /// Hour (0-23)
-    pub hour: i32,
-
-    /// Hour label (e.g., "0:00", "13:00")
-    pub hour_label: String,
-
-    /// Number of calls in this hour
-    pub call_count: i64,
-
-    /// Total duration in seconds
-    pub total_duration: i64,
-
-    /// Total revenue
-    pub total_revenue: Decimal,
-}
-
-/// Daily revenue statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DailyRevenueStats {
-    /// Date
-    pub date: String,
-
-    /// Day of week (0-6, where 0 is Sunday)
-    pub day_of_week: i32,
-
-    /// Day label (e.g., "Dom", "Lun")
-    pub day_label: String,
-
-    /// Number of calls
-    pub call_count: i64,
-
-    /// Total revenue
-    pub revenue: Decimal,
-
-    /// Total minutes
-    pub total_minutes: Decimal,
-}
-
-/// Balance trend point
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BalanceTrendPoint {
-    /// Date
-    pub date: String,
-
-    /// Day number (1-30)
-    pub day: i32,
-
-    /// Total balance across all active accounts
-    pub total_balance: Decimal,
-
-    /// Number of active accounts
-    pub active_accounts: i64,
-
-    /// Average balance per account
-    pub average_balance: Decimal,
-}
-
-/// Calls by hour response
-#[derive(Debug, Clone, Serialize)]
-pub struct CallsByHourResponse {
-    /// Hourly statistics for last 24 hours
-    pub data: Vec<HourlyCallStats>,
-}
-
-/// Revenue by day response
-#[derive(Debug, Clone, Serialize)]
-pub struct RevenueByDayResponse {
-    /// Daily statistics for last 7 days
-    pub data: Vec<DailyRevenueStats>,
-}
-
-/// Balance trend response
-#[derive(Debug, Clone, Serialize)]
-pub struct BalanceTrendResponse {
-    /// Daily balance trend for last 30 days
-    pub data: Vec<BalanceTrendPoint>,
-}
-
-/// Call type statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CallTypeStats {
-    /// Call direction/type (outbound, inbound, internal)
-    pub call_type: String,
-
-    /// Display label
-    pub label: String,
-
-    /// Number of calls
-    pub call_count: i64,
-
-    /// Total duration in seconds
-    pub total_duration: i64,
-
-    /// Total cost
-    pub total_cost: Decimal,
-
-    /// Percentage of total calls
-    pub percentage: f64,
-}
-
-/// Zone statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZoneStats {
-    /// Zone ID
-    pub zone_id: Option<i32>,
-
-    /// Zone name
-    pub zone_name: String,
-
-    /// Number of calls to this zone
-    pub call_count: i64,
-
-    /// Total duration in seconds
-    pub total_duration: i64,
-
-    /// Total cost
-    pub total_cost: Decimal,
-
-    /// Percentage of total calls
-    pub percentage: f64,
-}
-
-/// Calls by type response
-#[derive(Debug, Clone, Serialize)]
-pub struct CallsByTypeResponse {
-    /// Call type statistics
-    pub data: Vec<CallTypeStats>,
-}
-
-/// Calls by zone response
-#[derive(Debug, Clone, Serialize)]
-pub struct CallsByZoneResponse {
-    /// Zone statistics
-    pub data: Vec<ZoneStats>,
-}
-
-/// Traffic statistics by direction
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TrafficStats {
-    /// Call direction (inbound, outbound)
-    pub direction: String,
-
-    /// Display label
-    pub label: String,
-
-    /// Total calls
-    pub total_calls: i64,
-
-    /// Total minutes
-    pub total_minutes: Decimal,
-
-    /// Total revenue
-    pub total_revenue: Decimal,
-
-    /// Average call duration in seconds
-    pub avg_duration: i32,
-}
-
-/// Traffic by direction response
-#[derive(Debug, Clone, Serialize)]
-pub struct TrafficByDirectionResponse {
-    /// Inbound traffic stats
-    pub inbound: TrafficStats,
-
-    /// Outbound traffic stats
-    pub outbound: TrafficStats,
-}
 
 // ============================================================================
 // NOC overview (carrier-class dashboard)
@@ -193,8 +21,6 @@ pub struct NocTotals {
     pub billsec: i64,
     /// Unanswered calls whose hangup cause is a network failure (for NER)
     pub network_failures: i64,
-    /// Billed amount
-    pub revenue: Decimal,
 }
 
 /// Headline counters: today so far, the comparison day up to the same time of
@@ -250,6 +76,78 @@ pub struct NocRange {
     pub billsec: i64,
     /// Attempts on the comparison day up to the same time of day
     pub compare_attempts: i64,
+    /// Attempts per local hour of today (24 values, 0 for future hours)
+    pub hourly_attempts: Vec<i64>,
+}
+
+/// Operator-defined levels from system_settings (noc_* keys)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocThresholds {
+    /// ASR (%) below this is "Vigilar"
+    pub asr_warn: f64,
+    /// ASR (%) below this is "Crítico"
+    pub asr_crit: f64,
+    pub ner_warn: f64,
+    pub ner_crit: f64,
+    /// Ranges with fewer attempts today are hidden by default
+    pub min_range_attempts: i64,
+}
+
+/// Channel and call-rate headroom
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocCapacity {
+    /// Licensed / configured simultaneous channels (noc_max_channels), if set
+    pub max_channels: Option<i64>,
+    /// Configured CPS limit of the SBC / trunk (noc_max_cps), if set
+    pub max_cps: Option<f64>,
+    /// Highest calls started in one second during the last hour (from CDRs)
+    pub peak_cps_last_hour: i64,
+    /// Average calls per second during the last hour (from CDRs)
+    pub avg_cps_last_hour: f64,
+}
+
+/// Media quality as RTPEngine reports it, over a recent window of the
+/// monitoring collector's samples, plus PDD from the CDRs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocQuality {
+    /// Start of the window the media figures cover
+    pub window_start: Option<DateTime<Utc>>,
+    /// Newest sample in the window
+    pub as_of: Option<DateTime<Utc>>,
+    /// 15 (1-minute samples) or 60 (hourly rollup fallback)
+    pub window_minutes: i32,
+    /// RTPEngine's running averages (since it started), latest sample
+    pub mos: Option<f64>,
+    pub jitter_ms: Option<f64>,
+    /// Lost / relayed packets within the window, in percent
+    pub packet_loss_pct: Option<f64>,
+    /// Sessions past ringing with media missing in one or both directions
+    pub one_sided_sessions: Option<f64>,
+    pub active_sessions: Option<f64>,
+    /// Post-Dial Delay of calls started in the last hour (FreeSWITCH path)
+    pub pdd_p50_ms: Option<i32>,
+    pub pdd_p95_ms: Option<i32>,
+    pub pdd_samples: i64,
+}
+
+/// Chart annotation (incident, campaign, maintenance, route migration...)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NocEvent {
+    pub id: i64,
+    pub kind: String,
+    pub title: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: Option<DateTime<Utc>>,
+    pub created_by: Option<String>,
+}
+
+/// POST /api/v1/stats/noc/events
+#[derive(Debug, Clone, Deserialize)]
+pub struct NocEventRequest {
+    pub kind: String,
+    pub title: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: Option<DateTime<Utc>>,
 }
 
 /// GET /api/v1/stats/noc
@@ -268,6 +166,11 @@ pub struct NocOverviewResponse {
     pub series: Vec<NocSlot>,
     pub causes: Vec<NocCause>,
     pub ranges: Vec<NocRange>,
+    pub thresholds: NocThresholds,
+    pub capacity: NocCapacity,
+    pub quality: NocQuality,
+    /// Annotations overlapping today or the comparison day
+    pub events: Vec<NocEvent>,
 }
 
 /// Query string of GET /api/v1/stats/noc

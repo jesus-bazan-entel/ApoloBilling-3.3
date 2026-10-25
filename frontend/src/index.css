@@ -87,6 +87,7 @@
   --viz-status-good: #0ca30c;
   --viz-status-warning: #fab219;
   --viz-status-critical: #d03b3b;
+  --viz-event: #2f6fd6;
 }
 
 .dark {
@@ -96,6 +97,7 @@
   --viz-axis: #4a2e22;
   --viz-delta-good: #2fbf4f;
   --viz-delta-bad: #ef6b6b;
+  --viz-event: #6f9ff0;
 }
 
 /* Dark theme — marrón profundo WIN */

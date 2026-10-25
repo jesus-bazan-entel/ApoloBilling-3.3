@@ -154,11 +154,6 @@ pub struct CdrStats {
     /// Average billable duration in seconds
     pub avg_billsec: Decimal,
 
-    /// Total cost
-    pub total_cost: Decimal,
-
-    /// Average cost per call
-    pub avg_cost: Decimal,
 
     /// Breakdown by period (if grouped)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,8 +172,6 @@ pub struct TimeSeriesPoint {
     /// Number of calls in this period
     pub calls: i64,
 
-    /// Total cost in this period
-    pub cost: Decimal,
 
     /// Total duration in seconds
     pub duration: i64,
@@ -220,11 +213,6 @@ pub struct CdrResponse {
     /// Billable duration in seconds
     pub billsec: i32,
 
-    /// Applied rate per minute
-    pub rate: Option<Decimal>,
-
-    /// Total cost
-    pub cost: Option<Decimal>,
 
     /// Hangup cause
     pub hangup_cause: String,
@@ -251,8 +239,6 @@ impl From<apolo_core::models::Cdr> for CdrResponse {
             end_time: cdr.end_time,
             duration: cdr.duration,
             billsec: cdr.billsec,
-            rate: cdr.rate_per_minute,
-            cost: cdr.cost,
             hangup_cause: cdr.hangup_cause,
             direction: cdr.direction,
             answered,
@@ -285,10 +271,6 @@ pub struct CdrExportRow {
     pub duration: i32,
     /// Billable seconds
     pub billsec: i32,
-    /// Rate per minute
-    pub rate: String,
-    /// Total cost
-    pub cost: String,
     /// Hangup cause
     pub hangup_cause: String,
     /// Direction
@@ -311,10 +293,6 @@ impl From<apolo_core::models::Cdr> for CdrExportRow {
             end_time: cdr.end_time.to_rfc3339(),
             duration: cdr.duration,
             billsec: cdr.billsec,
-            rate: cdr
-                .rate_per_minute
-                .map_or_else(String::new, |r| r.to_string()),
-            cost: cdr.cost.map_or_else(String::new, |c| c.to_string()),
             hangup_cause: cdr.hangup_cause,
             direction: cdr.direction,
         }

@@ -1,60 +1,42 @@
 // src/esl/event_handler.rs
-use crate::services::{AuthorizationService, RealtimeBiller, CdrGenerator};
-use crate::models::AuthRequest;
-use crate::esl::{event::EslEvent, connection::EslConnection};
+//
+// ESL events → active_calls tracking and CDRs. This SBC node does no billing:
+// calls are never authorized, reserved or rated here, only recorded.
+use crate::services::CdrGenerator;
+use crate::esl::event::EslEvent;
 use crate::database::DbPool;
-use crate::cache::RedisClient;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use chrono::Utc;
 use tracing::{info, warn, error};
 
 pub struct EventHandler {
     server_id: String,
-    auth_service: Arc<AuthorizationService>,
-    realtime_biller: Arc<RealtimeBiller>,
     cdr_generator: Arc<CdrGenerator>,
     db_pool: DbPool,
-    redis: RedisClient,
-    connection: Option<Arc<EslConnection>>,  // Optional for server mode
+    /// a-leg uuid → PDD (ms) from its b-legs, held until the a-leg's CDR is
+    /// written. The a-leg's own progress is FreeSWITCH's local Ring-Ready
+    /// (~20 ms after the INVITE), so the real PDD comes from the b-leg: its
+    /// first 180/183 from the destination. Parallel ring keeps the fastest leg.
+    pending_pdd: Arc<Mutex<HashMap<String, (i32, Instant)>>>,
 }
 
+/// b-leg PDDs whose a-leg never hung up here are dropped after this long
+const PENDING_PDD_TTL: Duration = Duration::from_secs(600);
+
 impl EventHandler {
-    pub fn new(
-        server_id: String,
-        auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
-        cdr_generator: Arc<CdrGenerator>,
-        db_pool: DbPool,
-        redis: RedisClient,
-        connection: Arc<EslConnection>,
-    ) -> Self {
+    pub fn new(server_id: String, cdr_generator: Arc<CdrGenerator>, db_pool: DbPool) -> Self {
         Self {
             server_id,
-            auth_service,
-            realtime_biller,
             cdr_generator,
             db_pool,
-            redis,
-            connection: Some(connection),
+            pending_pdd: Arc::default(),
         }
     }
 
-    pub fn new_server_mode(
-        auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
-        cdr_generator: Arc<CdrGenerator>,
-        db_pool: DbPool,
-        redis: RedisClient,
-    ) -> Self {
-        Self {
-            server_id: "esl-server".to_string(),
-            auth_service,
-            realtime_biller,
-            cdr_generator,
-            db_pool,
-            redis,
-            connection: None,  // No connection in server mode
-        }
+    pub fn new_server_mode(cdr_generator: Arc<CdrGenerator>, db_pool: DbPool) -> Self {
+        Self::new("esl-server".to_string(), cdr_generator, db_pool)
     }
 
     pub async fn handle_event(&self, event: &EslEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -131,119 +113,17 @@ impl EventHandler {
 
         info!("📞 CHANNEL_CREATE (a-leg): {} - {} → {} [{}]", uuid, caller, callee, direction);
 
-        // 🔍 Check if destination is a toll-free number (0800, 0801, 1800)
-        // These numbers ARE billed to the account that owns them
-        let is_toll_free = callee.starts_with("0800")
-            || callee.starts_with("0801")
-            || callee.starts_with("1800");
-
-        if is_toll_free {
-            info!("📞 Toll-free number detected: {} - will authorize for billing", callee);
-        }
-
-        // 🔍 Skip authorization for INBOUND calls (from external carriers via Kamailio)
-        // EXCEPT for toll-free numbers which are billed to the receiving account
-        // Inbound calls don't need billing authorization - the caller is external
-        if (direction == "inbound" || context == "to-kamailio") && !is_toll_free {
-            info!("⏭️  Skipping authorization for INBOUND call {} (context: {}, not toll-free)", uuid, context);
-
-            // Insert into active_calls for tracking
-            if let Ok(client) = self.db_pool.get().await {
-                let now = Utc::now();
-                let _ = client.execute(
-                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
-                     ON CONFLICT (call_id) DO NOTHING",
-                    &[&uuid, &caller, &callee, &"inbound".to_string(), &now, &self.server_id]
-                ).await;
-            }
-            return;
-        }
-
-        // 🔍 Check if call was already authorized via HTTP endpoint (dialplan curl)
-        // This prevents duplicate reservations
-        let already_authorized = if let Ok(client) = self.db_pool.get().await {
-            match client.query_opt(
-                "SELECT id FROM balance_reservations WHERE call_uuid = $1 AND status = 'active' LIMIT 1",
-                &[&uuid]
+        // Track the call; nothing is authorized or reserved on this node
+        if let Ok(client) = self.db_pool.get().await {
+            let now = Utc::now();
+            match client.execute(
+                "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
+                 VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
+                 ON CONFLICT (call_id) DO NOTHING",
+                &[&uuid, &caller, &callee, &direction, &now, &self.server_id]
             ).await {
-                Ok(Some(_)) => {
-                    info!("⏭️  Call {} already authorized via HTTP, skipping ESL authorization", uuid);
-                    true
-                }
-                Ok(None) => false,
-                Err(e) => {
-                    error!("Error checking existing reservation: {}", e);
-                    false
-                }
-            }
-        } else {
-            false
-        };
-
-        if already_authorized {
-            // Insert into active_calls if not already there
-            if let Ok(client) = self.db_pool.get().await {
-                let now = Utc::now();
-                let _ = client.execute(
-                    "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                     VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
-                     ON CONFLICT (call_id) DO NOTHING",
-                    &[&uuid, &caller, &callee, &direction, &now, &self.server_id]
-                ).await;
-            }
-            return;
-        }
-
-        // Authorize call (only if not already authorized via HTTP)
-        let auth_req = AuthRequest {
-            caller: caller.clone(),
-            callee: callee.clone(),
-            uuid: Some(uuid.clone()),
-            direction: Some(direction.clone()),
-        };
-
-        match self.auth_service.authorize(&auth_req).await {
-            Ok(response) => {
-                if !response.authorized {
-                    warn!("❌ Call DENIED: {} - Reason: {}", uuid, response.reason);
-                    
-                    // Send uuid_kill command to FreeSWITCH (if connection available)
-                    if let Some(conn) = &self.connection {
-                        let kill_command = format!("api uuid_kill {} CALL_REJECTED\n\n", uuid);
-                        match conn.send_command(&kill_command).await {
-                            Ok(result) => {
-                                info!("🔪 Sent kill command for call {}: {}", uuid, result.trim());
-                            }
-                            Err(e) => {
-                                error!("❌ Failed to send kill command for call {}: {}", uuid, e);
-                            }
-                        }
-                    } else {
-                        info!("📝 Call denied but no connection to send kill command (server mode)");
-                    }
-
-                } else {
-                    info!("✅ Call AUTHORIZED: {} [{}]", uuid, direction);
-
-                    // Insert into active_calls table
-                    if let Ok(client) = self.db_pool.get().await {
-                        let now = Utc::now();
-
-                        match client.execute(
-                            "INSERT INTO active_calls (call_id, calling_number, called_number, direction, start_time, current_duration, current_cost, server)
-                             VALUES ($1, $2, $3, $4, $5, 0, 0, $6)
-                             ON CONFLICT (call_id) DO NOTHING",
-                            &[&uuid, &caller, &callee, &direction, &now, &self.server_id]
-                        ).await {
-                            Ok(_) => info!("📊 Added call {} to active_calls [{}]", uuid, direction),
-                            Err(e) => error!("❌ Failed to add call {} to active_calls: {}", uuid, e),
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                error!("Error authorizing call {}: {}", uuid, e);
+                Ok(_) => info!("📊 Added call {} to active_calls [{}]", uuid, direction),
+                Err(e) => error!("❌ Failed to add call {} to active_calls: {}", uuid, e),
             }
         }
     }
@@ -282,11 +162,50 @@ impl EventHandler {
                 Err(e) => error!("❌ Failed to update answer_time for call {}: {}", uuid, e),
             }
         }
+    }
 
-        // Start realtime billing for prepaid
-        // TODO: Get account type from session
-        // For now, assume prepaid
-        self.realtime_biller.start_billing(uuid, "prepaid".to_string()).await;
+    /// Attach a b-leg's PDD to its a-leg: kept in memory if the a-leg CDR is
+    /// not written yet, otherwise applied to the CDR directly.
+    async fn record_bleg_pdd(&self, event: &EslEvent) {
+        let (Some(pdd), Some(a_uuid)) = (
+            event.pdd_ms(),
+            event
+                .get_header("Other-Leg-Unique-ID")
+                .or_else(|| event.get_header("variable_originating_leg_uuid"))
+                .cloned(),
+        ) else {
+            return;
+        };
+
+        if let Ok(client) = self.db_pool.get().await {
+            match client
+                .execute(
+                    "UPDATE cdrs SET pdd_ms = LEAST(COALESCE(pdd_ms, $2), $2)
+                     WHERE call_uuid = $1 AND start_time > now() - INTERVAL '1 day'",
+                    &[&a_uuid, &pdd],
+                )
+                .await
+            {
+                Ok(n) if n > 0 => return,
+                Ok(_) => {}
+                Err(e) => warn!("Could not store PDD for {}: {}", a_uuid, e),
+            }
+        }
+
+        let mut pending = self.pending_pdd.lock().unwrap_or_else(|e| e.into_inner());
+        pending.retain(|_, (_, at)| at.elapsed() < PENDING_PDD_TTL);
+        pending
+            .entry(a_uuid)
+            .and_modify(|(ms, _)| *ms = (*ms).min(pdd))
+            .or_insert((pdd, Instant::now()));
+    }
+
+    fn take_pending_pdd(&self, a_uuid: &str) -> Option<i32> {
+        self.pending_pdd
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(a_uuid)
+            .map(|(ms, _)| ms)
     }
 
     async fn handle_channel_hangup(&self, event: &EslEvent) {
@@ -303,6 +222,7 @@ impl EventHandler {
 
         if call_direction == "leg_b" || call_direction == "outbound" && event.get_header("Other-Leg-Unique-ID").is_some() {
             info!("⏭️  Skipping b-leg hangup: {} (direction: {})", uuid, call_direction);
+            self.record_bleg_pdd(event).await;
             return;
         }
 
@@ -353,9 +273,6 @@ impl EventHandler {
             uuid, duration, billsec, hangup_cause, direction
         );
 
-        // Stop realtime billing
-        self.realtime_biller.stop_billing(&uuid).await;
-
         // Remove from active_calls table
         if let Ok(client) = self.db_pool.get().await {
             match client.execute(
@@ -368,29 +285,6 @@ impl EventHandler {
                     }
                 }
                 Err(e) => error!("❌ Failed to remove call {} from active_calls: {}", uuid, e),
-            }
-        }
-
-        // ✅ Limpia Redis para llamadas rechazadas (que no tienen reservación)
-        if let Ok(client) = self.db_pool.get().await {
-            match client
-                .query_opt(
-                    "SELECT account_id FROM balance_reservations WHERE call_uuid = $1 LIMIT 1",
-                    &[&uuid]
-                )
-                .await 
-            {
-                Ok(None) => {
-                    // No hay reservación, limpia cualquier estado residual en Redis
-                    info!("🧹 Cleaning up Redis for non-reserved call: {}", uuid);
-                    let _ = self.redis.delete(&format!("call_state:{}", uuid)).await;
-                }
-                Ok(Some(_)) => {
-                    // Hay reservación, el CDR se encargará de limpiarla
-                }
-                Err(e) => {
-                    error!("Error checking reservation for {}: {}", uuid, e);
-                }
             }
         }
 
@@ -407,6 +301,7 @@ impl EventHandler {
             hangup_cause,
             direction: direction.clone(),  // ✅ Dirección real
             server_id: self.server_id.clone(),
+            pdd_ms: self.take_pending_pdd(&uuid),
         };
 
         if let Err(e) = self.cdr_generator.generate_cdr(hangup_event).await {

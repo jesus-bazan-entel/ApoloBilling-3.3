@@ -186,7 +186,7 @@ export default function SipDevicesPage() {
     },
     {
       key: 'account_id',
-      header: 'Cuenta',
+      header: 'Cliente',
       render: (device: SipDevice) => (
         <span className="text-sm">{getAccountName(device.account_id)}</span>
       ),
@@ -523,7 +523,7 @@ function DeviceModal({
 
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Cuenta de Facturación *
+              Cliente *
             </label>
             <select
               required
@@ -578,7 +578,7 @@ function DeviceModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Código de Cuenta (CDR)
+                Accountcode (CDR)
               </label>
               <input
                 type="text"
@@ -590,7 +590,7 @@ function DeviceModal({
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#ff5a0a]"
               />
               <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                Usado para vincular CDRs con facturación
+                Se envía a FreeSWITCH como accountcode (aparece en sus CDR)
               </p>
             </div>
 

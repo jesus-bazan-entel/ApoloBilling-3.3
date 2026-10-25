@@ -468,7 +468,7 @@ EOF
 }
 
 build_billing_engine() {
-    log_step "10/12 - Compilando Billing Engine"
+    log_step "10/12 - Compilando motor SBC (CDRs + llamadas activas)"
 
     export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -497,7 +497,7 @@ EOF
     if [[ -d "${APOLO_HOME}/rust-billing-engine" ]]; then
         run_cmd "cd ${APOLO_HOME}/rust-billing-engine && cargo build --release" \
             "Compilando billing-engine"
-        log_info "Billing Engine compilado exitosamente"
+        log_info "Motor SBC compilado exitosamente"
     else
         log_warn "Directorio rust-billing-engine no encontrado, saltando..."
     fi
@@ -552,7 +552,7 @@ EOF
     if [[ -f "${APOLO_HOME}/rust-billing-engine/target/release/apolo-billing-engine" ]]; then
         cat > /etc/systemd/system/apolo-billing-engine.service << EOF
 [Unit]
-Description=ApoloBilling Engine - Real-time billing
+Description=Apolo SBC Engine - CDRs and active calls (ESL)
 After=network.target postgresql.service redis.service
 Wants=postgresql.service redis.service
 
@@ -957,7 +957,7 @@ cmd_upgrade() {
 
     if [[ -d "${APOLO_HOME}/rust-billing-engine" ]]; then
         run_cmd "cd ${APOLO_HOME}/rust-billing-engine && cargo build --release" \
-            "Recompilando billing engine"
+            "Recompilando motor SBC"
     fi
 
     run_cmd "cd ${APOLO_HOME}/frontend && npm install && npm run build" \
@@ -977,7 +977,7 @@ cmd_upgrade() {
     run_cmd "systemctl restart apolo-backend" "Reiniciando backend"
 
     if systemctl is-active apolo-billing-engine &>/dev/null; then
-        run_cmd "systemctl restart apolo-billing-engine" "Reiniciando billing engine"
+        run_cmd "systemctl restart apolo-billing-engine" "Reiniciando motor SBC"
     fi
 
     run_cmd "systemctl restart nginx" "Reiniciando nginx"

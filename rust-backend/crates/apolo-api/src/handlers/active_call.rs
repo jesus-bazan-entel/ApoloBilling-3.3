@@ -8,12 +8,8 @@ use crate::dto::active_call::{
 use crate::dto::ApiResponse;
 use actix_web::{web, HttpResponse};
 use apolo_auth::AuthenticatedUser;
-use apolo_core::models::{ActiveCall, Cdr, RateCard};
-use apolo_core::traits::{RateRepository, Repository};
 use apolo_core::AppError;
-use apolo_db::PgRateRepository;
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use tracing::{debug, info, instrument, warn};
 use validator::Validate;
@@ -32,9 +28,15 @@ pub async fn list_active_calls(
         r#"
         SELECT
             id, call_id as call_uuid, calling_number, called_number,
-            direction, start_time, current_duration, current_cost,
+            direction, start_time,
             connection_id as server_id, last_updated as updated_at, server,
-            client_id, answer_time, status, rate_per_minute
+            client_id, answer_time, status,
+            -- current_duration is never refreshed by the billing engine, so
+            -- the talk time is derived from answer_time on every read
+            CASE WHEN answer_time IS NOT NULL
+                 THEN GREATEST(EXTRACT(EPOCH FROM now() - answer_time), 0)::INTEGER
+                 ELSE 0
+            END AS talk_seconds
         FROM active_calls
         ORDER BY start_time DESC
         "#,
@@ -68,15 +70,9 @@ pub async fn list_active_calls(
                     .unwrap_or_else(|| "outbound".to_string()),
                 start_time: row.get("start_time"),
                 status,
-                duration_seconds: row.get::<Option<i32>, _>("current_duration").unwrap_or(0),
-                current_cost: row
-                    .get::<Option<Decimal>, _>("current_cost")
-                    .unwrap_or(Decimal::ZERO),
-                zone_name: None,
-                rate_per_minute: row.get::<Option<Decimal>, _>("rate_per_minute"),
+                answer_time,
+                duration_seconds: row.get::<Option<i32>, _>("talk_seconds").unwrap_or(0),
                 account_id: row.get::<Option<i32>, _>("client_id"),
-                max_duration: None,
-                remaining_duration: None,
                 server_id: row
                     .get::<Option<String>, _>("server_id")
                     .or_else(|| row.get("server")),
@@ -104,26 +100,6 @@ pub async fn report_active_call(
 
     debug!(call_id = %req.call_id, "Reporting active call");
 
-    // Get rate for the called number using LPM
-    let rate_repo = PgRateRepository::new(pool.get_ref().clone());
-    let rate = if let Some(called) = &req.called_number {
-        let normalized = RateCard::normalize_destination(called);
-        rate_repo
-            .find_by_destination(&normalized)
-            .await
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-
-    // Calculate cost if we have a rate
-    let cost = if let Some(ref rate) = rate {
-        rate.calculate_cost(req.duration)
-    } else {
-        req.cost
-    };
-
     let now = Utc::now();
     let start_time = req.start_time.unwrap_or(now);
 
@@ -132,14 +108,13 @@ pub async fn report_active_call(
         r#"
         INSERT INTO active_calls (
             call_id, calling_number, called_number, direction,
-            start_time, current_duration, current_cost,
+            start_time, current_duration,
             connection_id, server, last_updated
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (call_id) DO UPDATE SET
             current_duration = $6,
-            current_cost = $7,
-            last_updated = $10
+            last_updated = $9
         RETURNING id
         "#,
     )
@@ -149,7 +124,6 @@ pub async fn report_active_call(
     .bind(&req.direction)
     .bind(start_time)
     .bind(req.duration)
-    .bind(cost)
     .bind(&req.connection_id)
     .bind(&req.server)
     .bind(now)
@@ -168,13 +142,9 @@ pub async fn report_active_call(
         direction: req.direction.clone(),
         start_time,
         status: "dialing".to_string(),
+        answer_time: None,
         duration_seconds: req.duration,
-        current_cost: cost,
-        zone_name: rate.as_ref().map(|r| r.destination_name.clone()),
-        rate_per_minute: rate.as_ref().map(|r| r.rate_per_minute),
         account_id: None,
-        max_duration: None,
-        remaining_duration: None,
         server_id: req.server.clone().or(req.connection_id.clone()),
         updated_at: now,
     };
@@ -227,24 +197,6 @@ pub async fn create_cdr(
 
     debug!(call_uuid = %req.call_uuid, "Creating CDR");
 
-    // Get rate if rate_id provided or lookup by called number
-    let rate_repo = PgRateRepository::new(pool.get_ref().clone());
-    let rate = if let Some(rate_id) = req.rate_id {
-        rate_repo.find_by_id(rate_id).await.ok().flatten()
-    } else {
-        let normalized = RateCard::normalize_destination(&req.called_number);
-        rate_repo
-            .find_by_destination(&normalized)
-            .await
-            .ok()
-            .flatten()
-    };
-
-    // Calculate cost
-    let cost = req
-        .cost
-        .or_else(|| rate.as_ref().map(|r| r.calculate_cost(req.billsec)));
-
     let now = Utc::now();
 
     // Insert CDR
@@ -253,10 +205,9 @@ pub async fn create_cdr(
         INSERT INTO cdrs (
             call_uuid, account_id, caller_number, called_number,
             start_time, answer_time, end_time, duration, billsec,
-            hangup_cause, rate_id, cost, direction, freeswitch_server_id,
-            created_at
+            hangup_cause, direction, freeswitch_server_id, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         "#,
     )
@@ -270,8 +221,6 @@ pub async fn create_cdr(
     .bind(req.duration)
     .bind(req.billsec)
     .bind(&req.hangup_cause)
-    .bind(rate.as_ref().map(|r| r.id).or(req.rate_id))
-    .bind(cost)
     .bind(&req.direction)
     .bind(&req.freeswitch_server_id)
     .bind(now)
@@ -290,14 +239,12 @@ pub async fn create_cdr(
     info!(
         id = id,
         call_uuid = %req.call_uuid,
-        cost = ?cost,
         "CDR created successfully"
     );
 
     let response = CdrCreateResponse {
         id,
         call_uuid: req.call_uuid.clone(),
-        cost,
         message: "CDR created successfully".to_string(),
     };
 
@@ -327,7 +274,6 @@ mod tests {
             direction: "outbound".to_string(),
             start_time: None,
             duration: 60,
-            cost: Decimal::ZERO,
             connection_id: None,
             server: None,
         };

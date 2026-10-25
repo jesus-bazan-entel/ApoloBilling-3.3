@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
-import { fetchAccountsPaginated, fetchAccountStats, createAccount, updateAccount, deleteAccount, fetchPlans, fetchSettings, updateSetting } from '../api/client'
+import { fetchAccountsPaginated, fetchAccountStats, createAccount, updateAccount, deleteAccount } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
-import CreditUtilizationBar from '../components/CreditUtilizationBar'
-import { Users, Plus, Edit, X, DollarSign, Trash2, Power, AlertTriangle, Shield, ShieldOff, Search } from 'lucide-react'
-import type { Account, AccountType, AccountStatus, Plan } from '../types'
-import { getAccountDisplayInfo } from '../lib/accountHelpers'
+import { Users, Plus, Edit, X, Trash2, Power, AlertTriangle, Search, UserX } from 'lucide-react'
+import type { Account, AccountStatus } from '../types'
 
 const PER_PAGE = 25
 
+const STATUS_LABEL: Record<string, string> = { active: 'Activo', suspended: 'Suspendido', closed: 'Cerrado' }
+
+/**
+ * Customers (subscribers). On this SBC an account is who a SIP device belongs
+ * to: any status other than active blocks its devices' REGISTER.
+ */
 export default function AccountsPage() {
   const [showModal, setShowModal] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -38,57 +42,31 @@ export default function AccountsPage() {
   const accounts = accountsPage?.data ?? []
   const totalPages = accountsPage?.total_pages ?? 1
 
-  // Global aggregates for the summary cards (across all accounts, not just this page).
+  // Global aggregates for the summary cards (across all customers, not just this page).
   const { data: stats } = useQuery({
     queryKey: ['accountStats'],
     queryFn: fetchAccountStats,
     refetchInterval: 10000,
   })
 
-  // Cargar planes para mostrar nombre del plan en la tabla
-  const { data: plans = [] } = useQuery({
-    queryKey: ['plans'],
-    queryFn: fetchPlans,
-  })
-
-  const { data: settings = [] } = useQuery({
-    queryKey: ['settings'],
-    queryFn: fetchSettings,
-  })
-
-  const updateSettingMutation = useMutation({
-    mutationFn: ({ key, value }: { key: string; value: string }) =>
-      updateSetting(key, value),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
-  })
-
-  const authRequired = settings.find(s => s.key === 'require_outbound_authorization')?.value !== 'false'
-
-  // Helper para obtener nombre del plan
-  const getPlanName = (planId?: number) => {
-    if (!planId) return '-'
-    const plan = plans.find(p => p.id === planId)
-    return plan?.plan_name || '-'
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['accounts'] })
+    queryClient.invalidateQueries({ queryKey: ['accountStats'] })
   }
 
   const createMutation = useMutation({
     mutationFn: createAccount,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
+      invalidate()
       setShowModal(false)
       setEditingAccount(null)
     },
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<Account> }) =>
-      updateAccount(id, data),
+    mutationFn: ({ id, data }: { id: number; data: Partial<Account> }) => updateAccount(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
+      invalidate()
       setShowModal(false)
       setEditingAccount(null)
     },
@@ -97,8 +75,7 @@ export default function AccountsPage() {
   const deleteMutation = useMutation({
     mutationFn: deleteAccount,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
+      invalidate()
       setDeleteConfirm(null)
     },
   })
@@ -108,53 +85,45 @@ export default function AccountsPage() {
       const newStatus = currentStatus?.toLowerCase() === 'active' ? 'suspended' : 'active'
       return updateAccount(id, { status: newStatus })
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['accounts'] })
-      queryClient.invalidateQueries({ queryKey: ['accountStats'] })
-    },
+    onSuccess: invalidate,
   })
-
-  const handleEdit = (account: Account) => {
-    setEditingAccount(account)
-    setShowModal(true)
-  }
-
-  const handleCreate = () => {
-    setEditingAccount(null)
-    setShowModal(true)
-  }
 
   const columns = [
     {
       key: 'account_number',
-      header: 'Número de Cuenta',
+      header: 'Número',
       render: (acc: Account) => (
-        <span className="font-mono font-medium text-[var(--color-text-primary)]">
-          {acc.account_number}
-        </span>
+        <span className="font-mono font-medium text-[var(--color-text-primary)]">{acc.account_number}</span>
       ),
     },
     {
-      key: 'account_type',
-      header: 'Tipo',
-      render: (acc: Account) => {
-        const isPrepaid = acc.account_type?.toLowerCase() === 'prepaid'
-        return (
-          <Badge variant={isPrepaid ? 'info' : 'warning'}>
-            {isPrepaid ? 'Prepago' : 'Postpago'}
-          </Badge>
-        )
-      },
+      key: 'account_name',
+      header: 'Cliente',
+      render: (acc: Account) => (
+        <div className="min-w-0">
+          <div className="text-sm text-[var(--color-text-primary)] truncate">
+            {acc.account_name || <span className="text-[var(--color-text-muted)] italic">Sin nombre</span>}
+          </div>
+          {acc.customer_phone && (
+            <div className="text-xs font-mono text-[var(--color-text-tertiary)]">{acc.customer_phone}</div>
+          )}
+        </div>
+      ),
     },
     {
-      key: 'plan',
-      header: 'Plan',
+      key: 'cod_ped',
+      header: 'COD_PED',
+      render: (acc: Account) => (
+        <span className="font-mono text-sm text-[var(--color-text-secondary)]">{acc.cod_ped || '—'}</span>
+      ),
+    },
+    {
+      key: 'location',
+      header: 'Ubicación',
       render: (acc: Account) => {
-        const planName = getPlanName(acc.plan_id)
+        const parts = [acc.distrito, acc.provincia, acc.departamento].filter(Boolean)
         return (
-          <span className={`text-sm ${planName === '-' ? 'text-[var(--color-text-muted)] italic' : 'text-[var(--color-text-secondary)]'}`}>
-            {planName}
-          </span>
+          <span className="text-sm text-[var(--color-text-secondary)]">{parts.length ? parts.join(', ') : '—'}</span>
         )
       },
     },
@@ -164,104 +133,50 @@ export default function AccountsPage() {
       render: (acc: Account) => {
         const status = acc.status?.toLowerCase()
         return (
-          <Badge
-            variant={
-              status === 'active'
-                ? 'success'
-                : status === 'suspended'
-                ? 'warning'
-                : 'error'
-            }
-          >
-            {status === 'active'
-              ? 'Activa'
-              : status === 'suspended'
-              ? 'Suspendida'
-              : 'Cerrada'}
+          <Badge variant={status === 'active' ? 'success' : status === 'suspended' ? 'warning' : 'error'}>
+            {STATUS_LABEL[status] ?? acc.status}
           </Badge>
         )
       },
     },
     {
-      key: 'balance',
-      header: 'Estado Financiero',
-      render: (acc: Account) => {
-        const info = getAccountDisplayInfo(acc)
-
-        if (info.isPrepaid) {
-          return (
-            <div className="text-right">
-              <div className={`font-mono font-bold ${
-                info.balanceColor === 'success' ? 'text-green-600' :
-                info.balanceColor === 'warning' ? 'text-yellow-600' :
-                'text-red-600'
-              }`}>
-                S/{info.currentBalance?.toFixed(2)}
-              </div>
-              <div className="text-xs text-[var(--color-text-tertiary)]">Saldo Disponible</div>
-            </div>
-          )
-        } else {
-          return (
-            <div className="text-right space-y-1 min-w-[200px]">
-              <div className="text-sm font-medium text-[var(--color-text-secondary)]">
-                Consumido: S/{info.consumedCredit?.toFixed(2)}
-              </div>
-              <CreditUtilizationBar
-                utilizationPercent={info.utilizationPercent || 0}
-                showLabel={false}
-              />
-              <div className="text-xs text-[var(--color-text-tertiary)]">
-                Disponible: S/{info.availableCredit?.toFixed(2)} de S/{info.creditLimit?.toFixed(2)}
-              </div>
-            </div>
-          )
-        }
-      },
-      className: 'text-right min-w-[200px]',
-    },
-    {
       key: 'created_at',
-      header: 'Creada',
-      render: (acc: Account) =>
-        new Date(acc.created_at).toLocaleDateString('es-PE'),
+      header: 'Alta',
+      render: (acc: Account) => new Date(acc.created_at).toLocaleDateString('es-PE'),
     },
     {
       key: 'actions',
       header: 'Acciones',
       render: (acc: Account) => {
         const isActive = acc.status?.toLowerCase() === 'active'
-        const isToggling = toggleStatusMutation.isPending
         return (
           <div className="flex items-center gap-1">
-            {/* Editar */}
             <button
-              onClick={() => handleEdit(acc)}
+              onClick={() => {
+                setEditingAccount(acc)
+                setShowModal(true)
+              }}
               className="p-1.5 text-[var(--color-text-tertiary)] hover:text-[#ff5a0a] hover:bg-[#fff3ed] rounded transition-colors"
-              title="Editar cuenta"
+              title="Editar cliente"
             >
               <Edit className="w-4 h-4" />
             </button>
-
-            {/* Activar/Desactivar */}
             <button
               onClick={() => toggleStatusMutation.mutate({ id: acc.id, currentStatus: acc.status })}
-              disabled={isToggling}
+              disabled={toggleStatusMutation.isPending}
               className={`p-1.5 rounded transition-colors ${
                 isActive
                   ? 'text-[var(--color-text-tertiary)] hover:text-amber-600 hover:bg-amber-50'
                   : 'text-amber-600 hover:text-green-600 hover:bg-green-50'
               }`}
-              title={isActive ? 'Suspender cuenta' : 'Activar cuenta'}
+              title={isActive ? 'Suspender (bloquea el registro de sus dispositivos SIP)' : 'Activar cliente'}
             >
               <Power className="w-4 h-4" />
             </button>
-
-            {/* Eliminar */}
             <button
               onClick={() => setDeleteConfirm(acc)}
               className="p-1.5 text-[var(--color-text-tertiary)] hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-              title="Eliminar cuenta"
+              title="Eliminar cliente"
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -271,85 +186,38 @@ export default function AccountsPage() {
     },
   ]
 
-  // Summary stats — global totals from the backend (not page-scoped)
   const totalAccounts = stats?.total_accounts ?? 0
   const activeAccounts = stats?.active_accounts ?? 0
-  const prepaidAccounts = stats?.prepaid_accounts ?? 0
-  const postpaidAccounts = stats?.postpaid_accounts ?? 0
-  const totalBalance = Number(stats?.total_balance ?? 0)
+  const blockedAccounts = Math.max(0, totalAccounts - activeAccounts)
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold gradient-text tracking-tight">
-            Gestión de Cuentas
-          </h1>
+          <h1 className="text-3xl font-bold gradient-text tracking-tight">Clientes</h1>
           <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
-            Administra cuentas prepago y postpago
+            Abonados del SBC · un cliente suspendido o cerrado no puede registrar sus dispositivos SIP
           </p>
         </div>
         <button
-          onClick={handleCreate}
+          onClick={() => {
+            setEditingAccount(null)
+            setShowModal(true)
+          }}
           className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors"
         >
           <Plus className="w-5 h-5 mr-2" />
-          Nueva Cuenta
-        </button>
-      </div>
-
-      {/* Authorization Setting Banner */}
-      <div className={`rounded-lg border p-4 flex items-center justify-between ${
-        authRequired
-          ? 'bg-[#fff3ed] border-[#ffbb9a]'
-          : 'bg-amber-50 border-amber-200'
-      }`}>
-        <div className="flex items-center gap-3">
-          {authRequired ? (
-            <Shield className="w-5 h-5 text-[#ff5a0a]" />
-          ) : (
-            <ShieldOff className="w-5 h-5 text-amber-600" />
-          )}
-          <div>
-            <p className={`text-sm font-medium ${authRequired ? 'text-[#301d19]' : 'text-amber-900'}`}>
-              {authRequired
-                ? 'Control de autorización activo'
-                : 'Control de autorización desactivado'}
-            </p>
-            <p className={`text-xs ${authRequired ? 'text-[#d8450b]' : 'text-amber-700'}`}>
-              {authRequired
-                ? 'Las llamadas salientes requieren cuenta activa con saldo para ser autorizadas'
-                : 'Todas las llamadas salientes se permiten sin verificación de cuenta ni saldo'}
-            </p>
-          </div>
-        </div>
-        <button
-          onClick={() => updateSettingMutation.mutate({
-            key: 'require_outbound_authorization',
-            value: authRequired ? 'false' : 'true'
-          })}
-          disabled={updateSettingMutation.isPending}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-            authRequired
-              ? 'bg-amber-100 text-amber-800 hover:bg-amber-200 border border-amber-300'
-              : 'bg-[#ffede3] text-[#d8450b] hover:bg-[#ffdac8] border border-[#ffbb9a]'
-          } disabled:opacity-50`}
-        >
-          {updateSettingMutation.isPending
-            ? 'Cambiando...'
-            : authRequired
-              ? 'Desactivar Control'
-              : 'Activar Control'}
+          Nuevo Cliente
         </button>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Total Cuentas</p>
-              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{totalAccounts}</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Total clientes</p>
+              <p className="text-2xl font-bold text-[var(--color-text-primary)]">{totalAccounts.toLocaleString('es-PE')}</p>
             </div>
             <Users className="w-8 h-8 text-[#ff5a0a]" />
           </div>
@@ -357,8 +225,8 @@ export default function AccountsPage() {
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Activas</p>
-              <p className="text-2xl font-bold text-green-600">{activeAccounts}</p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Activos</p>
+              <p className="text-2xl font-bold text-green-600">{activeAccounts.toLocaleString('es-PE')}</p>
             </div>
             <Users className="w-8 h-8 text-green-500" />
           </div>
@@ -366,23 +234,10 @@ export default function AccountsPage() {
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Prepago / Postpago</p>
-              <p className="text-2xl font-bold text-[var(--color-text-primary)]">
-                {prepaidAccounts} / {postpaidAccounts}
-              </p>
+              <p className="text-sm text-[var(--color-text-tertiary)]">Suspendidos o cerrados</p>
+              <p className="text-2xl font-bold text-amber-600">{blockedAccounts.toLocaleString('es-PE')}</p>
             </div>
-            <DollarSign className="w-8 h-8 text-purple-500" />
-          </div>
-        </div>
-        <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-[var(--color-text-tertiary)]">Saldo Total</p>
-              <p className="text-2xl font-bold text-green-600">
-                S/{totalBalance.toFixed(2)}
-              </p>
-            </div>
-            <DollarSign className="w-8 h-8 text-green-500" />
+            <UserX className="w-8 h-8 text-amber-500" />
           </div>
         </div>
       </div>
@@ -395,26 +250,20 @@ export default function AccountsPage() {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Buscar por número de cuenta o teléfono..."
+            placeholder="Buscar por número, nombre o teléfono..."
             className="w-full pl-10 pr-4 py-2 bg-[var(--color-bg-primary)] border border-[var(--color-border-primary)] text-[var(--color-text-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] transition-colors placeholder:text-[var(--color-text-muted)]"
           />
         </div>
       </div>
 
-      {/* Accounts Table */}
       <DataTable
         columns={columns}
         data={accounts}
         loading={isLoading}
-        emptyMessage="No hay cuentas registradas"
-        pagination={{
-          page,
-          totalPages,
-          onPageChange: setPage,
-        }}
+        emptyMessage="No hay clientes registrados"
+        pagination={{ page, totalPages, onPageChange: setPage }}
       />
 
-      {/* Create/Edit Modal */}
       {showModal && (
         <AccountModal
           account={editingAccount}
@@ -433,7 +282,6 @@ export default function AccountsPage() {
         />
       )}
 
-      {/* Delete Confirmation Modal */}
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-md w-full mx-4">
@@ -443,25 +291,17 @@ export default function AccountsPage() {
                   <AlertTriangle className="w-6 h-6 text-red-600" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[var(--color-text-primary)]">Eliminar Cuenta</h3>
+                  <h3 className="text-lg font-bold text-[var(--color-text-primary)]">Eliminar cliente</h3>
                   <p className="text-sm text-[var(--color-text-tertiary)]">Esta acción no se puede deshacer</p>
                 </div>
               </div>
 
               <div className="bg-[var(--color-bg-secondary)] rounded-lg p-4 mb-4">
                 <p className="text-sm text-[var(--color-text-secondary)]">
-                  ¿Estás seguro de eliminar la cuenta{' '}
-                  <span className="font-mono font-bold text-[var(--color-text-primary)]">
-                    {deleteConfirm.account_number}
-                  </span>
-                  ?
+                  ¿Eliminar el cliente{' '}
+                  <span className="font-mono font-bold text-[var(--color-text-primary)]">{deleteConfirm.account_number}</span>?
+                  Sus dispositivos SIP dejarán de poder registrarse.
                 </p>
-                {Number(deleteConfirm.balance) > 0 && (
-                  <p className="text-sm text-amber-600 mt-2">
-                    <strong>Advertencia:</strong> Esta cuenta tiene un saldo de $
-                    {Number(deleteConfirm.balance).toFixed(2)}
-                  </p>
-                )}
               </div>
 
               <div className="flex justify-end gap-3">
@@ -503,275 +343,82 @@ interface AccountModalProps {
 
 function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalProps) {
   const isEditing = !!account
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [formData, setFormData] = useState({
     account_number: account?.account_number || '',
-    account_type: account?.account_type?.toLowerCase() || 'prepaid',
-    initial_balance: 0, // Solo para crear - backend usa initial_balance
-    credit_limit: Number(account?.credit_limit) || 0,
+    customer_phone: account?.customer_phone || '',
     status: account?.status?.toLowerCase() || 'active',
-    max_concurrent_calls: account?.max_concurrent_calls || 5,
-    plan_id: account?.plan_id,
   })
-
-  // Cargar planes disponibles (solo para crear nuevas cuentas)
-  const { data: plans = [] } = useQuery({
-    queryKey: ['plans'],
-    queryFn: fetchPlans,
-    enabled: !isEditing, // Solo cargar cuando creamos una cuenta
-  })
-
-  // Handler para cambio de plan (auto-poblar campos)
-  const handlePlanChange = (planId: string) => {
-    if (!planId) {
-      setSelectedPlan(null)
-      return
-    }
-
-    const plan = plans.find(p => p.id === Number(planId))
-    if (!plan) return
-
-    setSelectedPlan(plan)
-
-    // Auto-poblar valores del plan
-    const isPrepaid = plan.account_type.toLowerCase() === 'prepaid'
-    setFormData({
-      ...formData,
-      plan_id: plan.id,
-      account_type: plan.account_type.toLowerCase(),
-      initial_balance: isPrepaid ? Number(plan.initial_balance) : 0,
-      credit_limit: !isPrepaid ? Number(plan.credit_limit) : 0,
-      max_concurrent_calls: plan.max_concurrent_calls,
-    })
-  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (isEditing) {
-      // Solo enviar campos que se pueden editar
-      onSubmit({
-        status: formData.status as AccountStatus,
-        credit_limit: formData.credit_limit,
-        max_concurrent_calls: formData.max_concurrent_calls,
-      })
+      // "" (not undefined) so a cleared phone actually persists
+      onSubmit({ customer_phone: formData.customer_phone, status: formData.status as AccountStatus })
     } else {
-      // Crear con initial_balance y plan_id (si aplica)
-      const payload: Partial<Account> & { initial_balance?: number } = {
-        account_number: formData.account_number,
-        account_type: formData.account_type as AccountType,
-        initial_balance: formData.initial_balance,
-        credit_limit: formData.credit_limit,
-        max_concurrent_calls: formData.max_concurrent_calls,
-      }
-
-      // Solo incluir plan_id si hay un plan seleccionado
-      if (formData.plan_id) {
-        payload.plan_id = formData.plan_id
-      }
-
-      onSubmit(payload as Partial<Account>)
+      onSubmit({ account_number: formData.account_number, customer_phone: formData.customer_phone || undefined })
     }
   }
 
+  const field =
+    'w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]'
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="bg-[var(--color-bg-card)] rounded-xl shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between p-6 border-b border-[var(--color-border-primary)]">
           <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
-            {account ? 'Editar Cuenta' : 'Nueva Cuenta'}
+            {isEditing ? 'Editar cliente' : 'Nuevo cliente'}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
-          >
+          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]">
             <X className="w-6 h-6" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {!isEditing && (
-            <div className="bg-[#fff3ed] border border-[#ffbb9a] rounded-lg p-4 mb-4">
-              <label className="block text-sm font-medium text-[#301d19] mb-2">
-                Seleccionar Plan (Opcional)
-              </label>
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Número de cliente *</label>
+            <input
+              type="text"
+              required
+              value={formData.account_number}
+              onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
+              disabled={isEditing}
+              className={field}
+            />
+            {!isEditing && (
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                Para crear cliente y dispositivo SIP juntos usa Aprovisionamiento.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Teléfono de contacto</label>
+            <input
+              type="text"
+              value={formData.customer_phone}
+              onChange={(e) => setFormData({ ...formData, customer_phone: e.target.value })}
+              className={field}
+            />
+          </div>
+
+          {isEditing && (
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Estado</label>
               <select
-                value={selectedPlan?.id || ''}
-                onChange={(e) => handlePlanChange(e.target.value)}
-                className="w-full px-3 py-2 border border-[#ffbb9a] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] bg-[var(--color-bg-card)]"
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as AccountStatus })}
+                className={field}
               >
-                <option value="">Sin plan (configuración manual)</option>
-                {plans
-                  .filter(p => p.enabled)
-                  .map((plan) => (
-                    <option key={plan.id} value={plan.id}>
-                      {plan.plan_name} ({plan.account_type === 'PREPAID' ? 'Prepago' : 'Postpago'})
-                    </option>
-                  ))}
+                <option value="active">Activo</option>
+                <option value="suspended">Suspendido</option>
+                <option value="closed">Cerrado</option>
               </select>
-              {selectedPlan && (
-                <p className="text-xs text-[#d8450b] mt-2">
-                  ℹ️ Los valores del plan se han aplicado automáticamente y están bloqueados
-                </p>
-              )}
+              <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                Suspender o cerrar desregistra sus dispositivos SIP y bloquea nuevos registros.
+              </p>
             </div>
           )}
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Número de Cuenta *
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.account_number}
-                onChange={(e) =>
-                  setFormData({ ...formData, account_number: e.target.value })
-                }
-                disabled={!!account}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Tipo de Cuenta *
-              </label>
-              <select
-                value={formData.account_type?.toLowerCase()}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    account_type: e.target.value as AccountType,
-                  })
-                }
-                disabled={!!account || !!selectedPlan}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
-              >
-                <option value="prepaid">Prepago</option>
-                <option value="postpaid">Postpago</option>
-              </select>
-              {selectedPlan && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
-              )}
-            </div>
-
-            {!isEditing ? (
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                  {formData.account_type === 'prepaid' ? 'Saldo Inicial *' : 'Saldo Inicial'}
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={formData.account_type === 'prepaid' ? '0.01' : '0'}
-                  required={formData.account_type === 'prepaid'}
-                  value={formData.initial_balance}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      initial_balance: parseFloat(e.target.value) || 0,
-                    })
-                  }
-                  disabled={!!selectedPlan}
-                  className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
-                />
-                {selectedPlan && (
-                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
-                )}
-                {formData.account_type === 'prepaid' && !selectedPlan && (
-                  <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                    Prepago requiere saldo inicial {'>'} 0
-                  </p>
-                )}
-              </div>
-            ) : (
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                  Saldo Actual
-                </label>
-                <div className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] font-mono">
-                  S/{Number(account?.balance || 0).toFixed(2)}
-                </div>
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Para modificar el saldo, usa la opción "Recargar" en Gestión de Saldos
-                </p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                {formData.account_type === 'postpaid' ? 'Límite de Crédito *' : 'Límite de Crédito'}
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min={formData.account_type === 'postpaid' ? '0.01' : '0'}
-                required={formData.account_type === 'postpaid'}
-                value={formData.credit_limit}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    credit_limit: parseFloat(e.target.value) || 0,
-                  })
-                }
-                disabled={formData.account_type?.toLowerCase() === 'prepaid' || !!selectedPlan}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
-              />
-              {selectedPlan && formData.account_type === 'postpaid' && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
-              )}
-              {formData.account_type === 'postpaid' && !selectedPlan && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-                  Postpago requiere límite de crédito {'>'} 0
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Estado
-              </label>
-              <select
-                value={formData.status?.toLowerCase()}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    status: e.target.value as AccountStatus,
-                  })
-                }
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
-              >
-                <option value="active">Activa</option>
-                <option value="suspended">Suspendida</option>
-                <option value="closed">Cerrada</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Llamadas Concurrentes Máx. *
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="100"
-                required
-                value={formData.max_concurrent_calls}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    max_concurrent_calls: parseInt(e.target.value) || 5,
-                  })
-                }
-                disabled={!!selectedPlan && !isEditing}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a] disabled:bg-[var(--color-bg-secondary)]"
-              />
-              {selectedPlan && !isEditing && (
-                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">🔒 Bloqueado por plan</p>
-              )}
-            </div>
-          </div>
 
           <div className="flex justify-end space-x-3 pt-4 border-t border-[var(--color-border-primary)]">
             <button
@@ -786,7 +433,7 @@ function AccountModal({ account, onClose, onSubmit, isLoading }: AccountModalPro
               disabled={isLoading}
               className="px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] disabled:opacity-50"
             >
-              {isLoading ? 'Guardando...' : account ? 'Actualizar' : 'Crear'}
+              {isLoading ? 'Guardando...' : isEditing ? 'Actualizar' : 'Crear'}
             </button>
           </div>
         </form>

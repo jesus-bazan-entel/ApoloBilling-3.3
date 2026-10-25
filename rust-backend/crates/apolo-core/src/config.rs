@@ -15,7 +15,6 @@ pub struct AppConfig {
     pub redis: RedisConfig,
     pub auth: AuthConfig,
     pub freeswitch: FreeSwitchConfig,
-    pub billing: BillingConfig,
 }
 
 /// HTTP server configuration
@@ -187,74 +186,6 @@ fn default_fs_port() -> u16 {
     8021
 }
 
-/// Billing-specific configuration
-#[derive(Debug, Deserialize, Clone)]
-pub struct BillingConfig {
-    /// Initial reservation minutes for prepaid calls
-    #[serde(default = "default_initial_reservation")]
-    pub initial_reservation_minutes: i32,
-
-    /// Buffer percentage for reservations
-    #[serde(default = "default_reservation_buffer")]
-    pub reservation_buffer_percent: i32,
-
-    /// Minimum reservation amount
-    #[serde(default = "default_min_reservation")]
-    pub min_reservation_amount: f64,
-
-    /// Maximum reservation amount
-    #[serde(default = "default_max_reservation")]
-    pub max_reservation_amount: f64,
-
-    /// Reservation TTL in seconds
-    #[serde(default = "default_reservation_ttl")]
-    pub reservation_ttl_secs: i64,
-
-    /// Maximum concurrent calls per account
-    #[serde(default = "default_max_concurrent")]
-    pub max_concurrent_calls: i32,
-
-    /// Maximum allowed deficit before suspension
-    #[serde(default = "default_max_deficit")]
-    pub max_deficit_amount: f64,
-
-    /// Default billing increment in seconds
-    #[serde(default = "default_billing_increment")]
-    pub default_billing_increment: i32,
-}
-
-fn default_initial_reservation() -> i32 {
-    5
-}
-
-fn default_reservation_buffer() -> i32 {
-    8
-}
-
-fn default_min_reservation() -> f64 {
-    0.30
-}
-
-fn default_max_reservation() -> f64 {
-    30.00
-}
-
-fn default_reservation_ttl() -> i64 {
-    2700 // 45 minutes
-}
-
-fn default_max_concurrent() -> i32 {
-    5
-}
-
-fn default_max_deficit() -> f64 {
-    10.00
-}
-
-fn default_billing_increment() -> i32 {
-    6
-}
-
 impl AppConfig {
     /// Load configuration from environment and optional config file
     pub fn load() -> Result<Self, ConfigError> {
@@ -274,14 +205,6 @@ impl AppConfig {
             .set_default("auth.hash_cost", 3)?
             .set_default("freeswitch.server_port", 8021)?
             .set_default("freeswitch.reconnect_delay_secs", 5)?
-            .set_default("billing.initial_reservation_minutes", 5)?
-            .set_default("billing.reservation_buffer_percent", 8)?
-            .set_default("billing.min_reservation_amount", 0.30)?
-            .set_default("billing.max_reservation_amount", 30.00)?
-            .set_default("billing.reservation_ttl_secs", 2700)?
-            .set_default("billing.max_concurrent_calls", 5)?
-            .set_default("billing.max_deficit_amount", 10.00)?
-            .set_default("billing.default_billing_increment", 6)?
             // Load config file if exists
             .add_source(File::with_name("config/default").required(false))
             .add_source(File::with_name(&format!("config/{}", run_mode)).required(false))
@@ -311,32 +234,5 @@ impl AppConfig {
     /// Get the server bind address
     pub fn server_addr(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
-    }
-}
-
-impl Default for BillingConfig {
-    fn default() -> Self {
-        Self {
-            initial_reservation_minutes: 5,
-            reservation_buffer_percent: 8,
-            min_reservation_amount: 0.30,
-            max_reservation_amount: 30.00,
-            reservation_ttl_secs: 2700,
-            max_concurrent_calls: 5,
-            max_deficit_amount: 10.00,
-            default_billing_increment: 6,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_billing_config() {
-        let config = BillingConfig::default();
-        assert_eq!(config.initial_reservation_minutes, 5);
-        assert_eq!(config.max_concurrent_calls, 5);
     }
 }

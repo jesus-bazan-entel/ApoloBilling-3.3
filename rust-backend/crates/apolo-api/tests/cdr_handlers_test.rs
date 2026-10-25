@@ -93,14 +93,12 @@ mod tests {
         cdr.id = 54321;
         cdr.caller_number = "1234567890".to_string();
         cdr.called_number = "9876543210".to_string();
-        cdr.cost = Some(Decimal::new(150, 2)); // 1.50
 
         let export_row = CdrExportRow::from(cdr);
 
         assert_eq!(export_row.id, 54321);
         assert_eq!(export_row.caller, "1234567890");
         assert_eq!(export_row.callee, "9876543210");
-        assert_eq!(export_row.cost, "1.50");
     }
 
     #[test]

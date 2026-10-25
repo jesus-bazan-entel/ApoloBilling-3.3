@@ -41,7 +41,7 @@ export const pctChange = (now: number, before: number): number | null =>
 // Hangup causes in operator language. Unknown causes fall back to the raw name.
 const CAUSE_LABELS: Record<string, string> = {
   ORIGINATOR_CANCEL: 'Cancelada por quien llama',
-  NORMAL_CLEARING: 'Liberada sin contestar',
+  NORMAL_CLEARING: 'Ocupado en ring paralelo',
   CALL_REJECTED: 'Rechazada',
   USER_BUSY: 'Ocupado',
   NO_ANSWER: 'Sin respuesta',
@@ -68,4 +68,77 @@ export const CATEGORY_LABELS: Record<string, string> = {
   user: 'Usuario',
   cancel: 'Cancelación',
   other: 'Otra',
+}
+
+// SIP final behind each cause, as FreeSWITCH (sofia sip2cause) and
+// kamailio_cdr_sync map them, so both CDR paths read the same. 408 and 504
+// both become RECOVERY_ON_TIMER_EXPIRE (network); 480 is NO_USER_RESPONSE.
+const CAUSE_SIP: Record<string, string> = {
+  ORIGINATOR_CANCEL: '487',
+  USER_BUSY: '486',
+  NO_ANSWER: '480',
+  NO_USER_RESPONSE: '480',
+  NORMAL_CLEARING: '486',
+  CALL_REJECTED: '603',
+  UNALLOCATED_NUMBER: '404',
+  NO_ROUTE_DESTINATION: '404',
+  NUMBER_CHANGED: '410',
+  SUBSCRIBER_ABSENT: '480',
+  INVALID_NUMBER_FORMAT: '484',
+  RECOVERY_ON_TIMER_EXPIRE: '408/504',
+  NORMAL_TEMPORARY_FAILURE: '503',
+  NETWORK_OUT_OF_ORDER: '502',
+  DESTINATION_OUT_OF_ORDER: '502',
+  SWITCH_CONGESTION: '503',
+  NORMAL_CIRCUIT_CONGESTION: '503',
+  REQUESTED_CHAN_UNAVAIL: '503',
+  SERVICE_UNAVAILABLE: '503',
+  INCOMPATIBLE_DESTINATION: '488',
+  BEARERCAPABILITY_NOTAVAIL: '488',
+  INTERWORKING: '500',
+  NORMAL_UNSPECIFIED: '480',
+}
+
+export const causeSipCode = (cause: string): string | null => CAUSE_SIP[cause] ?? null
+
+/** Why a cause is classed the way it is, for the tooltip */
+export const CAUSE_NOTES: Record<string, string> = {
+  RECOVERY_ON_TIMER_EXPIRE:
+    'El siguiente salto respondió 408/504 o no respondió y venció el timer de transacción: falla de red, resta al NER.',
+  NO_USER_RESPONSE: 'El destino respondió 480 (no disponible): decisión/estado del usuario, no resta al NER.',
+  NO_ANSWER: 'Venció el tiempo de timbrado sin que contestaran: usuario, no resta al NER.',
+  NORMAL_CLEARING:
+    'Ring paralelo (Legado + app): Legado respondió 486 y la app no estaba registrada. FreeSWITCH contesta 486 al carrier pero guarda la causa Q.850 16.',
+}
+
+export type StatusLevel = 'good' | 'warning' | 'critical'
+
+/** Level of a "higher is better" ratio against operator thresholds */
+export const thresholdStatus = (
+  value: number | null,
+  warn: number,
+  crit: number,
+): { level: StatusLevel; label: string } | null =>
+  value == null
+    ? null
+    : value >= warn
+      ? { level: 'good', label: 'OK' }
+      : value >= crit
+        ? { level: 'warning', label: 'Vigilar' }
+        : { level: 'critical', label: 'Crítico' }
+
+/** 917012190 → 9170•••190; short extensions keep only their first digits */
+export const maskNumber = (n: string): string => {
+  if (!n) return n
+  if (n.length >= 7) return `${n.slice(0, 4)}•••${n.slice(-3)}`
+  if (n.length >= 4) return `${n.slice(0, 2)}•••`
+  return n
+}
+
+export const EVENT_KIND_LABELS: Record<string, string> = {
+  incident: 'Incidente',
+  campaign: 'Campaña',
+  maintenance: 'Mantenimiento',
+  migration: 'Migración de ruta',
+  other: 'Otro',
 }

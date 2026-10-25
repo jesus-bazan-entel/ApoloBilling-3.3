@@ -144,6 +144,27 @@ impl EslEvent {
         self.timestamp_to_datetime("variable_answer_epoch")
     }
 
+    /// Time from this channel's creation to its first 180 or 183, in ms.
+    /// On a b-leg that is the destination's Post-Dial Delay; on an a-leg it is
+    /// only FreeSWITCH's own Ring-Ready. None when the channel never rang.
+    pub fn pdd_ms(&self) -> Option<i32> {
+        let micros = |h: &str| {
+            self.headers
+                .get(h)
+                .and_then(|v| v.parse::<i64>().ok())
+                .filter(|v| *v > 0)
+        };
+        let start = micros("variable_start_uepoch")?;
+        let progress = [
+            micros("variable_progress_uepoch"),
+            micros("variable_progress_media_uepoch"),
+        ]
+        .into_iter()
+        .flatten()
+        .min()?;
+        i32::try_from((progress - start) / 1000).ok().filter(|ms| *ms >= 0)
+    }
+
     /// Get call end time
     pub fn end_time(&self) -> Option<DateTime<Utc>> {
         // Try variable_end_epoch first

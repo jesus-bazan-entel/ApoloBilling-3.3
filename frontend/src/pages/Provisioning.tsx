@@ -1,9 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { unzipSync, strFromU8 } from 'fflate'
-import { fetchPlans, provisionAccount, provisionBulk } from '../api/client'
+import { provisionAccount, provisionBulk } from '../api/client'
 import type {
-  Plan,
   ProvisionRequest,
   ProvisionResult,
   BulkProvisionResponse,
@@ -22,6 +21,8 @@ import {
 } from 'lucide-react'
 
 const DEFAULT_DOMAIN = 'app.fonowin.pe'
+// Simultaneous registrations per SIP device (what 3219 of 3225 devices use)
+const DEFAULT_REGISTRATIONS = 2
 
 // Template columns (order matters for the downloadable template).
 const TEMPLATE_COLUMNS = [
@@ -29,7 +30,7 @@ const TEMPLATE_COLUMNS = [
   'Username',
   'Password',
   'Dominio',
-  'Plan',
+  'Registros',
   'COD_PED',
   'Departamento',
   'Provincia',
@@ -45,17 +46,10 @@ function normalize(s: string): string {
     .toLowerCase()
 }
 
-// Resolve a plan name/code from the CSV against the real plans (flexible match).
-// Falls back to the provided default plan id when there is no match.
-function resolvePlanId(raw: string | undefined, plans: Plan[], defaultId: number): { id: number; matched: boolean } {
-  const key = normalize(raw ?? '')
-  if (key) {
-    const exact = plans.find((p) => normalize(p.plan_name) === key || normalize(p.plan_code) === key)
-    if (exact) return { id: exact.id, matched: true }
-    const partial = plans.find((p) => normalize(p.plan_name).includes(key) || key.includes(normalize(p.plan_name)))
-    if (partial) return { id: partial.id, matched: true }
-  }
-  return { id: defaultId, matched: false }
+/** Registrations from the file: 1–10, or the default when empty/invalid */
+function parseRegistrations(raw: string | undefined, fallback: number): number {
+  const n = Number.parseInt((raw ?? '').trim(), 10)
+  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : fallback
 }
 
 // Decode the handful of XML entities that appear in spreadsheet text.
@@ -194,8 +188,8 @@ function parseDelimited(text: string): string[][] {
 }
 
 interface ParsedRow extends ProvisionRequest {
-  _planLabel: string
-  _planMatched: boolean
+  /** The file set the value (otherwise the default applies) */
+  _fromFile: boolean
   _valid: boolean
   _error?: string
 }
@@ -203,8 +197,8 @@ interface ParsedRow extends ProvisionRequest {
 function buildTemplateCsv(): string {
   const header = TEMPLATE_COLUMNS.join(',')
   const samples = [
-    ['VASTHI TUESTA CRUZ', '17349597', 'W1nn3t*2022#Fonowin1#', 'app.fonowin.pe', 'Postpago 1000', '456336', 'Lima', 'Lima', 'Puente Piedra'],
-    ['DIEGO ARMANDO JACHO ZUNIGA', '19032672', 'W1nn3t*2022#Fonowin1#', 'app.fonowin.pe', 'Postpago 1000', '717566', 'Lima', 'Lima', 'Villa Maria del Triunfo'],
+    ['VASTHI TUESTA CRUZ', '17349597', 'W1nn3t*2022#Fonowin1#', 'app.fonowin.pe', '2', '456336', 'Lima', 'Lima', 'Puente Piedra'],
+    ['DIEGO ARMANDO JACHO ZUNIGA', '19032672', 'W1nn3t*2022#Fonowin1#', 'app.fonowin.pe', '2', '717566', 'Lima', 'Lima', 'Villa Maria del Triunfo'],
   ]
   const lines = samples.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(','))
   return [header, ...lines].join('\n')
@@ -213,14 +207,12 @@ function buildTemplateCsv(): string {
 export default function ProvisioningPage() {
   const [tab, setTab] = useState<'individual' | 'bulk'>('individual')
 
-  const { data: plans = [] } = useQuery({ queryKey: ['plans'], queryFn: fetchPlans })
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold gradient-text tracking-tight">Aprovisionamiento</h1>
         <p className="text-sm text-[var(--color-text-secondary)] mt-1 font-medium">
-          Crea la cuenta de facturación y su dispositivo SIP en un solo paso — individual o masivo
+          Crea el cliente y su dispositivo SIP en un solo paso — individual o masivo
         </p>
       </div>
 
@@ -251,9 +243,9 @@ export default function ProvisioningPage() {
       </div>
 
       {tab === 'individual' ? (
-        <IndividualForm plans={plans} />
+        <IndividualForm />
       ) : (
-        <BulkForm plans={plans} />
+        <BulkForm />
       )}
     </div>
   )
@@ -261,13 +253,13 @@ export default function ProvisioningPage() {
 
 // ----------------------------- Individual -----------------------------
 
-function IndividualForm({ plans }: { plans: Plan[] }) {
+function IndividualForm() {
   const [form, setForm] = useState<ProvisionRequest>({
     customer_name: '',
     username: '',
     password: '',
     domain: DEFAULT_DOMAIN,
-    plan_id: 0,
+    max_registrations: DEFAULT_REGISTRATIONS,
     cod_ped: '',
     departamento: '',
     provincia: '',
@@ -317,7 +309,7 @@ function IndividualForm({ plans }: { plans: Plan[] }) {
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
               Username <span className="text-red-500">*</span>
             </label>
-            <input className={inputClass} required value={form.username} onChange={(e) => set('username', e.target.value)} placeholder="Ej. 19007232 (cuenta = usuario SIP)" />
+            <input className={inputClass} required value={form.username} onChange={(e) => set('username', e.target.value)} placeholder="Ej. 19007232 (cliente = usuario SIP)" />
           </div>
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Password</label>
@@ -328,19 +320,16 @@ function IndividualForm({ plans }: { plans: Plan[] }) {
             <input className={inputClass} value={form.domain} onChange={(e) => set('domain', e.target.value)} placeholder={DEFAULT_DOMAIN} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Plan <span className="text-red-500">*</span>
-            </label>
-            <select className={inputClass} required value={form.plan_id || ''} onChange={(e) => set('plan_id', Number(e.target.value))}>
-              <option value="" disabled>
-                Seleccione un plan…
-              </option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.plan_name} ({p.account_type})
-                </option>
-              ))}
-            </select>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Registros simultáneos</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              className={inputClass}
+              value={form.max_registrations ?? DEFAULT_REGISTRATIONS}
+              onChange={(e) => set('max_registrations', Number(e.target.value))}
+            />
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">Dispositivos que pueden registrarse a la vez con este usuario (1–10).</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">COD_PED</label>
@@ -370,7 +359,7 @@ function IndividualForm({ plans }: { plans: Plan[] }) {
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={mutation.isPending || !form.username || !form.plan_id}
+            disabled={mutation.isPending || !form.username}
             className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors disabled:opacity-50"
           >
             {mutation.isPending ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <UserPlus className="w-5 h-5 mr-2" />}
@@ -386,7 +375,7 @@ function IndividualForm({ plans }: { plans: Plan[] }) {
             Cliente aprovisionado correctamente
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-green-900">
-            <span>Cuenta: <strong>{result.account_number}</strong> (id {result.account_id})</span>
+            <span>Cliente: <strong>{result.account_number}</strong> (id {result.account_id})</span>
             <span>Dispositivo SIP: <strong>{result.sip_username}@{result.sip_domain}</strong></span>
             <span className="col-span-2 flex items-center gap-2">
               <KeyRound className="w-4 h-4" /> Password: <code className="bg-white px-2 py-0.5 rounded border border-green-300">{result.password}</code>
@@ -400,8 +389,8 @@ function IndividualForm({ plans }: { plans: Plan[] }) {
 
 // ----------------------------- Bulk -----------------------------
 
-function BulkForm({ plans }: { plans: Plan[] }) {
-  const [defaultPlanId, setDefaultPlanId] = useState<number>(0)
+function BulkForm() {
+  const [defaultRegistrations, setDefaultRegistrations] = useState<number>(DEFAULT_REGISTRATIONS)
   const [rows, setRows] = useState<ParsedRow[]>([])
   const [fileName, setFileName] = useState('')
   const [parseError, setParseError] = useState<string | null>(null)
@@ -415,7 +404,7 @@ function BulkForm({ plans }: { plans: Plan[] }) {
 
   const validRows = useMemo(() => rows.filter((r) => r._valid), [rows])
 
-  const processMatrix = (matrix: string[][], planId: number) => {
+  const processMatrix = (matrix: string[][], registrations: number) => {
     setReport(null)
     try {
       if (matrix.length < 2) {
@@ -430,7 +419,7 @@ function BulkForm({ plans }: { plans: Plan[] }) {
         username: col('Username'),
         password: col('Password'),
         dominio: col('Dominio'),
-        plan: col('Plan'),
+        registros: col('Registros'),
         cod: col('COD_PED'),
         depto: col('Departamento'),
         prov: col('Provincia'),
@@ -444,24 +433,20 @@ function BulkForm({ plans }: { plans: Plan[] }) {
       const get = (r: string[], i: number) => (i >= 0 ? (r[i] ?? '').trim() : '')
       const parsed: ParsedRow[] = matrix.slice(1).map((r) => {
         const username = get(r, idx.username)
-        const planLabelRaw = get(r, idx.plan)
-        const resolved = resolvePlanId(planLabelRaw, plans, planId)
-        const planObj = plans.find((p) => p.id === resolved.id)
-        const valid = username.length > 0 && resolved.id > 0
+        const rawRegistrations = get(r, idx.registros)
         return {
           customer_name: get(r, idx.cliente) || undefined,
           username,
           password: get(r, idx.password) || undefined,
           domain: get(r, idx.dominio) || undefined,
-          plan_id: resolved.id,
+          max_registrations: parseRegistrations(rawRegistrations, registrations),
           cod_ped: get(r, idx.cod) || undefined,
           departamento: get(r, idx.depto) || undefined,
           provincia: get(r, idx.prov) || undefined,
           distrito: get(r, idx.dist) || undefined,
-          _planLabel: planObj ? `${planObj.plan_name}${resolved.matched ? '' : ' (por defecto)'}` : '— sin plan —',
-          _planMatched: resolved.matched,
-          _valid: valid,
-          _error: !username ? 'Username vacío' : resolved.id <= 0 ? 'Sin plan (elige plan por defecto)' : undefined,
+          _fromFile: parseRegistrations(rawRegistrations, 0) > 0,
+          _valid: username.length > 0,
+          _error: !username ? 'Username vacío' : undefined,
         }
       })
       setRows(parsed)
@@ -481,13 +466,13 @@ function BulkForm({ plans }: { plans: Plan[] }) {
     try {
       if (isXlsx) {
         const buf = await file.arrayBuffer()
-        processMatrix(parseXlsx(buf), defaultPlanId)
+        processMatrix(parseXlsx(buf), defaultRegistrations)
       } else if (/\.xls$/i.test(file.name)) {
         setParseError('Los archivos .xls antiguos no son compatibles. Guárdalo como .xlsx o CSV.')
         setRows([])
       } else {
         const text = await file.text()
-        processMatrix(parseDelimited(text), defaultPlanId)
+        processMatrix(parseDelimited(text), defaultRegistrations)
       }
     } catch {
       setParseError('No se pudo leer el archivo. Verifica que sea un .xlsx o CSV válido.')
@@ -495,24 +480,10 @@ function BulkForm({ plans }: { plans: Plan[] }) {
     }
   }
 
-  const onDefaultPlanChange = (id: number) => {
-    setDefaultPlanId(id)
-    // Re-resolve already-parsed rows that fell back to default.
-    if (rows.length > 0) {
-      setRows((prev) =>
-        prev.map((r) => {
-          if (r._planMatched) return r
-          const planObj = plans.find((p) => p.id === id)
-          return {
-            ...r,
-            plan_id: id,
-            _planLabel: planObj ? `${planObj.plan_name} (por defecto)` : '— sin plan —',
-            _valid: r.username.length > 0 && id > 0,
-            _error: !r.username ? 'Username vacío' : id <= 0 ? 'Sin plan (elige plan por defecto)' : undefined,
-          }
-        }),
-      )
-    }
+  const onDefaultRegistrationsChange = (n: number) => {
+    setDefaultRegistrations(n)
+    // Rows whose file left the column empty follow the default
+    setRows((prev) => prev.map((r) => (r._fromFile ? r : { ...r, max_registrations: n })))
   }
 
   const downloadTemplate = () => {
@@ -531,7 +502,7 @@ function BulkForm({ plans }: { plans: Plan[] }) {
       username: r.username,
       password: r.password,
       domain: r.domain,
-      plan_id: r.plan_id,
+      max_registrations: r.max_registrations,
       cod_ped: r.cod_ped,
       departamento: r.departamento,
       provincia: r.provincia,
@@ -549,20 +520,16 @@ function BulkForm({ plans }: { plans: Plan[] }) {
       <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] p-5 space-y-4">
         <div className="flex flex-wrap items-end gap-4">
           <div>
-            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-              Plan por defecto <span className="text-red-500">*</span>
-            </label>
-            <select className={inputClass} value={defaultPlanId || ''} onChange={(e) => onDefaultPlanChange(Number(e.target.value))}>
-              <option value="" disabled>
-                Seleccione…
-              </option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.plan_name} ({p.account_type})
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">Se usa cuando la columna "Plan" del archivo no coincide con un plan existente.</p>
+            <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">Registros simultáneos por defecto</label>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              className={inputClass}
+              value={defaultRegistrations}
+              onChange={(e) => onDefaultRegistrationsChange(Math.min(10, Math.max(1, Number(e.target.value) || DEFAULT_REGISTRATIONS)))}
+            />
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">Se usa cuando la columna "Registros" del archivo está vacía.</p>
           </div>
 
           <button onClick={() => fileRef.current?.click()} className="flex items-center px-4 py-2 bg-[#ff5a0a] text-white rounded-lg hover:bg-[#d8450b] transition-colors">
@@ -591,7 +558,7 @@ function BulkForm({ plans }: { plans: Plan[] }) {
 
         <p className="text-xs text-[var(--color-text-tertiary)]">
           Formatos aceptados: <code>.xlsx</code> (Excel) y <code>.csv</code>. Columnas esperadas:{' '}
-          <code>{TEMPLATE_COLUMNS.join(', ')}</code>. La cuenta y el usuario SIP toman el valor de <code>Username</code>;{' '}
+          <code>{TEMPLATE_COLUMNS.join(', ')}</code>. El cliente y el usuario SIP toman el valor de <code>Username</code>;{' '}
           <code>COD_PED</code> se usa como display name del SIP.
         </p>
 
@@ -627,7 +594,7 @@ function BulkForm({ plans }: { plans: Plan[] }) {
                   <th className="px-3 py-2">Cliente</th>
                   <th className="px-3 py-2">Username</th>
                   <th className="px-3 py-2">Dominio</th>
-                  <th className="px-3 py-2">Plan</th>
+                  <th className="px-3 py-2">Registros</th>
                   <th className="px-3 py-2">COD_PED</th>
                   <th className="px-3 py-2">Ubicación</th>
                   <th className="px-3 py-2">Estado</th>
@@ -640,7 +607,10 @@ function BulkForm({ plans }: { plans: Plan[] }) {
                     <td className="px-3 py-2">{r.customer_name ?? '—'}</td>
                     <td className="px-3 py-2 font-medium">{r.username || '—'}</td>
                     <td className="px-3 py-2">{r.domain ?? DEFAULT_DOMAIN}</td>
-                    <td className="px-3 py-2">{r._planLabel}</td>
+                    <td className="px-3 py-2 tabular-nums">
+                      {r.max_registrations}
+                      {!r._fromFile && <span className="text-[var(--color-text-tertiary)]"> (por defecto)</span>}
+                    </td>
                     <td className="px-3 py-2">{r.cod_ped ?? '—'}</td>
                     <td className="px-3 py-2 text-[var(--color-text-tertiary)]">{[r.distrito, r.provincia, r.departamento].filter(Boolean).join(', ') || '—'}</td>
                     <td className="px-3 py-2">

@@ -216,12 +216,6 @@ pub struct AccountStats {
     pub total_accounts: i64,
     /// Number of accounts with status = 'active'
     pub active_accounts: i64,
-    /// Number of prepaid accounts
-    pub prepaid_accounts: i64,
-    /// Number of postpaid accounts
-    pub postpaid_accounts: i64,
-    /// Sum of balance across all accounts
-    pub total_balance: Decimal,
 }
 
 #[cfg(test)]

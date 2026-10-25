@@ -55,7 +55,7 @@ export default function ActiveCalls() {
           </span>
           {call.account_id && (
             <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
-              (Cuenta: {call.account_id})
+              (Cliente: {call.account_id})
             </span>
           )}
         </div>
@@ -67,9 +67,6 @@ export default function ActiveCalls() {
       render: (call: ActiveCall) => (
         <div>
           <span className="font-mono text-[var(--color-text-secondary)]">{call.callee_number}</span>
-          {call.zone_name && (
-            <span className="text-xs text-[var(--color-text-tertiary)] block">{call.zone_name}</span>
-          )}
         </div>
       ),
     },
@@ -142,24 +139,6 @@ export default function ActiveCalls() {
         </div>
       ),
     },
-    {
-      key: 'estimated_cost',
-      header: 'Costo Est.',
-      render: (call: ActiveCall) => {
-        // Calculate real-time cost based on duration and rate
-        const startTime = new Date(call.start_time).getTime()
-        const now = Date.now()
-        const durationSec = Math.max(0, Math.floor((now - startTime) / 1000))
-        const rate = call.rate_per_minute || 0
-        const cost = (durationSec / 60) * rate
-        return (
-          <span className="font-mono tabular-nums text-[var(--color-text-secondary)]">
-            {rate > 0 ? `S/${cost.toFixed(4)}` : '-'}
-          </span>
-        )
-      },
-      className: 'text-right',
-    },
   ]
 
   return (
@@ -214,18 +193,9 @@ export default function ActiveCalls() {
           </p>
         </div>
         <div className="bg-[var(--color-bg-card)] rounded-lg shadow-sm p-4 border border-[var(--color-border-primary)]">
-          <p className="text-sm text-[var(--color-text-tertiary)]">Costo Total Est.</p>
-          <p className="text-2xl font-bold tabular-nums text-purple-600">
-            S/
-            {calls
-              .reduce((sum, c) => {
-                const startTime = new Date(c.start_time).getTime()
-                // eslint-disable-next-line react-hooks/purity
-                const durationSec = Math.max(0, Math.floor((Date.now() - startTime) / 1000))
-                const rate = c.rate_per_minute || 0
-                return sum + (durationSec / 60) * rate
-              }, 0)
-              .toFixed(2)}
+          <p className="text-sm text-[var(--color-text-tertiary)]">Conectadas</p>
+          <p className="text-2xl font-bold tabular-nums text-[var(--color-text-primary)]">
+            {calls.filter((c) => c.status === 'answered').length}
           </p>
         </div>
       </div>

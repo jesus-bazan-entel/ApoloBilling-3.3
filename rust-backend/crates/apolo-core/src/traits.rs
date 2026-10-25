@@ -4,7 +4,7 @@
 
 use crate::error::AppError;
 use crate::models::{
-    Account, AccountStats, BalanceReservation, Cdr, FreeswitchAllowedIp, RateCard, SipDevice, User,
+    Account, AccountStats, Cdr, FreeswitchAllowedIp, SipDevice, User,
 };
 use async_trait::async_trait;
 use rust_decimal::Decimal;
@@ -59,25 +59,6 @@ pub trait AccountRepository: Repository<Account, i32> {
     async fn stats(&self) -> Result<AccountStats, AppError>;
 }
 
-/// Rate card repository trait with specialized methods
-#[async_trait]
-pub trait RateRepository: Repository<RateCard, i32> {
-    /// Find rate by destination using Longest Prefix Match
-    async fn find_by_destination(&self, destination: &str) -> Result<Option<RateCard>, AppError>;
-
-    /// Search rates by prefix pattern
-    async fn search(
-        &self,
-        prefix: Option<&str>,
-        name: Option<&str>,
-        limit: i64,
-        offset: i64,
-    ) -> Result<(Vec<RateCard>, i64), AppError>;
-
-    /// Bulk insert rate cards
-    async fn bulk_create(&self, rates: &[RateCard]) -> Result<usize, AppError>;
-}
-
 /// CDR repository trait with specialized methods
 #[async_trait]
 pub trait CdrRepository: Repository<Cdr, i64> {
@@ -108,96 +89,6 @@ pub trait UserRepository: Repository<User, i32> {
 
     /// Update last login timestamp
     async fn update_last_login(&self, id: i32) -> Result<(), AppError>;
-}
-
-/// Reservation repository trait with specialized methods
-#[async_trait]
-pub trait ReservationRepository: Repository<BalanceReservation, Uuid> {
-    /// Find reservation by call UUID
-    async fn find_by_call_uuid(
-        &self,
-        call_uuid: &str,
-    ) -> Result<Option<BalanceReservation>, AppError>;
-
-    /// Find active reservations for account
-    async fn find_active_by_account(
-        &self,
-        account_id: i32,
-    ) -> Result<Vec<BalanceReservation>, AppError>;
-
-    /// Count active reservations for account
-    async fn count_active_by_account(&self, account_id: i32) -> Result<i64, AppError>;
-
-    /// Update reservation status
-    async fn update_status(
-        &self,
-        id: Uuid,
-        status: crate::models::ReservationStatus,
-        consumed: Option<Decimal>,
-        released: Option<Decimal>,
-    ) -> Result<BalanceReservation, AppError>;
-
-    /// Expire old reservations
-    async fn expire_old(&self) -> Result<i64, AppError>;
-}
-
-/// Rating service trait
-#[async_trait]
-pub trait RatingService: Send + Sync {
-    /// Find rate for a destination
-    async fn find_rate(&self, destination: &str) -> Result<Option<RateCard>, AppError>;
-
-    /// Calculate cost for a destination and duration
-    async fn calculate_cost(
-        &self,
-        destination: &str,
-        duration_seconds: i32,
-    ) -> Result<Decimal, AppError>;
-}
-
-/// Authorization response for billing
-#[derive(Debug, Clone)]
-pub struct AuthorizationResult {
-    pub authorized: bool,
-    pub reason: String,
-    pub account_id: Option<i32>,
-    pub reservation_id: Option<Uuid>,
-    pub reserved_amount: Option<Decimal>,
-    pub max_duration_seconds: Option<i32>,
-    pub rate_per_minute: Option<Decimal>,
-}
-
-/// Billing service trait
-#[async_trait]
-pub trait BillingService: Send + Sync {
-    /// Authorize a call
-    async fn authorize(
-        &self,
-        caller: &str,
-        callee: &str,
-        call_uuid: Option<&str>,
-    ) -> Result<AuthorizationResult, AppError>;
-
-    /// Consume a reservation (charge for call)
-    async fn consume(
-        &self,
-        call_uuid: &str,
-        actual_cost: Decimal,
-        actual_billsec: i32,
-    ) -> Result<ConsumeResult, AppError>;
-
-    /// Release unused reservation
-    async fn release(&self, call_uuid: &str) -> Result<Decimal, AppError>;
-}
-
-/// Consumption result
-#[derive(Debug, Clone)]
-pub struct ConsumeResult {
-    pub success: bool,
-    pub total_reserved: Decimal,
-    pub consumed: Decimal,
-    pub released: Decimal,
-    pub deficit: Option<Decimal>,
 }
 
 /// SIP Device repository trait with specialized methods

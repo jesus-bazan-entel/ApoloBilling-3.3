@@ -1,6 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import type { NocCause, NocCompare } from '../../types'
-import { CATEGORY_LABELS, causeLabel, compareLabel, fmtInt, pctChange } from './format'
+import { CATEGORY_LABELS, CAUSE_NOTES, causeLabel, causeSipCode, compareLabel, fmtInt, pctChange } from './format'
 
 /** Unanswered calls by hangup cause; network causes are the ones that cost NER. */
 export default function CausesPanel({ causes, compare }: { causes: NocCause[]; compare: NocCompare }) {
@@ -21,12 +21,18 @@ export default function CausesPanel({ causes, compare }: { causes: NocCause[]; c
           {causes.map(c => {
             const ch = pctChange(c.today, c.compare)
             const network = c.category === 'network'
+            const sip = causeSipCode(c.cause)
             return (
-              <li key={c.cause} title={c.cause}>
+              <li key={c.cause} title={`${c.cause}${sip ? ` · SIP ${sip}` : ''}${CAUSE_NOTES[c.cause] ? `\n${CAUSE_NOTES[c.cause]}` : ''}`}>
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="flex items-center gap-1.5 min-w-0 text-[var(--color-text-primary)]">
                     {network && (
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--viz-status-critical)' }} aria-label="Falla de red" />
+                    )}
+                    {sip && (
+                      <span className="font-mono text-[11px] px-1 rounded bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] shrink-0 tabular-nums">
+                        {sip}
+                      </span>
                     )}
                     <span className="truncate">{causeLabel(c.cause)}</span>
                     <span className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">· {CATEGORY_LABELS[c.category]}</span>
@@ -37,7 +43,7 @@ export default function CausesPanel({ causes, compare }: { causes: NocCause[]; c
                       {total ? `${((100 * c.today) / total).toFixed(1)}%` : '—'}
                     </span>
                     <span className="text-xs text-[var(--color-text-tertiary)] w-14 text-right">
-                      {ch == null ? '—' : `${ch > 0 ? '+' : ''}${ch.toFixed(0)}%`}
+                      {ch == null ? (c.today > 0 ? 'nuevo' : '—') : `${ch > 0 ? '+' : ''}${ch.toFixed(0)}%`}
                     </span>
                   </span>
                 </div>
@@ -57,6 +63,7 @@ export default function CausesPanel({ causes, compare }: { causes: NocCause[]; c
       )}
       <p className="text-[11px] text-[var(--color-text-tertiary)] mt-4">
         Las causas marcadas como «Red» son fallas de la red (timeouts, congestión, destino caído) y son las únicas que restan al NER.
+        El número junto a cada causa es la respuesta SIP que la produce (mismo mapeo que FreeSWITCH); pasa el cursor para ver la causa Q.850 y el criterio de clasificación.
       </p>
     </div>
   )

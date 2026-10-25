@@ -38,6 +38,7 @@ DAILY_RETENTION_DAYS = 400
 
 # Trunk health probe (KamailioCollector._probe_trunks)
 KAMAILIO_CFG = "/etc/kamailio/kamailio.cfg"
+ONE_SIDED_MIN_AGE = 90          # s; younger sessions may still be ringing
 TRUNK_PROBE_TIMEOUT = 4          # seconds per SIP OPTIONS
 TRUNK_LOG_RETENTION_DAYS = 7     # routing_sip_status_log: 1 row/trunk/minute
 RAW_JSON_STRIP_HOURS = 48
@@ -464,6 +465,7 @@ class RtpengineCollector:
         self.kamcmd_path = "/usr/sbin/kamcmd"
         self.port_min, self.port_max = self._read_port_range()
         self.query_sample = 8
+        self.direction_check_cap = 500
 
     @staticmethod
     def _read_port_range(path: str = "/etc/rtpengine/rtpengine.conf") -> tuple:
@@ -542,26 +544,37 @@ class RtpengineCollector:
             if isinstance(ng_stats, dict):
                 data["ng_statistics"] = _clean_ng(ng_stats)
 
-            # 4) Sample per-call query (bounded) for ports/codec/packets + one-sided detection
+            # 4) Per-call query. Ports/packets come from a small sample; media
+            #    direction is checked on every session (bounded) because a
+            #    sample of 8 extrapolated to the total swung 0..20 per minute.
+            #    A session counts as one-sided only once it is past ringing
+            #    (older than ONE_SIDED_MIN_AGE): before answer, no media or
+            #    callee-only early media is normal.
             sampled_packets = 0
             sampled_bytes = 0
             sampled_ports: set = set()
             one_sided = 0
+            no_media = 0
             queried = 0
-            for cid in callids[:self.query_sample]:
+            sampled = 0
+            now_ts = time.time()
+            for idx, cid in enumerate(callids[:self.direction_check_cap]):
                 q = self._ng({"command": "query", "call-id": cid}, timeout=3.0)
                 if not isinstance(q, dict):
                     continue
                 queried += 1
+                in_sample = idx < self.query_sample
+                if in_sample:
+                    sampled += 1
                 try:
                     tags = q.get(b'tags', q.get('tags', {}))
                     if not isinstance(tags, dict):
                         continue
-                    call_pkts = 0
-                    call_has_media = False
+                    pkts_per_tag = []
                     for _tag, tinfo in tags.items():
                         if not isinstance(tinfo, dict):
                             continue
+                        tag_pkts = 0
                         medias = tinfo.get(b'medias', tinfo.get('medias', []))
                         if not isinstance(medias, list):
                             continue
@@ -574,29 +587,39 @@ class RtpengineCollector:
                             for st in streams:
                                 if not isinstance(st, dict):
                                     continue
+                                stats = st.get(b'stats', st.get('stats', {}))
+                                pk = stats.get(b'packets', stats.get('packets', 0)) if isinstance(stats, dict) else 0
+                                if isinstance(pk, int):
+                                    tag_pkts += pk
+                                if not in_sample:
+                                    continue
                                 lp = st.get(b'local port', st.get('local port'))
                                 if isinstance(lp, int):
                                     sampled_ports.add(lp)
-                                stats = st.get(b'stats', st.get('stats', {}))
-                                if isinstance(stats, dict):
-                                    pk = stats.get(b'packets', stats.get('packets', 0))
-                                    by = stats.get(b'bytes', stats.get('bytes', 0))
-                                    if isinstance(pk, int):
-                                        call_pkts += pk
-                                        sampled_packets += pk
-                                    if isinstance(by, int):
-                                        sampled_bytes += by
-                                    if isinstance(pk, int) and pk > 0:
-                                        call_has_media = True
-                    if not call_has_media:
+                                by = stats.get(b'bytes', stats.get('bytes', 0)) if isinstance(stats, dict) else 0
+                                if isinstance(pk, int):
+                                    sampled_packets += pk
+                                if isinstance(by, int):
+                                    sampled_bytes += by
+                        pkts_per_tag.append(tag_pkts)
+                    created = q.get(b'created', q.get('created', 0))
+                    age = now_ts - created if isinstance(created, (int, float)) and created > 0 else 0
+                    if age < ONE_SIDED_MIN_AGE or not pkts_per_tag:
+                        continue
+                    with_media = sum(1 for p in pkts_per_tag if p > 0)
+                    if with_media == 0:
+                        no_media += 1
+                    elif with_media < 2:
                         one_sided += 1
                 except Exception:
                     continue
-            data["ng_queried"] = queried
+            data["ng_queried"] = sampled  # sample size behind ports/packets
+            data["ng_direction_checked"] = queried
             data["ng_sampled_packets"] = sampled_packets
             data["ng_sampled_bytes"] = sampled_bytes
             data["ng_sampled_ports"] = sorted(sampled_ports)
-            data["ng_one_sided_sample"] = one_sided
+            data["ng_one_sided"] = one_sided
+            data["ng_no_media"] = no_media
 
             # 5) Kamailio view fallback (hash table entries using rtpengine)
             hash_total = None
@@ -654,13 +677,10 @@ class RtpengineCollector:
         metrics["active_sessions"] = int(active_sessions)
         metrics["active_calls"] = int(active_sessions)
 
-        # One-sided: extrapolated from query sample
-        queried = raw.get("ng_queried") or 0
-        one_sided_sample = raw.get("ng_one_sided_sample") or 0
-        if queried > 0 and active_sessions > 0:
-            metrics["one_sided_sessions"] = int(round(one_sided_sample / queried * active_sessions))
-        else:
-            metrics["one_sided_sessions"] = 0
+        # Sessions past ringing with media missing in one or both directions
+        # (one-way audio, dead media, or a call on hold). Counted on every
+        # session, not extrapolated.
+        metrics["one_sided_sessions"] = int((raw.get("ng_one_sided") or 0) + (raw.get("ng_no_media") or 0))
         metrics["deleted_sessions"] = 0
 
         # Ports: each media stream uses RTP+RTCP (2 ports). media_userspace = streams.
@@ -668,6 +688,7 @@ class RtpengineCollector:
         ports_used = media_streams * 2
         # Cross-check with sampled local ports scaled to all sessions
         sampled_ports = raw.get("ng_sampled_ports") or []
+        queried = raw.get("ng_queried") or 0
         if queried > 0 and active_sessions > 0 and sampled_ports:
             avg_ports = len(sampled_ports) / queried
             ports_used = int(round(avg_ports * active_sessions))

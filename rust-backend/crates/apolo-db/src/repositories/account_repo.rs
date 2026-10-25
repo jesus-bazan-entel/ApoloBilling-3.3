@@ -341,16 +341,19 @@ impl AccountRepository for PgAccountRepository {
             count_query.push_str(&format!(" AND account_type = '{}'", t));
         }
 
-        // Search by account number or phone. Sanitize input (account numbers and
-        // phones are alphanumeric) to keep the inline LIKE injection-safe.
+        // Search by account number, phone or customer name. Only letters
+        // (accents included), digits and spaces survive, which keeps the inline
+        // LIKE injection-safe.
         if let Some(s) = search {
             let sanitized: String = s
                 .chars()
-                .filter(|c| c.is_ascii_alphanumeric())
+                .filter(|c| c.is_alphanumeric() || *c == ' ')
                 .collect();
+            let sanitized = sanitized.trim();
             if !sanitized.is_empty() {
                 let clause = format!(
-                    " AND (account_number ILIKE '%{0}%' OR customer_phone ILIKE '%{0}%')",
+                    " AND (account_number ILIKE '%{0}%' OR customer_phone ILIKE '%{0}%' \
+                     OR account_name ILIKE '%{0}%')",
                     sanitized
                 );
                 query_str.push_str(&clause);
@@ -385,14 +388,11 @@ impl AccountRepository for PgAccountRepository {
     async fn stats(&self) -> AppResult<AccountStats> {
         debug!("Computing global account statistics");
 
-        let row: (i64, i64, i64, i64, Decimal) = sqlx::query_as(
+        let row: (i64, i64) = sqlx::query_as(
             r#"
             SELECT
                 COUNT(*)::BIGINT AS total_accounts,
-                COUNT(*) FILTER (WHERE LOWER(status) = 'active')::BIGINT AS active_accounts,
-                COUNT(*) FILTER (WHERE LOWER(account_type) = 'prepaid')::BIGINT AS prepaid_accounts,
-                COUNT(*) FILTER (WHERE LOWER(account_type) = 'postpaid')::BIGINT AS postpaid_accounts,
-                COALESCE(SUM(balance), 0)::NUMERIC AS total_balance
+                COUNT(*) FILTER (WHERE LOWER(status) = 'active')::BIGINT AS active_accounts
             FROM accounts
             "#,
         )
@@ -406,9 +406,6 @@ impl AccountRepository for PgAccountRepository {
         Ok(AccountStats {
             total_accounts: row.0,
             active_accounts: row.1,
-            prepaid_accounts: row.2,
-            postpaid_accounts: row.3,
-            total_balance: row.4,
         })
     }
 }

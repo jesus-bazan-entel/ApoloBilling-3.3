@@ -1,9 +1,9 @@
-//! ApoloBilling Core Library
+//! Apolo SBC Core Library
 //!
 //! This crate provides the foundational types, traits, and error handling
-//! for the ApoloBilling system. It includes:
+//! for the Apolo SBC system. It includes:
 //!
-//! - Domain models (Account, RateCard, CDR, etc.)
+//! - Domain models (Account, CDR, SIP device, etc.)
 //! - Common traits for repositories and services
 //! - Unified error handling with HTTP response mapping
 //! - Application configuration

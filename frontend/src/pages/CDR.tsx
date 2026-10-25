@@ -96,21 +96,8 @@ export default function CDRPage() {
     },
     {
       key: 'billsec',
-      header: 'Facturable',
+      header: 'Conversación',
       render: (cdr: CDR) => formatDuration(cdr.billsec ?? 0),
-      className: 'text-right',
-    },
-    {
-      key: 'total_cost',
-      header: 'Costo',
-      render: (cdr: CDR) => {
-        const cost = parseFloat(String(cdr.total_cost ?? cdr.cost ?? 0)) || 0
-        return (
-          <span className="font-mono font-medium text-[var(--color-text-primary)]">
-            S/{cost.toFixed(4)}
-          </span>
-        )
-      },
       className: 'text-right',
     },
     {
@@ -276,42 +263,6 @@ export default function CDRPage() {
                 <option value="internal">Interna</option>
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Costo Mínimo
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={filters.min_cost || ''}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    min_cost: e.target.value ? parseFloat(e.target.value) : undefined,
-                  })
-                }
-                placeholder="S/0.00"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Costo Máximo
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                value={filters.max_cost || ''}
-                onChange={(e) =>
-                  setFilters({
-                    ...filters,
-                    max_cost: e.target.value ? parseFloat(e.target.value) : undefined,
-                  })
-                }
-                placeholder="S/100.00"
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
-              />
-            </div>
           </div>
         </div>
       )}
@@ -324,10 +275,6 @@ export default function CDRPage() {
             <span className="text-[var(--color-text-secondary)]">
               Mostrando {(data.data ?? data.items ?? []).length} de {data.total} registros
             </span>
-          </div>
-          <div className="text-sm text-[var(--color-text-tertiary)]">
-            Total facturado: S/
-            {(data.data ?? data.items ?? []).reduce((sum, cdr) => sum + (parseFloat(String(cdr.total_cost ?? cdr.cost ?? 0)) || 0), 0).toFixed(2)}
           </div>
         </div>
       )}

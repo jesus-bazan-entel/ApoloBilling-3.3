@@ -1,6 +1,6 @@
-//! API layer for ApoloBilling
+//! API layer for Apolo SBC
 //!
-//! HTTP API handlers for managing billing operations, CDRs, accounts, and more.
+//! HTTP API handlers for CDRs, customers, SIP devices, routing and monitoring.
 
 #![forbid(unsafe_code)]
 #![warn(
@@ -19,8 +19,7 @@ pub use dto::{ApiResponse, PaginationParams};
 
 // Re-export handler configuration functions and CDR handlers
 pub use handlers::{
-    configure_accounts, configure_active_calls, configure_auth, configure_management,
-    configure_rate_cards, configure_rates, create_cdr,
+    configure_accounts, configure_active_calls, configure_auth, create_cdr,
     // CDR handlers (configured manually in main.rs)
     cdr,
 };

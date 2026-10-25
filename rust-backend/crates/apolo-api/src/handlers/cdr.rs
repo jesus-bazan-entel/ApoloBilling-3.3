@@ -202,7 +202,7 @@ pub async fn export_cdrs(
 
 /// Get CDR statistics
 ///
-/// Calculates aggregated statistics including call counts, ASR, costs, and durations.
+/// Calculates aggregated statistics including call counts, ASR and durations.
 /// Optionally groups results by time periods.
 ///
 /// # Errors
@@ -262,8 +262,8 @@ pub async fn get_cdr_stats(
     };
 
     info!(
-        "Calculated stats: total_calls={}, asr={}%, total_cost={}",
-        result.total_calls, result.asr, result.total_cost
+        "Calculated stats: total_calls={}, asr={}%",
+        result.total_calls, result.asr
     );
 
     Ok(Json(ApiResponse::success(result)))
@@ -321,7 +321,7 @@ async fn create_csv_stream(
             if offset == 0 {
                 if let Err(e) = writeln!(
                     &mut csv_data,
-                    "id,call_uuid,account_id,caller,callee,destination,start_time,answer_time,end_time,duration,billsec,rate,cost,hangup_cause,direction"
+                    "id,call_uuid,account_id,caller,callee,destination,start_time,answer_time,end_time,duration,billsec,hangup_cause,direction"
                 ) {
                     error!("Error writing CSV header: {}", e);
                     return None;
@@ -333,7 +333,7 @@ async fn create_csv_stream(
                 let row = CdrExportRow::from(cdr);
                 if let Err(e) = writeln!(
                     &mut csv_data,
-                    "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                    "{},{},{},{},{},{},{},{},{},{},{},{},{}",
                     row.id,
                     row.call_uuid,
                     row.account_id,
@@ -345,8 +345,6 @@ async fn create_csv_stream(
                     row.end_time,
                     row.duration,
                     row.billsec,
-                    row.rate,
-                    row.cost,
                     row.hangup_cause,
                     row.direction
                 ) {
@@ -528,8 +526,6 @@ fn calculate_stats(cdrs: &[Cdr]) -> CdrStats {
             total_billsec: 0,
             avg_duration: Decimal::ZERO,
             avg_billsec: Decimal::ZERO,
-            total_cost: Decimal::ZERO,
-            avg_cost: Decimal::ZERO,
             time_series: None,
         };
     }
@@ -546,11 +542,8 @@ fn calculate_stats(cdrs: &[Cdr]) -> CdrStats {
     let total_duration: i64 = cdrs.iter().map(|cdr| i64::from(cdr.duration)).sum();
     let total_billsec: i64 = cdrs.iter().map(|cdr| i64::from(cdr.billsec)).sum();
 
-    let total_cost: Decimal = cdrs.iter().filter_map(|cdr| cdr.cost).sum();
-
     let avg_duration = Decimal::from(total_duration) / Decimal::from(total_calls);
     let avg_billsec = Decimal::from(total_billsec) / Decimal::from(total_calls);
-    let avg_cost = total_cost / Decimal::from(total_calls);
 
     CdrStats {
         total_calls,
@@ -561,8 +554,6 @@ fn calculate_stats(cdrs: &[Cdr]) -> CdrStats {
         total_billsec,
         avg_duration,
         avg_billsec,
-        total_cost,
-        avg_cost,
         time_series: None,
     }
 }
@@ -590,13 +581,11 @@ fn calculate_time_series(cdrs: &[Cdr], group_by: StatsGroupBy) -> Vec<TimeSeries
         .map(|(period, (timestamp, cdrs))| {
             let calls = cdrs.len() as i64;
             let duration: i64 = cdrs.iter().map(|cdr| i64::from(cdr.duration)).sum();
-            let cost: Decimal = cdrs.iter().filter_map(|cdr| cdr.cost).sum();
 
             TimeSeriesPoint {
                 period,
                 timestamp,
                 calls,
-                cost,
                 duration,
             }
         })
@@ -719,13 +708,11 @@ mod tests {
         cdr1.duration = 60;
         cdr1.billsec = 55;
         cdr1.answer_time = Some(Utc::now());
-        cdr1.cost = Some(Decimal::new(100, 2)); // 1.00
 
         let mut cdr2 = Cdr::default();
         cdr2.duration = 30;
         cdr2.billsec = 0;
         cdr2.answer_time = None;
-        cdr2.cost = Some(Decimal::ZERO);
 
         let cdrs = vec![cdr1, cdr2];
         let stats = calculate_stats(&cdrs);

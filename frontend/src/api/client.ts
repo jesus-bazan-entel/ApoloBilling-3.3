@@ -2,18 +2,14 @@ import axios from 'axios'
 import type {
   NocCompare,
   NocOverview,
+  NocEvent,
   Account,
   AccountStats,
   ProvisionRequest,
   ProvisionResult,
   BulkProvisionResponse,
-  Plan,
-  Zone,
-  RateCard,
   CDR,
   ActiveCall,
-  Reservation,
-  DashboardStats,
   PaginatedResponse,
   CDRFilters,
   DialplanRoute,
@@ -52,12 +48,6 @@ api.interceptors.response.use(
 // Health check
 export const checkHealth = async (): Promise<{ status: string; version: string }> => {
   const { data } = await api.get('/health')
-  return data
-}
-
-// Dashboard Stats
-export const fetchStats = async (): Promise<DashboardStats> => {
-  const { data } = await api.get('/stats')
   return data
 }
 
@@ -132,103 +122,6 @@ export const deleteAccount = async (id: number): Promise<void> => {
   await api.delete(`/accounts/${id}`)
 }
 
-export const topupAccount = async (
-  id: number,
-  amount: number,
-  reason?: string
-): Promise<{ previous_balance: number; amount: number; new_balance: number }> => {
-  const { data } = await api.post(`/accounts/${id}/topup`, { amount, reason })
-  return data.data || data
-}
-
-// ============== PLANS ==============
-
-export const fetchPlans = async (): Promise<Plan[]> => {
-  const { data } = await api.get('/plans')
-  return data.data || data
-}
-
-export const fetchActivePlans = async (): Promise<Plan[]> => {
-  const { data } = await api.get('/plans/active')
-  return data.data || data
-}
-
-export const fetchPlan = async (id: number): Promise<Plan> => {
-  const { data } = await api.get(`/plans/${id}`)
-  return data.data || data
-}
-
-export const createPlan = async (plan: Partial<Plan>): Promise<Plan> => {
-  const { data } = await api.post('/plans', plan)
-  return data.data || data
-}
-
-export const updatePlan = async (id: number, plan: Partial<Plan>): Promise<Plan> => {
-  const { data} = await api.put(`/plans/${id}`, plan)
-  return data.data || data
-}
-
-export const deletePlan = async (id: number): Promise<void> => {
-  await api.delete(`/plans/${id}`)
-}
-
-// ============== ZONES (Management) ==============
-
-export const fetchZones = async (): Promise<Zone[]> => {
-  const { data } = await api.get('/zonas')
-  return data.data || data
-}
-
-export const createZone = async (zone: Partial<Zone>): Promise<Zone> => {
-  const { data } = await api.post('/zonas', zone)
-  return data.data || data
-}
-
-export const updateZone = async (id: number, zone: Partial<Zone>): Promise<Zone> => {
-  const { data } = await api.put(`/zonas/${id}`, zone)
-  return data.data || data
-}
-
-export const deleteZone = async (id: number): Promise<void> => {
-  await api.delete(`/zonas/${id}`)
-}
-
-// ============== RATE CARDS ==============
-
-export const fetchRateCards = async (): Promise<RateCard[]> => {
-  const { data } = await api.get('/rate-cards')
-  return data.data || data
-}
-
-export const fetchRateCard = async (id: number): Promise<RateCard> => {
-  const { data } = await api.get(`/rate-cards/${id}`)
-  return data.data || data
-}
-
-export const createRateCard = async (rate: Partial<RateCard>): Promise<RateCard> => {
-  const { data } = await api.post('/rate-cards', rate)
-  return data.data || data
-}
-
-export const updateRateCard = async (id: number, rate: Partial<RateCard>): Promise<RateCard> => {
-  const { data } = await api.put(`/rate-cards/${id}`, rate)
-  return data.data || data
-}
-
-export const deleteRateCard = async (id: number): Promise<void> => {
-  await api.delete(`/rate-cards/${id}`)
-}
-
-// Rate lookup (LPM - Longest Prefix Match)
-export const lookupRate = async (destination: string): Promise<RateCard | null> => {
-  try {
-    const { data } = await api.get(`/rate-cards/search/${destination}`)
-    return data.data || data
-  } catch {
-    return null
-  }
-}
-
 // ============== CDRs (Call Detail Records) ==============
 
 export const fetchCDRs = async (
@@ -299,8 +192,8 @@ export const exportCDRs = async (filters?: CDRFilters, format: 'csv' | 'json' = 
   return new Blob([adjustCdrCsv(await data.text(), filters)], { type: 'text/csv;charset=utf-8' })
 }
 
-// The export endpoint returns times in UTC and ignores the direction and
-// cost filters; apply both here so the file matches the CDR screen.
+// The export endpoint returns times in UTC and ignores the direction filter;
+// apply both here so the file matches the CDR screen.
 const CSV_TIME_COLUMNS = ['start_time', 'answer_time', 'end_time']
 const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000 // Peru: UTC-5 all year
 
@@ -318,17 +211,11 @@ export const adjustCdrCsv = (csv: string, filters?: CDRFilters): string => {
   const col = (name: string) => header.indexOf(name)
   const timeCols = CSV_TIME_COLUMNS.map(col).filter((i) => i >= 0)
   const dirCol = col('direction')
-  const costCol = col('cost')
   const direction = filters?.direction?.toLowerCase()
-  const minCost = filters?.min_cost
-  const maxCost = filters?.max_cost
 
   const rows = lines.slice(1).flatMap((line) => {
     const cells = line.split(',')
     if (direction && dirCol >= 0 && cells[dirCol]?.toLowerCase() !== direction) return []
-    const cost = costCol >= 0 && cells[costCol] ? parseFloat(cells[costCol]) : 0
-    if (minCost !== undefined && cost < minCost) return []
-    if (maxCost !== undefined && cost > maxCost) return []
     timeCols.forEach((i) => {
       cells[i] = toLimaTime(cells[i])
     })
@@ -340,7 +227,6 @@ export const adjustCdrCsv = (csv: string, filters?: CDRFilters): string => {
 export const fetchCDRStats = async (filters?: CDRFilters): Promise<{
   total_cdrs: number
   total_minutes: number
-  total_cost: number
   avg_duration: number
 }> => {
   const params = new URLSearchParams()
@@ -370,19 +256,6 @@ export const createActiveCall = async (call: Partial<ActiveCall>): Promise<Activ
 
 export const deleteActiveCall = async (callId: string): Promise<void> => {
   await api.delete(`/active-calls/${callId}`)
-}
-
-// ============== RESERVATIONS ==============
-
-export const fetchReservations = async (status?: string): Promise<Reservation[]> => {
-  const params = status ? `?status=${status}` : ''
-  const { data } = await api.get(`/reservations${params}`)
-  return data
-}
-
-export const fetchActiveReservations = async (): Promise<Reservation[]> => {
-  const { data } = await api.get('/reservations/active')
-  return data
 }
 
 // ============== AUTHENTICATION ==============
@@ -429,173 +302,20 @@ export const changePassword = async (request: ChangePasswordRequest): Promise<{ 
   return data.data || data
 }
 
-// ============== MANAGEMENT (Prefixes, Tariffs) ==============
-
-export interface Prefix {
-  id: number
-  zone_id: number
-  prefix: string
-  description?: string
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface Tariff {
-  id: number
-  zone_id: number
-  rate_name?: string
-  rate_per_minute: number
-  rate_per_call: number
-  billing_increment: number
-  minimum_seconds: number
-  priority: number
-  effective_from: string
-  effective_until?: string
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export const fetchPrefixes = async (zoneId?: number): Promise<Prefix[]> => {
-  const params = zoneId ? `?zone_id=${zoneId}` : ''
-  const { data } = await api.get(`/prefijos${params}`)
-  return data.data || data
-}
-
-export const createPrefix = async (prefix: Partial<Prefix>): Promise<Prefix> => {
-  const { data } = await api.post('/prefijos', prefix)
-  return data.data || data
-}
-
-export const deletePrefix = async (id: number): Promise<void> => {
-  await api.delete(`/prefijos/${id}`)
-}
-
-export const fetchTariffs = async (zoneId?: number): Promise<Tariff[]> => {
-  const params = zoneId ? `?zone_id=${zoneId}` : ''
-  const { data } = await api.get(`/tarifas${params}`)
-  return data.data || data
-}
-
-export const createTariff = async (tariff: Partial<Tariff>): Promise<Tariff> => {
-  const { data } = await api.post('/tarifas', tariff)
-  return data.data || data
-}
-
-export const updateTariff = async (id: number, tariff: Partial<Tariff>): Promise<Tariff> => {
-  const { data } = await api.put(`/tarifas/${id}`, tariff)
-  return data.data || data
-}
-
-export const deleteTariff = async (id: number): Promise<void> => {
-  await api.delete(`/tarifas/${id}`)
-}
-
-// Sync rate cards from zones/prefixes/tariffs
-export const syncRateCards = async (): Promise<{ synced_count: number }> => {
-  const { data } = await api.post('/sync-rate-cards')
-  return data.data || data
-}
-
 // ============== STATISTICS ==============
-
-export interface HourlyCallStats {
-  hour: number
-  hour_label: string
-  call_count: number
-  total_duration: number
-  total_revenue: number
-}
-
-export interface DailyRevenueStats {
-  date: string
-  day_of_week: number
-  day_label: string
-  call_count: number
-  revenue: number
-  total_minutes: number
-}
-
-export interface BalanceTrendPoint {
-  date: string
-  day: number
-  total_balance: number
-  active_accounts: number
-  average_balance: number
-}
 
 export const fetchNocOverview = async (compare: NocCompare): Promise<NocOverview> => {
   const { data } = await api.get('/stats/noc', { params: { compare } })
   return data.data
 }
 
-export const fetchCallsByHour = async (): Promise<HourlyCallStats[]> => {
-  const { data } = await api.get('/stats/calls-by-hour')
-  // Backend returns { data: { data: [...] } }
-  return data.data?.data || data.data || data
+export const createNocEvent = async (event: Omit<NocEvent, 'id' | 'created_by'>): Promise<NocEvent> => {
+  const { data } = await api.post('/stats/noc/events', event)
+  return data.data
 }
 
-export const fetchRevenueByDay = async (): Promise<DailyRevenueStats[]> => {
-  const { data } = await api.get('/stats/revenue-by-day')
-  // Backend returns { data: { data: [...] } }
-  return data.data?.data || data.data || data
-}
-
-export const fetchBalanceTrend = async (): Promise<BalanceTrendPoint[]> => {
-  const { data } = await api.get('/stats/balance-trend')
-  // Backend returns { data: { data: [...] } }
-  return data.data?.data || data.data || data
-}
-
-export interface CallTypeStats {
-  call_type: string
-  label: string
-  call_count: number
-  total_duration: number
-  total_cost: number
-  percentage: number
-}
-
-export interface ZoneStats {
-  zone_id?: number
-  zone_name: string
-  call_count: number
-  total_duration: number
-  total_cost: number
-  percentage: number
-}
-
-export const fetchCallsByType = async (): Promise<CallTypeStats[]> => {
-  const { data } = await api.get('/stats/calls-by-type')
-  // Backend returns { data: { data: [...] } }
-  return data.data?.data || data.data || data
-}
-
-export const fetchCallsByZone = async (): Promise<ZoneStats[]> => {
-  const { data } = await api.get('/stats/calls-by-zone')
-  // Backend returns { data: { data: [...] } }
-  return data.data?.data || data.data || data
-}
-
-export interface TrafficStats {
-  direction: string
-  label: string
-  total_calls: number
-  total_minutes: number
-  total_revenue: number
-  avg_duration: number
-}
-
-export interface TrafficByDirection {
-  inbound: TrafficStats
-  outbound: TrafficStats
-}
-
-export const fetchTrafficByDirection = async (): Promise<TrafficByDirection> => {
-  const { data } = await api.get('/stats/traffic-by-direction')
-  // Backend returns { data: { inbound: {...}, outbound: {...} } }
-  return data.data || data
+export const deleteNocEvent = async (id: number): Promise<void> => {
+  await api.delete(`/stats/noc/events/${id}`)
 }
 
 // ============== USER MANAGEMENT (Superadmin only) ==============

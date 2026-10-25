@@ -1,475 +1,18 @@
 //! Statistics handlers
 //!
-//! HTTP handlers for dashboard statistics endpoints.
+//! NOC dashboard overview (traffic, quality, capacity) and its chart marks.
 
 use crate::dto::{
-    ApiResponse, BalanceTrendPoint, BalanceTrendResponse, CallsByHourResponse,
-    CallsByTypeResponse, CallsByZoneResponse, CallTypeStats, DailyRevenueStats,
-    HourlyCallStats, NocCause, NocKpis, NocOverviewQuery, NocOverviewResponse, NocRange, NocSlot,
-    NocSlotValues, NocTotals, RevenueByDayResponse, TrafficByDirectionResponse, TrafficStats,
-    ZoneStats,
+    ApiResponse, NocCapacity, NocCause, NocEvent, NocEventRequest, NocKpis, NocOverviewQuery,
+    NocOverviewResponse, NocQuality, NocRange, NocSlot, NocSlotValues, NocThresholds, NocTotals,
 };
 use actix_web::{web, HttpResponse};
-use apolo_auth::AuthenticatedUser;
+use apolo_auth::{AdminUser, AuthenticatedUser};
 use apolo_core::AppError;
-use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc, Weekday};
-use rust_decimal::Decimal;
+use chrono::{DateTime, Duration, Utc};
 use sqlx::{PgPool, Row};
-use tracing::{debug, instrument};
-
-/// Get calls by hour (last 24 hours)
-///
-/// GET /api/v1/stats/calls-by-hour
-#[instrument(skip(pool, _user))]
-pub async fn get_calls_by_hour(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching hourly call statistics");
-
-    // "Hoy" = since local midnight. The previous last-24h window folded
-    // yesterday's later hours onto today's hour-of-day buckets.
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            EXTRACT(HOUR FROM start_time AT TIME ZONE $1)::INTEGER as hour,
-            COUNT(*)::BIGINT as call_count,
-            COALESCE(SUM(duration), 0)::BIGINT as total_duration,
-            COALESCE(SUM(cost), 0) as total_revenue
-        FROM cdrs
-        WHERE start_time >= (date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1)
-        GROUP BY 1
-        ORDER BY hour
-        "#,
-    )
-    .bind(dashboard_timezone())
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch hourly stats: {}", e)))?;
-
-    // Create a map of existing data
-    let mut hour_map = std::collections::HashMap::new();
-    for row in rows {
-        let hour: i32 = row.get("hour");
-        hour_map.insert(
-            hour,
-            HourlyCallStats {
-                hour,
-                hour_label: format!("{}:00", hour),
-                call_count: row.get("call_count"),
-                total_duration: row.get("total_duration"),
-                total_revenue: row.get::<Decimal, _>("total_revenue"),
-            },
-        );
-    }
-
-    // Fill in all 24 hours (0-23) with zeros for missing hours
-    let mut data: Vec<HourlyCallStats> = (0..24)
-        .map(|hour| {
-            hour_map.get(&hour).cloned().unwrap_or_else(|| {
-                HourlyCallStats {
-                    hour,
-                    hour_label: format!("{}:00", hour),
-                    call_count: 0,
-                    total_duration: 0,
-                    total_revenue: Decimal::ZERO,
-                }
-            })
-        })
-        .collect();
-
-    // Sort by hour
-    data.sort_by_key(|s| s.hour);
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(CallsByHourResponse { data })))
-}
-
-/// Get revenue by day (last 7 days)
-///
-/// GET /api/v1/stats/revenue-by-day
-#[instrument(skip(pool, _user))]
-pub async fn get_revenue_by_day(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching daily revenue statistics");
-
-    let now = Utc::now();
-    let start_date = (now - Duration::days(7)).date_naive();
-
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            DATE(start_time) as date,
-            COUNT(*)::BIGINT as call_count,
-            COALESCE(SUM(cost), 0) as revenue,
-            COALESCE(SUM(billsec) / 60.0, 0) as total_minutes
-        FROM cdrs
-        WHERE DATE(start_time) >= $1
-        GROUP BY DATE(start_time)
-        ORDER BY date
-        "#,
-    )
-    .bind(start_date)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch daily revenue: {}", e)))?;
-
-    // Spanish day labels
-    let day_labels = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-
-    let mut data: Vec<DailyRevenueStats> = Vec::new();
-    for row in rows {
-        let date: chrono::NaiveDate = row.get("date");
-        let weekday = date.weekday().num_days_from_sunday() as usize;
-
-        data.push(DailyRevenueStats {
-            date: date.format("%Y-%m-%d").to_string(),
-            day_of_week: weekday as i32,
-            day_label: day_labels[weekday].to_string(),
-            call_count: row.get("call_count"),
-            revenue: row.get::<Decimal, _>("revenue"),
-            total_minutes: row.get::<Decimal, _>("total_minutes"),
-        });
-    }
-
-    // Fill in missing days with zero data
-    let mut all_days = Vec::new();
-    for i in 0..7 {
-        let day = (now - Duration::days(6 - i)).date_naive();
-        let weekday = day.weekday().num_days_from_sunday() as usize;
-
-        // Find existing data or create zero entry
-        let existing = data.iter().find(|d| d.date == day.format("%Y-%m-%d").to_string());
-
-        if let Some(existing_data) = existing {
-            all_days.push(existing_data.clone());
-        } else {
-            all_days.push(DailyRevenueStats {
-                date: day.format("%Y-%m-%d").to_string(),
-                day_of_week: weekday as i32,
-                day_label: day_labels[weekday].to_string(),
-                call_count: 0,
-                revenue: Decimal::ZERO,
-                total_minutes: Decimal::ZERO,
-            });
-        }
-    }
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(RevenueByDayResponse { data: all_days })))
-}
-
-/// Get balance trend (last 30 days)
-///
-/// GET /api/v1/stats/balance-trend
-#[instrument(skip(pool, _user))]
-pub async fn get_balance_trend(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching balance trend");
-
-    let now = Utc::now();
-
-    // Get daily snapshots from balance_transactions or calculate from current state
-    // For simplicity, we'll aggregate current balance by date for the last 30 days
-    let start_date = (now - Duration::days(30)).date_naive();
-
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            DATE(created_at) as date,
-            SUM(new_balance)::NUMERIC as total_balance,
-            COUNT(DISTINCT account_id)::BIGINT as account_count
-        FROM (
-            SELECT DISTINCT ON (account_id, DATE(created_at))
-                account_id,
-                new_balance,
-                created_at
-            FROM balance_transactions
-            WHERE DATE(created_at) >= $1
-            ORDER BY account_id, DATE(created_at), created_at DESC
-        ) latest_per_day
-        GROUP BY DATE(created_at)
-        ORDER BY date
-        "#,
-    )
-    .bind(start_date)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch balance trend: {}", e)))?;
-
-    // If no transaction history, get current balance
-    let current_balance_row = sqlx::query(
-        r#"
-        SELECT
-            COALESCE(SUM(balance), 0) as total_balance,
-            COUNT(*)::BIGINT as active_accounts
-        FROM accounts
-        WHERE status = 'active'
-        "#,
-    )
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch current balance: {}", e)))?;
-
-    let current_total: Decimal = current_balance_row.get("total_balance");
-    let current_count: i64 = current_balance_row.get("active_accounts");
-
-    let mut data: Vec<BalanceTrendPoint> = Vec::new();
-
-    // If we have historical data, use it
-    if !rows.is_empty() {
-        for (index, row) in rows.iter().enumerate() {
-            let date: chrono::NaiveDate = row.get("date");
-            let total_balance: Decimal = row.get("total_balance");
-            let account_count: i64 = row.get("account_count");
-
-            let avg_balance = if account_count > 0 {
-                total_balance / Decimal::from(account_count)
-            } else {
-                Decimal::ZERO
-            };
-
-            data.push(BalanceTrendPoint {
-                date: date.format("%Y-%m-%d").to_string(),
-                day: (index + 1) as i32,
-                total_balance,
-                active_accounts: account_count,
-                average_balance: avg_balance,
-            });
-        }
-    } else {
-        // No historical data, create a flat line with current balance
-        for i in 0..30 {
-            let date = (now - Duration::days(29 - i)).date_naive();
-            let avg_balance = if current_count > 0 {
-                current_total / Decimal::from(current_count)
-            } else {
-                Decimal::ZERO
-            };
-
-            data.push(BalanceTrendPoint {
-                date: date.format("%Y-%m-%d").to_string(),
-                day: (i + 1) as i32,
-                total_balance: current_total,
-                active_accounts: current_count,
-                average_balance: avg_balance,
-            });
-        }
-    }
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(BalanceTrendResponse { data })))
-}
-
-/// Get calls by type (last 30 days)
-///
-/// GET /api/v1/stats/calls-by-type
-#[instrument(skip(pool, _user))]
-pub async fn get_calls_by_type(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching calls by type statistics");
-
-    let now = Utc::now();
-    let start_time = now - Duration::days(7);
-
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            COALESCE(direction, 'unknown') as call_type,
-            COUNT(*)::BIGINT as call_count,
-            COALESCE(SUM(duration), 0)::BIGINT as total_duration,
-            COALESCE(SUM(cost), 0) as total_cost
-        FROM cdrs
-        WHERE start_time >= $1
-        GROUP BY direction
-        ORDER BY call_count DESC
-        "#,
-    )
-    .bind(start_time)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch calls by type: {}", e)))?;
-
-    // Calculate total for percentage
-    let total_calls: i64 = rows.iter().map(|r| r.get::<i64, _>("call_count")).sum();
-
-    // Spanish labels for call types
-    let type_labels = |call_type: &str| -> String {
-        match call_type {
-            "outbound" => "Salientes".to_string(),
-            "inbound" => "Entrantes".to_string(),
-            "internal" => "Internas".to_string(),
-            _ => "Desconocido".to_string(),
-        }
-    };
-
-    let mut data: Vec<CallTypeStats> = Vec::new();
-    for row in rows {
-        let call_type: String = row.get("call_type");
-        let call_count: i64 = row.get("call_count");
-        let percentage = if total_calls > 0 {
-            (call_count as f64 / total_calls as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        data.push(CallTypeStats {
-            call_type: call_type.clone(),
-            label: type_labels(&call_type),
-            call_count,
-            total_duration: row.get("total_duration"),
-            total_cost: row.get::<Decimal, _>("total_cost"),
-            percentage,
-        });
-    }
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(CallsByTypeResponse { data })))
-}
-
-/// Get calls by zone (top 10 zones, last 30 days)
-///
-/// GET /api/v1/stats/calls-by-zone
-#[instrument(skip(pool, _user))]
-pub async fn get_calls_by_zone(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching calls by zone statistics");
-
-    let now = Utc::now();
-    let start_time = now - Duration::days(30);
-
-    // Use Longest Prefix Match (LPM) to find destination zones
-    let rows = sqlx::query(
-        r#"
-        SELECT
-            COALESCE(rc.destination_name, 'Sin Zona') as zone_name,
-            COUNT(c.id)::BIGINT as call_count,
-            COALESCE(SUM(c.duration), 0)::BIGINT as total_duration,
-            COALESCE(SUM(c.cost), 0) as total_cost
-        FROM cdrs c
-        LEFT JOIN LATERAL (
-            SELECT destination_name, destination_prefix
-            FROM rate_cards
-            WHERE c.called_number LIKE destination_prefix || '%'
-            ORDER BY LENGTH(destination_prefix) DESC, priority DESC
-            LIMIT 1
-        ) rc ON true
-        WHERE c.start_time >= $1
-        GROUP BY rc.destination_name
-        ORDER BY call_count DESC
-        LIMIT 10
-        "#,
-    )
-    .bind(start_time)
-    .fetch_all(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch calls by zone: {}", e)))?;
-
-    // Calculate total for percentage
-    let total_calls: i64 = rows.iter().map(|r| r.get::<i64, _>("call_count")).sum();
-
-    let mut data: Vec<ZoneStats> = Vec::new();
-    for row in rows {
-        let call_count: i64 = row.get("call_count");
-        let percentage = if total_calls > 0 {
-            (call_count as f64 / total_calls as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        data.push(ZoneStats {
-            zone_id: None,
-            zone_name: row.get("zone_name"),
-            call_count,
-            total_duration: row.get("total_duration"),
-            total_cost: row.get::<Decimal, _>("total_cost"),
-            percentage,
-        });
-    }
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(CallsByZoneResponse { data })))
-}
-
-/// Get traffic statistics by direction (today)
-///
-/// GET /api/v1/stats/traffic-by-direction
-#[instrument(skip(pool, _user))]
-pub async fn get_traffic_by_direction(
-    pool: web::Data<PgPool>,
-    _user: AuthenticatedUser,
-) -> Result<HttpResponse, AppError> {
-    debug!("Fetching traffic statistics by direction");
-
-    let now = Utc::now();
-    let start_of_day = now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc();
-
-    // Get inbound stats
-    let inbound_row = sqlx::query(
-        r#"
-        SELECT
-            COUNT(*)::BIGINT as total_calls,
-            COALESCE(SUM(billsec) / 60.0, 0) as total_minutes,
-            COALESCE(SUM(cost), 0) as total_revenue,
-            COALESCE(AVG(duration), 0)::INTEGER as avg_duration
-        FROM cdrs
-        WHERE start_time >= $1
-          AND direction = 'inbound'
-        "#,
-    )
-    .bind(start_of_day)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch inbound stats: {}", e)))?;
-
-    let inbound = TrafficStats {
-        direction: "inbound".to_string(),
-        label: "Entrantes".to_string(),
-        total_calls: inbound_row.get("total_calls"),
-        total_minutes: inbound_row.get::<Decimal, _>("total_minutes"),
-        total_revenue: inbound_row.get::<Decimal, _>("total_revenue"),
-        avg_duration: inbound_row.get("avg_duration"),
-    };
-
-    // Get outbound stats
-    let outbound_row = sqlx::query(
-        r#"
-        SELECT
-            COUNT(*)::BIGINT as total_calls,
-            COALESCE(SUM(billsec) / 60.0, 0) as total_minutes,
-            COALESCE(SUM(cost), 0) as total_revenue,
-            COALESCE(AVG(duration), 0)::INTEGER as avg_duration
-        FROM cdrs
-        WHERE start_time >= $1
-          AND direction = 'outbound'
-        "#,
-    )
-    .bind(start_of_day)
-    .fetch_one(pool.get_ref())
-    .await
-    .map_err(|e| AppError::Database(format!("Failed to fetch outbound stats: {}", e)))?;
-
-    let outbound = TrafficStats {
-        direction: "outbound".to_string(),
-        label: "Salientes".to_string(),
-        total_calls: outbound_row.get("total_calls"),
-        total_minutes: outbound_row.get::<Decimal, _>("total_minutes"),
-        total_revenue: outbound_row.get::<Decimal, _>("total_revenue"),
-        avg_duration: outbound_row.get("avg_duration"),
-    };
-
-    Ok(HttpResponse::Ok().json(ApiResponse::success(TrafficByDirectionResponse {
-        inbound,
-        outbound,
-    })))
-}
+use std::collections::HashMap;
+use tracing::{info, instrument, warn};
 
 // ============================================================================
 // NOC overview
@@ -508,6 +51,10 @@ const NETWORK_FAILURE_CAUSES: &[&str] = &[
 ];
 
 const USER_CAUSES: &[&str] = &[
+    // Unanswered NORMAL_CLEARING is a parallel-ring bridge whose answering leg
+    // was busy: FreeSWITCH replies 486 but keeps Q.850 16 (all of a 40-call
+    // sample on 2026-10-24 were "Overriding SIP cause 480 with 486").
+    "NORMAL_CLEARING",
     "USER_BUSY",
     "NO_ANSWER",
     "NO_USER_RESPONSE",
@@ -536,7 +83,10 @@ async fn noc_totals(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> Result<NocTotals, AppError> {
-    let network: Vec<String> = NETWORK_FAILURE_CAUSES.iter().map(|c| c.to_string()).collect();
+    let network: Vec<String> = NETWORK_FAILURE_CAUSES
+        .iter()
+        .map(|c| c.to_string())
+        .collect();
     let row = sqlx::query(
         r#"
         SELECT
@@ -544,8 +94,7 @@ async fn noc_totals(
             COUNT(answer_time)::BIGINT AS answered,
             COALESCE(SUM(billsec) FILTER (WHERE answer_time IS NOT NULL), 0)::BIGINT AS billsec,
             COUNT(*) FILTER (WHERE answer_time IS NULL AND hangup_cause = ANY($3))::BIGINT
-                AS network_failures,
-            COALESCE(SUM(cost), 0) AS revenue
+                AS network_failures
         FROM cdrs
         WHERE start_time >= $1 AND start_time < $2
         "#,
@@ -562,7 +111,6 @@ async fn noc_totals(
         answered: row.get("answered"),
         billsec: row.get("billsec"),
         network_failures: row.get("network_failures"),
-        revenue: row.get::<Decimal, _>("revenue"),
     })
 }
 
@@ -628,6 +176,210 @@ async fn noc_day_slots(
     }
 
     Ok(slots)
+}
+
+/// noc_* keys of system_settings (thresholds, capacity limits)
+async fn noc_settings(pool: &PgPool) -> HashMap<String, String> {
+    sqlx::query_as::<_, (String, String)>(
+        r"SELECT key, value FROM system_settings WHERE key LIKE 'noc\_%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| {
+        warn!("NOC settings unavailable, using defaults: {}", e);
+        Vec::new()
+    })
+    .into_iter()
+    .collect()
+}
+
+fn setting<T: std::str::FromStr>(settings: &HashMap<String, String>, key: &str) -> Option<T> {
+    settings.get(key).and_then(|v| v.trim().parse().ok())
+}
+
+fn noc_thresholds(settings: &HashMap<String, String>) -> NocThresholds {
+    NocThresholds {
+        asr_warn: setting(settings, "noc_asr_warn").unwrap_or(50.0),
+        asr_crit: setting(settings, "noc_asr_crit").unwrap_or(40.0),
+        ner_warn: setting(settings, "noc_ner_warn").unwrap_or(99.0),
+        ner_crit: setting(settings, "noc_ner_crit").unwrap_or(97.0),
+        min_range_attempts: setting(settings, "noc_min_range_attempts").unwrap_or(20),
+    }
+}
+
+/// Call-rate headroom over the last hour. CDRs are written at hangup, so
+/// calls still in progress are not counted yet.
+async fn noc_capacity(
+    pool: &PgPool,
+    settings: &HashMap<String, String>,
+) -> Result<NocCapacity, AppError> {
+    let row = sqlx::query(
+        r#"
+        SELECT COALESCE(MAX(n), 0)::BIGINT AS peak, COALESCE(SUM(n), 0)::BIGINT AS total
+        FROM (
+            SELECT COUNT(*) AS n FROM cdrs
+            WHERE start_time >= now() - INTERVAL '1 hour'
+            GROUP BY date_trunc('second', start_time)
+        ) s
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Failed to fetch NOC capacity: {}", e)))?;
+
+    Ok(NocCapacity {
+        max_channels: setting(settings, "noc_max_channels"),
+        max_cps: setting(settings, "noc_max_cps"),
+        peak_cps_last_hour: row.get("peak"),
+        avg_cps_last_hour: row.get::<i64, _>("total") as f64 / 3600.0,
+    })
+}
+
+/// RTPEngine media quality over the last 15 minutes of the monitoring
+/// collector's 1-minute samples (the hourly rollup is only a fallback: it
+/// lags up to two hours). MOS and jitter are RTPEngine's own running
+/// averages; packet loss is the share of relayed packets lost in the window
+/// (both are counters). Never fails the overview: the tables belong to the
+/// collector.
+async fn noc_quality(pool: &PgPool) -> NocQuality {
+    let mut q = NocQuality {
+        window_start: None,
+        as_of: None,
+        window_minutes: 15,
+        mos: None,
+        jitter_ms: None,
+        packet_loss_pct: None,
+        one_sided_sessions: None,
+        active_sessions: None,
+        pdd_p50_ms: None,
+        pdd_p95_ms: None,
+        pdd_samples: 0,
+    };
+    let loss = |lost: Option<f64>, sent: Option<f64>| match (lost, sent) {
+        (Some(lost), Some(sent)) if sent > 0.0 => Some(100.0 * lost / sent),
+        _ => None,
+    };
+
+    let live = sqlx::query(
+        r#"
+        SELECT MIN("timestamp") AT TIME ZONE 'UTC' AS window_start,
+               MAX("timestamp") AT TIME ZONE 'UTC' AS as_of,
+               (ARRAY_AGG(mos_avg ORDER BY "timestamp" DESC))[1] AS mos,
+               (ARRAY_AGG(jitter_avg_ms ORDER BY "timestamp" DESC))[1] AS jitter,
+               (MAX(packets_lost_in) - MIN(packets_lost_in))::FLOAT8 AS lost,
+               (MAX(packets_in) - MIN(packets_in))::FLOAT8 AS sent,
+               AVG(one_sided_sessions)::FLOAT8 AS one_sided,
+               AVG(active_sessions)::FLOAT8 AS active
+        FROM monitoring_rtpengine_metrics
+        WHERE "timestamp" >= (now() AT TIME ZONE 'UTC') - INTERVAL '15 minutes'
+        "#,
+    )
+    .fetch_one(pool)
+    .await;
+
+    match live {
+        Ok(row) if row.get::<Option<DateTime<Utc>>, _>("as_of").is_some() => {
+            q.window_start = row.get("window_start");
+            q.as_of = row.get("as_of");
+            q.mos = row.get("mos");
+            q.jitter_ms = row.get("jitter");
+            q.packet_loss_pct = loss(row.get("lost"), row.get("sent"));
+            q.one_sided_sessions = row.get("one_sided");
+            q.active_sessions = row.get("active");
+        }
+        other => {
+            if let Err(e) = other {
+                warn!("NOC live quality unavailable, using hourly rollup: {}", e);
+            }
+            let rows = sqlx::query(
+                r#"
+                SELECT metric, avg_value, max_value - min_value AS delta,
+                       bucket_start AT TIME ZONE 'UTC' AS bucket_start
+                FROM monitoring_kpi_hourly
+                WHERE component = 'rtpengine'
+                  AND bucket_start = (SELECT MAX(bucket_start) FROM monitoring_kpi_hourly
+                                      WHERE component = 'rtpengine')
+                  AND metric IN ('mos_avg', 'jitter_avg_ms', 'packets_lost_in', 'packets_in',
+                                 'one_sided_sessions', 'active_sessions')
+                "#,
+            )
+            .fetch_all(pool)
+            .await
+            .unwrap_or_else(|e| {
+                warn!("NOC quality unavailable: {}", e);
+                Vec::new()
+            });
+            let mut avg = HashMap::new();
+            let mut delta = HashMap::new();
+            for row in rows {
+                let metric: String = row.get("metric");
+                q.window_start = row.get("bucket_start");
+                avg.insert(metric.clone(), row.get::<Option<f64>, _>("avg_value"));
+                delta.insert(metric, row.get::<Option<f64>, _>("delta"));
+            }
+            let get = |m: &HashMap<String, Option<f64>>, k: &str| m.get(k).copied().flatten();
+            q.window_minutes = 60;
+            q.as_of = q.window_start.map(|t| t + Duration::hours(1));
+            q.mos = get(&avg, "mos_avg");
+            q.jitter_ms = get(&avg, "jitter_avg_ms");
+            q.packet_loss_pct = loss(get(&delta, "packets_lost_in"), get(&delta, "packets_in"));
+            q.one_sided_sessions = get(&avg, "one_sided_sessions");
+            q.active_sessions = get(&avg, "active_sessions");
+        }
+    }
+    // 0 means RTPEngine had no samples yet, not a MOS of zero
+    q.mos = q.mos.filter(|v| *v > 0.0);
+
+    match sqlx::query(
+        r#"
+        SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY pdd_ms) AS p50,
+               PERCENTILE_DISC(0.95) WITHIN GROUP (ORDER BY pdd_ms) AS p95,
+               COUNT(pdd_ms)::BIGINT AS samples
+        FROM cdrs
+        WHERE start_time >= now() - INTERVAL '1 hour' AND pdd_ms IS NOT NULL
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+    {
+        Ok(row) => {
+            q.pdd_p50_ms = row.get("p50");
+            q.pdd_p95_ms = row.get("p95");
+            q.pdd_samples = row.get("samples");
+        }
+        Err(e) => warn!("NOC PDD unavailable (migration 020 applied?): {}", e),
+    }
+    q
+}
+
+/// Annotations overlapping [from, to). Never fails the overview.
+async fn noc_events(pool: &PgPool, from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<NocEvent> {
+    sqlx::query(
+        r#"
+        SELECT id, kind, title, starts_at, ends_at, created_by
+        FROM noc_events
+        WHERE starts_at < $2 AND COALESCE(ends_at, starts_at) >= $1
+        ORDER BY starts_at
+        "#,
+    )
+    .bind(from)
+    .bind(to)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| {
+        warn!("NOC events unavailable (migration 019 applied?): {}", e);
+        Vec::new()
+    })
+    .into_iter()
+    .map(|row| NocEvent {
+        id: row.get("id"),
+        kind: row.get("kind"),
+        title: row.get("title"),
+        starts_at: row.get("starts_at"),
+        ends_at: row.get("ends_at"),
+        created_by: row.get("created_by"),
+    })
+    .collect()
 }
 
 /// Carrier NOC overview: today vs a comparison day (yesterday or the same
@@ -739,7 +491,7 @@ pub async fn get_noc_overview(
         GROUP BY 1, 2
         HAVING COUNT(*) FILTER (WHERE start_time >= $1) > 0
         ORDER BY attempts DESC
-        LIMIT 10
+        LIMIT 25
         "#,
     )
     .bind(day_start)
@@ -757,45 +509,159 @@ pub async fn get_noc_overview(
         answered: row.get("answered"),
         billsec: row.get("billsec"),
         compare_attempts: row.get("compare_attempts"),
+        hourly_attempts: vec![0; 24],
     })
-    .collect();
+    .collect::<Vec<_>>();
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(NocOverviewResponse {
-        timezone: tz,
-        compare: compare.to_string(),
-        day_start,
-        compare_day_start: compare_start,
-        generated_at: now,
-        current_slot,
-        slot_minutes: SLOT_MINUTES,
-        kpis,
-        series,
-        causes,
-        ranges,
+    let mut ranges = ranges;
+    let hourly = sqlx::query(
+        r#"
+        SELECT
+            LEFT(called_number, 4) AS prefix,
+            CASE WHEN freeswitch_server_id = 'kamailio' THEN 'direct' ELSE 'freeswitch' END AS route,
+            FLOOR(EXTRACT(EPOCH FROM start_time - $1) / 3600)::INTEGER AS hour,
+            COUNT(*)::BIGINT AS attempts
+        FROM cdrs
+        WHERE start_time >= $1 AND start_time < $2
+        GROUP BY 1, 2, 3
+        "#,
+    )
+    .bind(day_start)
+    .bind(now)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Failed to fetch NOC range trend: {}", e)))?;
+    for row in hourly {
+        let prefix: Option<String> = row.get("prefix");
+        let route: String = row.get("route");
+        let hour: i32 = row.get("hour");
+        if let Some(r) = ranges
+            .iter_mut()
+            .find(|r| r.prefix == prefix.as_deref().unwrap_or_default() && r.route == route)
+        {
+            if let Some(v) = r.hourly_attempts.get_mut(hour as usize) {
+                *v = row.get("attempts");
+            }
+        }
+    }
+
+    let settings = noc_settings(pool).await;
+    let thresholds = noc_thresholds(&settings);
+    let capacity = noc_capacity(pool, &settings).await?;
+    let quality = noc_quality(pool).await;
+    let events = noc_events(
+        pool,
+        compare_start.min(day_start),
+        compare_start.max(day_start) + Duration::days(1),
+    )
+    .await;
+
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(NocOverviewResponse {
+            timezone: tz,
+            compare: compare.to_string(),
+            day_start,
+            compare_day_start: compare_start,
+            generated_at: now,
+            current_slot,
+            slot_minutes: SLOT_MINUTES,
+            kpis,
+            series,
+            causes,
+            ranges,
+            thresholds,
+            capacity,
+            quality,
+            events,
+        })),
+    )
+}
+
+const NOC_EVENT_KINDS: &[&str] = &["incident", "campaign", "maintenance", "migration", "other"];
+
+/// Add a chart annotation
+///
+/// POST /api/v1/stats/noc/events
+#[instrument(skip(pool, user, body))]
+pub async fn create_noc_event(
+    pool: web::Data<PgPool>,
+    body: web::Json<NocEventRequest>,
+    user: AdminUser,
+) -> Result<HttpResponse, AppError> {
+    let title = body.title.trim();
+    if title.is_empty() || title.chars().count() > 120 {
+        return Err(AppError::Validation(
+            "El título es obligatorio (máx. 120 caracteres)".to_string(),
+        ));
+    }
+    if !NOC_EVENT_KINDS.contains(&body.kind.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Tipo de marca inválido: {}",
+            body.kind
+        )));
+    }
+    if body.ends_at.is_some_and(|end| end < body.starts_at) {
+        return Err(AppError::Validation(
+            "El fin no puede ser anterior al inicio".to_string(),
+        ));
+    }
+
+    let row = sqlx::query(
+        r#"
+        INSERT INTO noc_events (kind, title, starts_at, ends_at, created_by)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, kind, title, starts_at, ends_at, created_by
+        "#,
+    )
+    .bind(&body.kind)
+    .bind(title)
+    .bind(body.starts_at)
+    .bind(body.ends_at)
+    .bind(&user.username)
+    .fetch_one(pool.get_ref())
+    .await
+    .map_err(|e| AppError::Database(format!("Failed to create NOC event: {}", e)))?;
+
+    info!(user = %user.username, title = %title, "NOC event created");
+
+    Ok(HttpResponse::Created().json(ApiResponse::success(NocEvent {
+        id: row.get("id"),
+        kind: row.get("kind"),
+        title: row.get("title"),
+        starts_at: row.get("starts_at"),
+        ends_at: row.get("ends_at"),
+        created_by: row.get("created_by"),
     })))
+}
+
+/// Remove a chart annotation
+///
+/// DELETE /api/v1/stats/noc/events/{id}
+#[instrument(skip(pool, user))]
+pub async fn delete_noc_event(
+    pool: web::Data<PgPool>,
+    path: web::Path<i64>,
+    user: AdminUser,
+) -> Result<HttpResponse, AppError> {
+    let id = path.into_inner();
+    let result = sqlx::query("DELETE FROM noc_events WHERE id = $1")
+        .bind(id)
+        .execute(pool.get_ref())
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to delete NOC event: {}", e)))?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound(format!("Marca {} no encontrada", id)));
+    }
+    info!(user = %user.username, id = id, "NOC event deleted");
+    Ok(HttpResponse::NoContent().finish())
 }
 
 /// Configure statistics routes
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/stats")
-            .route("/calls-by-hour", web::get().to(get_calls_by_hour))
-            .route("/revenue-by-day", web::get().to(get_revenue_by_day))
-            .route("/balance-trend", web::get().to(get_balance_trend))
-            .route("/calls-by-type", web::get().to(get_calls_by_type))
-            .route("/calls-by-zone", web::get().to(get_calls_by_zone))
-            .route("/traffic-by-direction", web::get().to(get_traffic_by_direction))
-            .route("/noc", web::get().to(get_noc_overview)),
+            .route("/noc", web::get().to(get_noc_overview))
+            .route("/noc/events", web::post().to(create_noc_event))
+            .route("/noc/events/{id}", web::delete().to(delete_noc_event)),
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_day_labels() {
-        let labels = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-        assert_eq!(labels.len(), 7);
-    }
 }

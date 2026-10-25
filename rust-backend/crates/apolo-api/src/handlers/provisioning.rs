@@ -1,8 +1,8 @@
 //! Provisioning handlers
 //!
-//! Creates a billing account and its associated SIP device in a single
-//! operation. Mirrors the logic of `account::create_account` (plan-derived
-//! settings) and `sip_device::create_sip_device` (encrypted password + A1 hash),
+//! Creates a customer (account) and its associated SIP device in a single
+//! operation. Mirrors `account::create_account` and
+//! `sip_device::create_sip_device` (encrypted password + A1 hash),
 //! but performs both together so a customer is provisioned end-to-end from one
 //! request. Supports individual and bulk (per-row reporting) modes.
 
@@ -13,12 +13,13 @@ use crate::dto::provisioning::{
 use crate::dto::ApiResponse;
 use actix_web::{web, HttpResponse};
 use apolo_auth::AdminUser;
-use apolo_core::models::{Account, AccountStatus, AuditLogBuilder, SipDevice};
+use apolo_core::models::{Account, AccountStatus, AccountType, AuditLogBuilder, SipDevice};
 use apolo_core::traits::{AccountRepository, Repository, SipDeviceRepository};
 use apolo_core::AppError;
-use apolo_db::{PgAccountRepository, PgPlanRepository, PgSipDeviceRepository};
+use apolo_db::{PgAccountRepository, PgSipDeviceRepository};
 use apolo_services::SipDeviceService;
 use chrono::Utc;
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
@@ -27,6 +28,8 @@ use validator::Validate;
 const DEFAULT_SIP_DOMAIN: &str = "app.fonowin.pe";
 const DEFAULT_CODECS: &str = "PCMU,PCMA,G729,opus";
 const DEFAULT_CONTEXT: &str = "from-pbx";
+/// What 3219 of 3225 provisioned devices use (2026-10-24)
+const DEFAULT_MAX_REGISTRATIONS: i32 = 2;
 
 /// Outcome of provisioning one row, distinguishing duplicates (skippable)
 /// from genuine errors.
@@ -50,7 +53,6 @@ async fn provision_one(
 
     let account_repo = PgAccountRepository::new(pool.clone());
     let sip_repo = PgSipDeviceRepository::new(pool.clone());
-    let plan_repo = PgPlanRepository::new(pool.clone());
 
     let domain = req
         .domain
@@ -72,12 +74,6 @@ async fn provision_one(
         )));
     }
 
-    // Derive account settings from the plan.
-    let plan = plan_repo
-        .find_by_id(req.plan_id)
-        .await?
-        .ok_or_else(|| AppError::Validation(format!("Plan {} no encontrado", req.plan_id)))?;
-
     let customer_name = req
         .customer_name
         .clone()
@@ -88,13 +84,14 @@ async fn provision_one(
         account_number: req.username.clone(),
         account_name: customer_name,
         customer_phone: None,
-        account_type: plan.account_type,
-        balance: plan.initial_balance,
-        credit_limit: plan.credit_limit,
-        currency: "USD".to_string(),
+        // Billing columns are unused on this SBC node; keep neutral values.
+        account_type: AccountType::Postpaid,
+        balance: Decimal::ZERO,
+        credit_limit: Decimal::ZERO,
+        currency: "PEN".to_string(),
         status: AccountStatus::Active,
-        max_concurrent_calls: plan.max_concurrent_calls,
-        plan_id: Some(plan.id),
+        max_concurrent_calls: 5,
+        plan_id: None,
         cod_ped: req.cod_ped.clone().filter(|s| !s.trim().is_empty()),
         departamento: req.departamento.clone().filter(|s| !s.trim().is_empty()),
         provincia: req.provincia.clone().filter(|s| !s.trim().is_empty()),
@@ -113,7 +110,10 @@ async fn provision_one(
         .filter(|p| !p.is_empty())
         .unwrap_or_else(SipDeviceService::generate_password);
 
-    let max_registrations = plan.max_concurrent_calls.clamp(1, 10);
+    let max_registrations = req
+        .max_registrations
+        .unwrap_or(DEFAULT_MAX_REGISTRATIONS)
+        .clamp(1, 10);
 
     let mut device = SipDevice {
         id: 0,
@@ -162,7 +162,7 @@ async fn provision_one(
         sip_username: created_device.sip_username,
         sip_domain: created_device.sip_domain,
         password,
-        plan_id: plan.id,
+        max_registrations,
     }))
 }
 
@@ -286,7 +286,7 @@ async fn audit_provision(pool: &PgPool, username: &str, result: &ProvisionResult
         "account_number": result.account_number,
         "sip_device_id": result.sip_device_id,
         "sip_username": result.sip_username,
-        "plan_id": result.plan_id,
+        "max_registrations": result.max_registrations,
     });
 
     if let Ok(audit_data) = AuditLogBuilder::default()

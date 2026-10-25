@@ -6,7 +6,6 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use actix_ws::{Message, Session};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::time::Duration;
@@ -52,7 +51,6 @@ pub struct WsActiveCall {
     pub start_time: DateTime<Utc>,
     pub duration_seconds: i32,
     pub status: String,
-    pub estimated_cost: Option<f64>,
 }
 
 /// Dashboard stats for WebSocket
@@ -60,7 +58,6 @@ pub struct WsActiveCall {
 pub struct WsDashboardStats {
     pub active_calls: i64,
     pub calls_today: i64,
-    pub revenue_today: f64,
 }
 
 /// Fetch active calls from database
@@ -74,7 +71,6 @@ async fn fetch_active_calls(pool: &PgPool) -> Result<Vec<WsActiveCall>, sqlx::Er
             direction,
             start_time,
             current_duration,
-            current_cost,
             connection_id
         FROM active_calls
         ORDER BY start_time DESC
@@ -86,7 +82,6 @@ async fn fetch_active_calls(pool: &PgPool) -> Result<Vec<WsActiveCall>, sqlx::Er
     let calls: Vec<WsActiveCall> = rows
         .iter()
         .map(|row| {
-            let cost: Option<Decimal> = row.get("current_cost");
             WsActiveCall {
                 call_uuid: row.get("call_uuid"),
                 account_id: None,
@@ -103,7 +98,6 @@ async fn fetch_active_calls(pool: &PgPool) -> Result<Vec<WsActiveCall>, sqlx::Er
                 start_time: row.get("start_time"),
                 duration_seconds: row.get::<Option<i32>, _>("current_duration").unwrap_or(0),
                 status: "answered".to_string(),
-                estimated_cost: cost.map(|c| c.to_string().parse::<f64>().unwrap_or(0.0)),
             }
         })
         .collect();

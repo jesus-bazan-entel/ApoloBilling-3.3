@@ -1,7 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { checkHealth, getCurrentUser, logout, changePassword } from '../api/client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   ArrowRightLeft,
@@ -9,8 +9,6 @@ import {
   Users,
   FileText,
   Phone,
-  DollarSign,
-  Globe,
   Activity,
   LogOut,
   ChevronDown,
@@ -23,9 +21,7 @@ import {
   EyeOff,
   AlertCircle,
   CheckCircle,
-  CreditCard,
   Headphones,
-  BarChart3,
   Router,
   Sun,
   Moon,
@@ -55,25 +51,8 @@ const mainSection: NavSection = {
     { name: 'Monitoreo SBC', href: '/monitoring', icon: ActivityIcon },
     { name: 'Llamadas Activas', href: '/calls', icon: Phone },
     { name: 'Registros CDR', href: '/cdr', icon: FileText },
-  ],
-}
-
-// Accounts & Billing
-const billingSection: NavSection = {
-  title: 'Facturación',
-  items: [
-    { name: 'Cuentas', href: '/accounts', icon: Users },
-    { name: 'Planes', href: '/plans', icon: CreditCard },
-    { name: 'Saldos', href: '/balance', icon: DollarSign },
-  ],
-}
-
-// Rates management
-const ratesSection: NavSection = {
-  title: 'Tarifas',
-  items: [
-    { name: 'Zonas', href: '/zones', icon: Globe },
-    { name: 'Tarifas', href: '/rates', icon: BarChart3 },
+    // Subscribers: their status gates their SIP devices' REGISTER
+    { name: 'Clientes', href: '/accounts', icon: Users },
   ],
 }
 
@@ -99,10 +78,24 @@ const systemSection: NavSection = {
   ],
 }
 
-const allSections = [mainSection, billingSection, ratesSection, adminSection, systemSection]
+const allSections = [mainSection, adminSection, systemSection]
 
 interface LayoutProps {
   children: React.ReactNode
+}
+
+/** The app's only wall clock; ticks on its own so the Layout doesn't re-render */
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <span className="text-xs font-mono tabular-nums">
+      {now.toLocaleTimeString('es-PE', { hour12: false })}
+    </span>
+  )
 }
 
 export default function Layout({ children }: LayoutProps) {
@@ -252,10 +245,10 @@ export default function Layout({ children }: LayoutProps) {
             />
             <div className="flex flex-col">
               <span className="text-[10px] font-extrabold tracking-[0.15em] text-white/80 uppercase">
-                Sistema de
+                Apolo
               </span>
               <span className="text-sm font-black tracking-tight text-white leading-none uppercase">
-                Facturación
+                SBC
               </span>
             </div>
           </div>
@@ -355,9 +348,7 @@ export default function Layout({ children }: LayoutProps) {
               {/* System time - adds industrial feel */}
               <div className="hidden sm:flex items-center gap-2 text-[#b49a8b]">
                 <div className="h-4 w-px bg-[#4a2e22]" />
-                <span className="text-xs font-mono tabular-nums">
-                  {new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                </span>
+                <HeaderClock />
               </div>
 
               {/* Theme Toggle */}

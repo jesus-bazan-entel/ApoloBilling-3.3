@@ -23,8 +23,8 @@ pub struct ProvisionRequest {
     /// SIP domain (realm). Defaults to the configured default domain if omitted.
     pub domain: Option<String>,
 
-    /// Plan id (resolved by the frontend from the plan name/code).
-    pub plan_id: i32,
+    /// Simultaneous registrations allowed for the SIP device (default 2, 1–10).
+    pub max_registrations: Option<i32>,
 
     /// Order code (COD_PED) — stored on the account and used as SIP display_name
     pub cod_ped: Option<String>,
@@ -49,7 +49,7 @@ pub struct ProvisionResult {
     pub sip_domain: String,
     /// Password used (generated or provided) — returned only on creation.
     pub password: String,
-    pub plan_id: i32,
+    pub max_registrations: i32,
 }
 
 /// Bulk provisioning request: a list of rows from the uploaded template.

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ApoloBilling is a real-time telecommunications billing platform for FreeSWITCH PBX environments. It handles call authorization, balance reservations, real-time billing, and CDR (Call Detail Records) generation.
+**Apolo SBC** (repo still named ApoloBilling) is the management platform of a Kamailio + FreeSWITCH SBC: SIP devices and their customers, routing, CDRs, active calls and NOC monitoring.
+
+> **No billing.** The billing module (rates, zones, plans, balances, reservations, call authorization, cost rating) was removed on 2026-10-24. CDRs are still recorded (no account, rate or cost). The billing tables are left in PostgreSQL unused (`rate_cards`, `zonas`, `prefijos`, `tarifas`, `plans`, `balance_reservations`, `balance_transactions`, billing columns of `accounts`/`cdrs`); drop them with a dedicated migration if ever needed. The `rust-billing-engine/` directory, the `apolo-billing*` binaries and systemd unit names keep their old names for deploy compatibility.
 
 ## Architecture
 
@@ -29,7 +31,7 @@ ApoloBilling is a real-time telecommunications billing platform for FreeSWITCH P
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
 ┌──────────────────┐  ┌──────────────┐  ┌──────────────────┐
-│ Billing Engine   │  │  PostgreSQL  │  │  MySQL/MariaDB   │
+│ SBC engine       │  │  PostgreSQL  │  │  MySQL/MariaDB   │
 │    (:9000)       │  │   (:5432)    │  │    (:3306)       │
 │ ESL, real-time   │  │ apolo_billing│  │   kamailio DB    │
 └──────────────────┘  └──────────────┘  └──────────────────┘
@@ -44,7 +46,7 @@ ApoloBilling is a real-time telecommunications billing platform for FreeSWITCH P
 **Three main components:**
 - **frontend/** - React 19 + TypeScript + Vite 7 SPA with TanStack Query, Radix UI, Tailwind CSS 4
 - **rust-backend/** - Actix-web 4 API server (Cargo workspace with 7 crates) for all CRUD, auth, CDR queries
-- **rust-billing-engine/** - Real-time billing processor via FreeSWITCH ESL (dual-mode: ESL server for testing, ESL client for production)
+- **rust-billing-engine/** - SBC engine via FreeSWITCH ESL: tracks `active_calls`, writes CDRs (+ PDD), imports direct Kamailio CDRs (dual-mode: ESL server for testing, ESL client for production). No Redis, no authorization
 
 ## Common Commands
 
@@ -72,7 +74,7 @@ npm run lint                      # ESLint check
 ```bash
 cd rust-billing-engine
 cargo build --release
-cargo run                         # Start billing engine on :9000
+cargo run                         # Start the engine on :9000 (health only)
 cargo test                        # Run all tests
 cargo test --test full_integration_test   # Integration tests
 ```
@@ -128,33 +130,27 @@ rust-backend/
     └── apolo-esl/            # FreeSWITCH Event Socket Layer integration
 ```
 
-### Rust Billing Engine
+### Rust Billing Engine (SBC engine)
 ```
 rust-billing-engine/src/
-├── services/                 # Core business logic
-│   ├── authorization.rs      # Call authorization, LPM rate lookup
-│   ├── realtime_biller.rs    # Active call monitoring, reservation extensions (every 180s)
-│   ├── cdr_generator.rs      # CDR creation, cost calculation
-│   └── reservation_manager.rs # Balance reservation CRUD
+├── services/
+│   ├── cdr_generator.rs      # CDR insert at a-leg hangup (no account/rate/cost)
+│   └── kamailio_cdr_sync.rs  # Direct-routed inbound CDRs from Kamailio acc_cdrs
 ├── esl/                      # FreeSWITCH Event Socket Layer
-│   └── event_handler.rs      # ESL event processing
-├── api/                      # HTTP API routes
-├── database/                 # PostgreSQL queries (tokio-postgres + deadpool)
-└── cache.rs                  # Redis client
+│   └── event_handler.rs      # active_calls tracking, CDRs, b-leg PDD
+├── api/                      # HTTP API (health only)
+└── database/                 # PostgreSQL (tokio-postgres + deadpool)
 ```
 
 ### Frontend
 ```
 frontend/src/
 ├── pages/
-│   ├── Dashboard.tsx         # Main dashboard with stats
-│   ├── Accounts.tsx          # Account management
+│   ├── Dashboard.tsx         # NOC dashboard (traffic, quality, capacity)
+│   ├── Accounts.tsx          # Clientes (customers; status gates REGISTER)
 │   ├── CDR.tsx               # Call detail records
 │   ├── ActiveCalls.tsx       # Live calls
-│   ├── Balance.tsx           # Balance transactions
-│   ├── Rates.tsx             # Rate cards
-│   ├── Zones.tsx             # Rate zones
-│   ├── Plans.tsx             # Account plans
+│   ├── Provisioning.tsx      # Customer + SIP device in one step
 │   ├── SipDevices.tsx        # SIP device management (NEW)
 │   ├── UnifiedRouting.tsx    # Inbound/outbound routes (NEW)
 │   ├── InternalRouting.tsx   # FS ↔ Kamailio routes (NEW)
@@ -190,23 +186,15 @@ frontend/src/
 
 Core tables in `apolo_billing` database:
 
-### Billing & Accounts
-- `accounts` - Customer accounts (prepaid/postpaid, balance, credit_limit, plan_id)
-- `plans` - Account creation templates (initial_balance, credit_limit, max_concurrent_calls)
-- `rate_cards` - Destination rates by prefix (LPM matching)
-- `cdrs` - Call detail records with cost, duration, hangup cause
-- `balance_reservations` - Active call balance holds
-- `balance_transactions` - Recharges, consumptions, refunds
+### Customers & Calls
+- `accounts` - Customers ("Clientes": number, name, status, COD_PED, location). `status` ≠ active blocks the customer's SIP REGISTER. Billing columns (balance, credit_limit, plan_id, account_type) are unused
+- `cdrs` - Call detail records (duration, billsec, hangup cause, `pdd_ms`); partitioned monthly
 - `active_calls` - Currently ongoing calls
+- `noc_events` - Dashboard chart marks (migration 019)
 
 ### Users & Audit
 - `usuarios` - System users with roles (superadmin, admin, operator)
 - `audit_logs` - System audit trail
-
-### Rate Management
-- `zonas` - Rate zones (e.g., "Argentina Mobile")
-- `prefijos` - Prefixes per zone (e.g., "5411")
-- `tarifas` - Rates per prefix
 
 ### Unified Routing System
 - `routing_trunks` - SIP trunks (public=Kamailio, private=FreeSWITCH)
@@ -227,94 +215,16 @@ Core tables in `apolo_billing` database:
 ### System Configuration
 - `system_settings` - Key-value system settings (sip_options_enabled, etc.)
 
-## Billing Flow
+## Call Recording Flow
 
-1. **CHANNEL_CREATE** → `AuthorizationService` validates account, finds rate via LPM, reserves initial balance
-2. **CHANNEL_ANSWER** → `RealtimeBiller` starts periodic monitoring (every 180s), extends reservations as needed
-3. **CHANNEL_HANGUP_COMPLETE** → `CdrGenerator` creates CDR, commits balance consumption, releases excess reservation
+The engine (`rust-billing-engine`) only records, it never authorizes or rejects a call:
 
-### Rate Matching (LPM)
-Rates use Longest Prefix Match on `destination_prefix`. For destination `541156000`:
-- Generates prefixes: ["5", "54", "541", "5411", "54115", "541156", ...]
-- Queries rate_cards for matching prefix with valid dates
-- Most specific (longest) prefix wins, ordered by priority
+1. **CHANNEL_CREATE** (a-leg) → row in `active_calls`
+2. **CHANNEL_ANSWER** (a-leg) → `active_calls.answer_time` / `status = 'answered'`
+3. **CHANNEL_HANGUP_COMPLETE** → b-legs: their first 180/183 gives the PDD of their a-leg; a-leg: row removed from `active_calls`, CDR written by `CdrGenerator`
+4. Calls routed Kamailio → trunk directly (no FreeSWITCH) get their CDRs from `kamailio_cdr_sync.rs`
 
-### Reservation Calculation
-```
-base = rate_per_minute × 5 minutes
-buffer = base × 8%
-total = clamp(base + buffer, $0.30, $30.00)
-max_duration = (total / rate_per_minute) × 60 seconds
-```
-
-### Inbound vs Outbound Calls
-- **Outbound** (context `from-pbx`): Account looked up by CALLER, charged
-- **Inbound normal** (context `to-kamailio`): Skip authorization, no charge
-- **Inbound toll-free** (0800/0801/1800): Account looked up by CALLEE (0800 owner pays)
-
-### Outbound Call Flow (authorization + billing)
-
-An authorized extension dials a PSTN number. The billing engine gates the call on
-**balance reservation** before media, meters it while it runs, and settles the real cost at
-hangup. Authorization has **two triggers** that share one `AuthorizationService.authorize()`
-and are mutually de-duplicated via the `balance_reservations` row keyed by `call_uuid`:
-- **Synchronous (dialplan):** the `from-pbx` dialplan curls the billing engine
-  (`GET /freeswitch/authorize` or `POST /authorize`, :9000) *before* bridging — can refuse
-  the call up front.
-- **Event-driven (ESL):** on `CHANNEL_CREATE` the engine authorizes too; if the dialplan
-  already reserved, it skips, and if the call is denied it sends `uuid_kill … CALL_REJECTED`.
-
-```
- Extension        FreeSWITCH (from-pbx)    Billing Engine (:9000)         PostgreSQL        Kamailio→Carrier→PSTN
-    │                    │                        │                          │                      │
-    │  INVITE (dialed)   │                        │                          │                      │
-    │───────────────────▶│                        │                          │                      │
-    │                    │  authorize(caller,     │                          │                      │
-    │                    │  callee, uuid)         │                          │                      │
-    │                    │───────────────────────▶│                          │                      │
-    │                    │                        │ outbound_auth_enabled?    │                      │
-    │                    │                        │ account by CALLER ANI ───▶│                      │
-    │                    │                        │ rate via LPM(callee) ────▶│                      │
-    │                    │                        │ reserve = clamp(rate×5m   │                      │
-    │                    │                        │   +8%, $0.30, $30)        │                      │
-    │                    │                        │ create balance_reservation│                      │
-    │                    │                        │ + concurrent-call check ─▶│                      │
-    │   ── DENIED path ──┤   authorized=false     │ (insufficient balance or  │                      │
-    │   486 / hangup     │◀───────────────────────│  max_concurrent reached)  │                      │
-    │◀───────────────────┤   (ESL: uuid_kill)     │                          │                      │
-    │                    │                        │                          │                      │
-    │   ── ALLOWED path ─┤   authorized=true,     │                          │                      │
-    │                    │   max_duration_seconds │  active_calls INSERT ────▶│                      │
-    │                    │   bridge to gateway ───┼──────────────────────────┼─────────────────────▶│
-    │                    │                        │                          │   INVITE → PSTN      │
-    │  ◀═══════ 200 OK / RTP (media) ═════════════╪══════════════════════════╪══════════════════════│
-    │                    │  CHANNEL_ANSWER (ESL)  │                          │                      │
-    │                    │───────────────────────▶│ RealtimeBiller starts;    │                      │
-    │                    │                        │ every 180s extend reserv. │                      │
-    │                    │                        │ if balance left, else hang│                      │
-    │   ── hangup ───────┤                        │                          │                      │
-    │───────────────────▶│  CHANNEL_HANGUP_       │                          │                      │
-    │                    │  COMPLETE (ESL)        │                          │                      │
-    │                    │───────────────────────▶│ stop billing;             │                      │
-    │                    │                        │ CdrGenerator: cost =      │                      │
-    │                    │                        │ billsec×rate; write CDR; ─▶│                      │
-    │                    │                        │ commit consumption,       │                      │
-    │                    │                        │ release excess reservation│                      │
-```
-
-**Key points**
-- **Account = CALLER** for outbound (by ANI); for 0800/0801/1800 toll-free it's the **CALLEE**.
-- **Rate** is Longest-Prefix-Match on the dialed number (see *Rate Matching (LPM)*).
-- **Reservation** holds an estimate (`clamp(rate×5min + 8%, $0.30, $30)`); `max_duration_seconds`
-  caps the call if balance would run out. `RealtimeBiller` extends it every 180s.
-- **Settlement** at `CHANNEL_HANGUP_COMPLETE`: actual cost = `billsec × rate`, CDR written,
-  consumption committed, the unused part of the reservation released.
-- **Fail-open cases** (engine returns `authorized=true`): auth disabled
-  (`outbound_auth_enabled=false`), no account for the ANI, or no rate for the destination —
-  the call proceeds **un-reserved/un-billed**. Only a *failed reservation* (insufficient
-  balance / concurrency cap) actually denies.
-- **Two-leg note:** the engine acts on the a-leg only; b-leg hangups are skipped
-  (`handle_channel_hangup` returns early for the b-leg).
+Direction comes from FreeSWITCH's native headers (`Call-Direction`…), with the context as fallback.
 
 ## API Endpoints (Port 8000)
 
@@ -331,20 +241,17 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/auth/change-password` | POST | Change password | Authenticated |
 | `/users/*` | CRUD | User management | Superadmin |
 | `/audit-logs/*` | GET | Audit logs | Superadmin |
-| `/accounts` | GET/POST | List/create accounts | Authenticated |
-| `/accounts/{id}` | GET/PUT | Get/update account | Authenticated |
-| `/accounts/{id}/topup` | POST | Add balance | Authenticated |
-| `/plans/*` | CRUD | Plan management | Authenticated |
-| `/rate-cards` | GET/POST | List/create rates | Authenticated |
-| `/rate-cards/search/{phone}` | GET | LPM rate search | Authenticated |
+| `/accounts` | GET/POST | List/create customers (Clientes) | Authenticated |
+| `/accounts/{id}` | GET/PUT/DELETE | Get/update (phone, status)/delete customer | Authenticated |
+| `/accounts/stats` | GET | Total / active customers | Authenticated |
+| `/provisioning` (`/bulk`) | POST | Customer + SIP device (individual / bulk) | Superadmin |
 | `/cdrs` | GET | List CDRs with pagination | Authenticated |
 | `/cdrs/export` | GET | Streaming export (CSV/JSON) | Authenticated |
 | `/cdrs/stats` | GET | CDR statistics | Authenticated |
 | `/active-calls` | GET | List active calls | Authenticated |
-| `/reservations/*` | CRUD | Balance reservations | Authenticated |
-| `/stats` | GET | Dashboard statistics | Authenticated |
+| `/stats/noc` | GET | NOC dashboard overview | Authenticated |
+| `/stats/noc/events` | POST/DELETE | Chart marks | Admin |
 | `/dialplan/*` | CRUD | FreeSWITCH dialplan | Superadmin |
-| `/rates/*` | CRUD | Rate management (zonas, prefijos, tarifas) | Authenticated |
 | `/settings` | GET/PUT | System settings | Superadmin |
 | `/ws` | WebSocket | Real-time updates | Authenticated |
 
@@ -391,9 +298,9 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/internal-routes/{id}` | GET/PUT/DELETE | CRUD internal route | Admin |
 | `/internal-routes/endpoints` | GET/POST | System endpoints | Admin |
 
-## Billing Engine Modes
+## Engine Modes
 
-The billing engine operates in two modes based on `FREESWITCH_SERVERS` env var:
+The engine (`rust-billing-engine`) operates in two modes based on `FREESWITCH_SERVERS` env var:
 - **Testing mode** (empty/unset): Starts an ESL server on port 8021 that accepts connections from the call simulator
 - **Production mode** (set to `host:port:password,...`): Connects as ESL client to FreeSWITCH server(s)
 
@@ -438,7 +345,6 @@ These settings are stored in the `system_settings` table and can be modified via
 |-----|---------|-------------|
 | `sip_options_enabled` | `false` | Enable SIP OPTIONS health monitoring |
 | `sip_options_interval` | `30` | Interval (seconds) between SIP OPTIONS checks |
-| `outbound_auth_enabled` | `true` | Enable outbound call authorization |
 
 ## Important Patterns
 
@@ -447,9 +353,6 @@ Always use `DateTime<Utc>` (not `NaiveDateTime`) for `TIMESTAMP WITH TIME ZONE` 
 ```rust
 let created_at: DateTime<Utc> = row.get("created_at");
 ```
-
-### Financial Calculations
-Use `rust_decimal::Decimal` (not f64) for all monetary values across both backend and billing engine.
 
 ### API Response Pagination
 Paginated endpoints return nested structure:
@@ -502,6 +405,8 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 016_partition_cdrs.sql | Monthly range partitioning of cdrs on start_time |
 | 017_inbound_direct_routing.sql | `direct_routing` / `fs_numbers` / `kamailio_fs_ruleid` on inbound routes + `kamailio_cdr_sync_state` cursor (Kamailio → trunk without FreeSWITCH; see *Direct inbound routing*) |
 | 018_monitoring_trunk_health.sql | `trunks_online` / `trunks_total` on `monitoring_kamailio_metrics` for the *Trunk Health* card (SIP OPTIONS via Kamailio) |
+| 019_noc_events.sql | `noc_events` — incident/campaign/migration marks on the dashboard traffic chart (`POST/DELETE /stats/noc/events`, admin+). Dashboard thresholds/capacity are optional `system_settings` keys: `noc_asr_warn/crit`, `noc_ner_warn/crit`, `noc_min_range_attempts`, `noc_max_channels`, `noc_max_cps` |
+| 020_noc_live_quality_and_pdd.sql | `cdrs.pdd_ms` (INVITE → first 180/183, written by the billing engine from FS `*_uepoch` vars; NULL on direct Kamailio CDRs) + SELECT on `monitoring_rtpengine_metrics`/`monitoring_kamailio_metrics` for the backend role (dashboard quality = last 15 min of 1-min samples) |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 
@@ -906,7 +811,7 @@ fn calculate_a1_hash(username: &str, realm: &str, password: &str) -> String {
 | 5080 | FreeSWITCH | UDP/TCP | Internal SIP profile |
 | 5062 | FreeSWITCH | UDP/TCP | External SIP profile |
 | 8000 | Rust Backend | TCP | REST API |
-| 9000 | Billing Engine | TCP | Real-time billing API |
+| 9000 | SBC engine | TCP | Health endpoint only (CDRs/active calls via ESL) |
 | 8021 | FreeSWITCH ESL | TCP | Event Socket Layer |
 | 5432 | PostgreSQL | TCP | Main database |
 | 3306 | MySQL | TCP | Kamailio database |

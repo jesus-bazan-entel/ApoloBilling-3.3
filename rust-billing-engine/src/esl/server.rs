@@ -4,33 +4,23 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use std::sync::Arc;
 use tracing::{info, error, warn};
 
-use crate::services::{AuthorizationService, RealtimeBiller, CdrGenerator};
+use crate::services::CdrGenerator;
 use crate::database::DbPool;
-use crate::cache::RedisClient;
 use super::event_handler::EventHandler;
 
 pub struct EslServer {
-    auth_service: Arc<AuthorizationService>,
-    realtime_biller: Arc<RealtimeBiller>,
     cdr_generator: Arc<CdrGenerator>,
     db_pool: DbPool,
-    redis_client: RedisClient,
 }
 
 impl EslServer {
     pub fn new(
-        auth_service: Arc<AuthorizationService>,
-        realtime_biller: Arc<RealtimeBiller>,
         cdr_generator: Arc<CdrGenerator>,
         db_pool: DbPool,
-        redis_client: RedisClient,
     ) -> Self {
         Self {
-            auth_service,
-            realtime_biller,
             cdr_generator,
             db_pool,
-            redis_client,
         }
     }
 
@@ -44,11 +34,8 @@ impl EslServer {
                     info!("ESL connection accepted from {}", addr);
                     
                     let handler = EventHandler::new_server_mode(
-                        self.auth_service.clone(),
-                        self.realtime_biller.clone(),
                         self.cdr_generator.clone(),
                         self.db_pool.clone(),
-                        self.redis_client.clone(),
                     );
 
                     tokio::spawn(async move {

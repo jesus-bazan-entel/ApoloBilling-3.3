@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import type { WSMessage, ActiveCall, DashboardStats } from '../types'
+import type { WSMessage, ActiveCall, WsStats } from '../types'
 
 interface UseWebSocketOptions {
   onCallStart?: (call: ActiveCall) => void
   onCallUpdate?: (call: ActiveCall) => void
   onCallEnd?: (call: ActiveCall) => void
-  onStatsUpdate?: (stats: DashboardStats) => void
+  onStatsUpdate?: (stats: WsStats) => void
   reconnectInterval?: number
 }
 
@@ -20,7 +20,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const [isConnected, setIsConnected] = useState(false)
   const [activeCalls, setActiveCalls] = useState<ActiveCall[]>([])
-  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [stats, setStats] = useState<WsStats | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number | null>(null)
   const connectRef = useRef<(() => void) | null>(null)
@@ -75,7 +75,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
             }
 
             case 'stats_update': {
-              const newStats = message.data as DashboardStats
+              const newStats = message.data as WsStats
               setStats(newStats)
               onStatsUpdate?.(newStats)
               break
