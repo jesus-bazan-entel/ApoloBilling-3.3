@@ -65,7 +65,7 @@ impl Repository<Cdr, i64> for PgCdrRepository {
         debug!("Finding all CDRs with limit {} offset {}", limit, offset);
 
         let query = format!(
-            "SELECT {} FROM cdrs ORDER BY start_time DESC LIMIT $1 OFFSET $2",
+            "SELECT {} FROM cdrs ORDER BY start_time DESC, id DESC LIMIT $1 OFFSET $2",
             CDR_SELECT_COLUMNS
         );
 
@@ -315,7 +315,7 @@ impl CdrRepository for PgCdrRepository {
 
         // Data query
         let data_query = format!(
-            "SELECT {} FROM cdrs {} ORDER BY start_time DESC LIMIT ${} OFFSET ${}",
+            "SELECT {} FROM cdrs {} ORDER BY start_time DESC, id DESC LIMIT ${} OFFSET ${}",
             CDR_SELECT_COLUMNS,
             where_clause,
             param_idx,
@@ -346,8 +346,13 @@ impl CdrRepository for PgCdrRepository {
         if let Some(c) = caller {
             raw_where_parts.push(format!("caller_number LIKE '{}%'", c.replace('\'', "''")));
         }
+        // The dialed number carries Integratel's routing prefix (3122…), so the
+        // callee search also looks at the routed E.164 destination
         if let Some(c) = callee {
-            raw_where_parts.push(format!("called_number LIKE '{}%'", c.replace('\'', "''")));
+            let c = c.replace('\'', "''");
+            raw_where_parts.push(format!(
+                "(called_number LIKE '{c}%' OR destination_prefix LIKE '%{c}%')"
+            ));
         }
         // RFC 3339 carries the offset; a bare timestamp would be read in the
         // session TimeZone
@@ -381,7 +386,7 @@ impl CdrRepository for PgCdrRepository {
 
         let count_sql = format!("SELECT COUNT(*) FROM cdrs {}", raw_where);
         let data_sql = format!(
-            "SELECT {} FROM cdrs {} ORDER BY start_time DESC LIMIT {} OFFSET {}",
+            "SELECT {} FROM cdrs {} ORDER BY start_time DESC, id DESC LIMIT {} OFFSET {}",
             CDR_SELECT_COLUMNS, raw_where, limit, offset
         );
 

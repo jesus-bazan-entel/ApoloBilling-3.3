@@ -11,19 +11,18 @@ use actix_web::{
     web::{Data, Json, Path, Query},
     HttpResponse, Result,
 };
+use apolo_auth::AuthenticatedUser;
 use apolo_core::{
     error::AppError,
     models::{AuditLogBuilder, Cdr},
     traits::{CdrListFilter, CdrRepository, PaginatedResponse, Repository},
     AppResult,
 };
-use apolo_auth::AuthenticatedUser;
 use apolo_db::repositories::cdr_repo::PgCdrRepository;
 use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
 use futures::{stream, StreamExt};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
-use std::io::Write;
 use tracing::{debug, error, info, instrument, warn};
 use validator::Validate;
 
@@ -163,10 +162,7 @@ pub async fn export_cdrs(
     })?;
     let end = parse_end_date(&query.end_date)?.unwrap_or_else(Utc::now);
     if end < start {
-        return Err(AppError::Validation(
-            "end_date es anterior a start_date".to_string(),
-        )
-        .into());
+        return Err(AppError::Validation("end_date es anterior a start_date".to_string()).into());
     }
     if end - start > Duration::days(MAX_EXPORT_DAYS) + Duration::hours(1) {
         return Err(AppError::Validation(format!(
@@ -176,9 +172,7 @@ pub async fn export_cdrs(
         .into());
     }
 
-    let mut params = query.into_inner();
-    params.start_date = Some(start.to_rfc3339());
-    params.end_date = Some(end.to_rfc3339());
+    let params = query.into_inner();
 
     info!(
         "Starting CDR export: user={}, format={:?}, limit={}, start={}, end={}, direction={:?}",
@@ -192,8 +186,8 @@ pub async fn export_cdrs(
         .entity_type("cdrs")
         .details(serde_json::json!({
             "format": params.format.extension(),
-            "start_date": params.start_date,
-            "end_date": params.end_date,
+            "start_date": start.to_rfc3339(),
+            "end_date": end.to_rfc3339(),
             "direction": params.direction.map(|d| d.as_str()),
             "caller": params.caller,
             "callee": params.callee,
@@ -228,20 +222,7 @@ pub async fn export_cdrs(
         format!("attachment; filename=\"{}\"", filename),
     ));
 
-    match format {
-        ExportFormat::Csv => {
-            let stream = create_csv_stream(pool, params).await?;
-            Ok(response.streaming(stream))
-        }
-        ExportFormat::Json => {
-            let stream = create_json_stream(pool, params).await?;
-            Ok(response.streaming(stream))
-        }
-        ExportFormat::Jsonl => {
-            let stream = create_jsonl_stream(pool, params).await?;
-            Ok(response.streaming(stream))
-        }
-    }
+    Ok(response.streaming(export_stream(pool, params, start, end)))
 }
 
 /// Get CDR statistics
@@ -318,256 +299,187 @@ pub async fn get_cdr_stats(
 // Helper Functions - Streaming
 // ============================================================================
 
-/// Create CSV streaming response
-async fn create_csv_stream(
-    pool: PgPool,
+/// Walks an export window newest-first in 1-hour slices. Each slice is one
+/// indexed query without OFFSET (a month is ~744 queries of at most a few
+/// thousand rows instead of OFFSET scans of up to ~850k), and consecutive
+/// slices are [lo, hi] / [.., lo - 1µs], so no CDR is skipped or repeated.
+struct ExportCursor {
+    repo: PgCdrRepository,
     params: CdrExportParams,
-) -> AppResult<impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>> {
-    const BATCH_SIZE: i64 = 1000;
-
-    let stream = stream::unfold(
-        (0_i64, false, pool, params),
-        |(offset, done, pool, params)| async move {
-            if done {
-                return None;
-            }
-
-            // Fetch batch
-            let repo = PgCdrRepository::new(pool.clone());
-            let (cdrs, _) = match repo
-                .list_filtered(
-                    params.account_id,
-                    params.caller.as_deref(),
-                    params.callee.as_deref(),
-                    parse_start_date(&params.start_date).unwrap_or(None),
-                    parse_end_date(&params.end_date).unwrap_or(None),
-                    &CdrListFilter {
-                        direction: params.direction.map(|d| d.as_str().to_string()),
-                        ..Default::default()
-                    },
-                    BATCH_SIZE,
-                    offset,
-                )
-                .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Error fetching CDRs for export: {}", e);
-                    return None;
-                }
-            };
-
-            // An empty export still gets its header
-            if cdrs.is_empty() && offset > 0 {
-                return None;
-            }
-
-            let is_done = cdrs.len() < BATCH_SIZE as usize || offset + BATCH_SIZE >= params.limit;
-
-            // Convert to CSV
-            let mut csv_data = Vec::new();
-
-            // Write header on first batch
-            if offset == 0 {
-                if let Err(e) = writeln!(&mut csv_data, "{}", CSV_HEADER) {
-                    error!("Error writing CSV header: {}", e);
-                    return None;
-                }
-            }
-
-            // Write rows
-            for cdr in cdrs {
-                let lima_time = |dt: Option<DateTime<Utc>>| {
-                    dt.map(|t| {
-                        t.with_timezone(&chrono_tz::America::Lima)
-                            .format("%Y-%m-%d %H:%M:%S")
-                            .to_string()
-                    })
-                    .unwrap_or_default()
-                };
-                let fields = [
-                    cdr.id.to_string(),
-                    cdr.call_uuid.clone(),
-                    cdr.account_id.map(|id| id.to_string()).unwrap_or_default(),
-                    cdr.caller_number.clone(),
-                    cdr.called_number.clone(),
-                    cdr.destination_prefix.clone().unwrap_or_default(),
-                    lima_time(Some(cdr.start_time)),
-                    lima_time(cdr.answer_time),
-                    lima_time(Some(cdr.end_time)),
-                    cdr.duration.to_string(),
-                    cdr.billsec.to_string(),
-                    cdr.hangup_cause.clone(),
-                    cdr.direction.clone(),
-                ];
-                let line = fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(",");
-                if let Err(e) = writeln!(&mut csv_data, "{}", line) {
-                    error!("Error writing CSV row: {}", e);
-                    return None;
-                }
-            }
-
-            Some((
-                Ok(actix_web::web::Bytes::from(csv_data)),
-                (offset + BATCH_SIZE, is_done, pool, params),
-            ))
-        },
-    );
-
-    Ok(stream)
+    start: DateTime<Utc>,
+    next_end: Option<DateTime<Utc>>,
+    remaining: i64,
 }
 
-/// Create JSON streaming response (array format)
-async fn create_json_stream(
-    pool: PgPool,
-    params: CdrExportParams,
-) -> AppResult<impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>> {
-    const BATCH_SIZE: i64 = 1000;
+impl ExportCursor {
+    fn new(
+        pool: PgPool,
+        params: CdrExportParams,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Self {
+        let remaining = params.limit;
+        Self {
+            repo: PgCdrRepository::new(pool),
+            params,
+            start,
+            next_end: Some(end),
+            remaining,
+        }
+    }
 
-    let stream = stream::unfold(
-        (0_i64, false, pool, params, true),
-        |(offset, done, pool, params, is_first)| async move {
-            if done {
-                // Send closing bracket
-                if !is_first {
-                    return Some((
-                        Ok(actix_web::web::Bytes::from("]")),
-                        (offset, true, pool, params, false),
-                    ));
-                }
-                return None;
+    /// Next non-empty slice, or None once the window or the row limit is exhausted
+    async fn next_batch(&mut self) -> AppResult<Option<Vec<Cdr>>> {
+        while let Some(hi) = self.next_end {
+            if self.remaining <= 0 {
+                break;
             }
+            let lo = (hi - Duration::hours(1)).max(self.start);
+            self.next_end = (lo > self.start).then(|| lo - Duration::microseconds(1));
 
-            // Fetch batch
-            let repo = PgCdrRepository::new(pool.clone());
-            let (cdrs, _) = match repo
+            let (cdrs, _) = self
+                .repo
                 .list_filtered(
-                    params.account_id,
-                    params.caller.as_deref(),
-                    params.callee.as_deref(),
-                    parse_start_date(&params.start_date).unwrap_or(None),
-                    parse_end_date(&params.end_date).unwrap_or(None),
+                    self.params.account_id,
+                    self.params.caller.as_deref(),
+                    self.params.callee.as_deref(),
+                    Some(lo),
+                    Some(hi),
                     &CdrListFilter {
-                        direction: params.direction.map(|d| d.as_str().to_string()),
+                        direction: self.params.direction.map(|d| d.as_str().to_string()),
                         ..Default::default()
                     },
-                    BATCH_SIZE,
-                    offset,
+                    self.remaining,
+                    0,
                 )
-                .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Error fetching CDRs for export: {}", e);
-                    return None;
-                }
-            };
-
-            let mut json_data = String::new();
-
-            // Opening bracket on first batch
-            if is_first {
-                json_data.push('[');
+                .await?;
+            if !cdrs.is_empty() {
+                self.remaining -= cdrs.len() as i64;
+                return Ok(Some(cdrs));
             }
-
-            if cdrs.is_empty() {
-                if is_first {
-                    json_data.push(']');
-                }
-                return Some((
-                    Ok(actix_web::web::Bytes::from(json_data)),
-                    (offset, true, pool, params, false),
-                ));
-            }
-
-            let is_done = cdrs.len() < BATCH_SIZE as usize || offset + BATCH_SIZE >= params.limit;
-
-            // Write JSON objects
-            for (i, cdr) in cdrs.iter().enumerate() {
-                if !is_first || i > 0 {
-                    json_data.push(',');
-                }
-
-                let row = CdrExportRow::from(cdr.clone());
-                if let Ok(json) = serde_json::to_string(&row) {
-                    json_data.push_str(&json);
-                }
-            }
-
-            Some((
-                Ok(actix_web::web::Bytes::from(json_data)),
-                (offset + BATCH_SIZE, is_done, pool, params, false),
-            ))
-        },
-    );
-
-    Ok(stream)
+        }
+        Ok(None)
+    }
 }
 
-/// Create JSON Lines streaming response (one object per line)
-async fn create_jsonl_stream(
+/// One CSV line (RFC 4180, formula-guarded, Lima times)
+fn csv_line(cdr: &Cdr) -> String {
+    let lima_time = |dt: Option<DateTime<Utc>>| {
+        dt.map(|t| {
+            t.with_timezone(&chrono_tz::America::Lima)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_default()
+    };
+    let fields = [
+        cdr.id.to_string(),
+        cdr.call_uuid.clone(),
+        cdr.account_id.map(|id| id.to_string()).unwrap_or_default(),
+        cdr.caller_number.clone(),
+        cdr.called_number.clone(),
+        cdr.destination_prefix.clone().unwrap_or_default(),
+        lima_time(Some(cdr.start_time)),
+        lima_time(cdr.answer_time),
+        lima_time(Some(cdr.end_time)),
+        cdr.duration.to_string(),
+        cdr.billsec.to_string(),
+        cdr.hangup_cause.clone(),
+        cdr.direction.clone(),
+    ];
+    let mut line = fields
+        .iter()
+        .map(|f| csv_field(f))
+        .collect::<Vec<_>>()
+        .join(",");
+    line.push('\n');
+    line
+}
+
+/// Streaming export body. A database error aborts the stream (the download
+/// fails visibly) instead of ending it early as if the file were complete.
+fn export_stream(
     pool: PgPool,
     params: CdrExportParams,
-) -> AppResult<impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>> {
-    const BATCH_SIZE: i64 = 1000;
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>> {
+    #[derive(Clone, Copy)]
+    enum Phase {
+        Open,
+        Body,
+        Closed,
+    }
 
-    let stream = stream::unfold(
-        (0_i64, false, pool, params),
-        |(offset, done, pool, params)| async move {
-            if done {
-                return None;
-            }
+    let format = params.format;
+    let cursor = ExportCursor::new(pool, params, start, end);
 
-            // Fetch batch
-            let repo = PgCdrRepository::new(pool.clone());
-            let (cdrs, _) = match repo
-                .list_filtered(
-                    params.account_id,
-                    params.caller.as_deref(),
-                    params.callee.as_deref(),
-                    parse_start_date(&params.start_date).unwrap_or(None),
-                    parse_end_date(&params.end_date).unwrap_or(None),
-                    &CdrListFilter {
-                        direction: params.direction.map(|d| d.as_str().to_string()),
-                        ..Default::default()
-                    },
-                    BATCH_SIZE,
-                    offset,
-                )
-                .await
-            {
-                Ok(result) => result,
-                Err(e) => {
-                    error!("Error fetching CDRs for export: {}", e);
-                    return None;
+    stream::unfold(
+        (cursor, Phase::Open, true),
+        move |(mut cursor, phase, first)| async move {
+            let (chunk, next) = match phase {
+                Phase::Closed => return None,
+                Phase::Open => {
+                    let head = match format {
+                        ExportFormat::Csv => format!("{}\n", CSV_HEADER),
+                        ExportFormat::Json => "[".to_string(),
+                        ExportFormat::Jsonl => String::new(),
+                    };
+                    (Ok(head), Phase::Body)
                 }
+                Phase::Body => match cursor.next_batch().await {
+                    Ok(Some(cdrs)) => {
+                        let mut out = String::new();
+                        let mut first_row = first;
+                        for cdr in cdrs {
+                            match format {
+                                ExportFormat::Csv => out.push_str(&csv_line(&cdr)),
+                                ExportFormat::Json | ExportFormat::Jsonl => {
+                                    let row = CdrExportRow::from(cdr);
+                                    let Ok(json) = serde_json::to_string(&row) else {
+                                        continue;
+                                    };
+                                    if matches!(format, ExportFormat::Json) && !first_row {
+                                        out.push(',');
+                                    }
+                                    out.push_str(&json);
+                                    if matches!(format, ExportFormat::Jsonl) {
+                                        out.push('\n');
+                                    }
+                                }
+                            }
+                            first_row = false;
+                        }
+                        return Some((
+                            Ok(actix_web::web::Bytes::from(out)),
+                            (cursor, Phase::Body, first_row),
+                        ));
+                    }
+                    Ok(None) => {
+                        let tail = if matches!(format, ExportFormat::Json) {
+                            "]"
+                        } else {
+                            ""
+                        };
+                        (Ok(tail.to_string()), Phase::Closed)
+                    }
+                    Err(e) => {
+                        error!("Error fetching CDRs for export: {}", e);
+                        (
+                            Err(actix_web::error::ErrorInternalServerError(
+                                "CDR export aborted",
+                            )),
+                            Phase::Closed,
+                        )
+                    }
+                },
             };
-
-            if cdrs.is_empty() {
-                return None;
-            }
-
-            let is_done = cdrs.len() < BATCH_SIZE as usize || offset + BATCH_SIZE >= params.limit;
-
-            let mut jsonl_data = String::new();
-
-            // Write JSON Lines
-            for cdr in cdrs {
-                let row = CdrExportRow::from(cdr);
-                if let Ok(json) = serde_json::to_string(&row) {
-                    jsonl_data.push_str(&json);
-                    jsonl_data.push('\n');
-                }
-            }
-
             Some((
-                Ok(actix_web::web::Bytes::from(jsonl_data)),
-                (offset + BATCH_SIZE, is_done, pool, params),
+                chunk.map(actix_web::web::Bytes::from),
+                (cursor, next, first),
             ))
         },
-    );
-
-    Ok(stream)
+    )
 }
 
 // ============================================================================
@@ -700,12 +612,17 @@ fn get_period_key(dt: &DateTime<Utc>, group_by: StatsGroupBy) -> (String, DateTi
 const MAX_EXPORT_DAYS: i64 = 31;
 
 /// CSV header; times are Lima local time (UTC-5, no DST)
-const CSV_HEADER: &str = "id,call_uuid,account_id,caller,callee,destination,start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,direction";
+const CSV_HEADER: &str = "id,call_uuid,account_id,caller,callee,destination (E.164),start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,direction";
 
 /// RFC 4180 field: quoted when it holds a comma, quote or line break; values a
-/// spreadsheet would run as a formula (= + - @, tab, CR) are prefixed with '
+/// spreadsheet would run as a formula (= + - @, tab, CR) are prefixed with '.
+/// A bare E.164 number (`+` and 1-15 digits) can't carry a formula and is left
+/// intact, so the destination column stays machine-readable.
 fn csv_field(value: &str) -> String {
-    let guarded = if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+    let e164 = value
+        .strip_prefix('+')
+        .is_some_and(|d| (1..=15).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit()));
+    let guarded = if !e164 && value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
         format!("'{}", value)
     } else {
         value.to_string()
@@ -776,7 +693,10 @@ mod tests {
     #[test]
     fn test_csv_field_quotes_and_formula_guard() {
         assert_eq!(csv_field("912345678"), "912345678");
-        assert_eq!(csv_field("+18505551234"), "'+18505551234");
+        assert_eq!(csv_field("+18505551234"), "+18505551234");
+        assert_eq!(csv_field("+1+1"), "'+1+1");
+        assert_eq!(csv_field("+cmd|' /C calc'!A0"), "'+cmd|' /C calc'!A0");
+        assert_eq!(csv_field("-1"), "'-1");
         assert_eq!(csv_field("=HYPERLINK(1)"), "'=HYPERLINK(1)");
         assert_eq!(csv_field("a,b"), "\"a,b\"");
         assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
@@ -788,11 +708,17 @@ mod tests {
         let some = |s: &str| Some(s.to_string());
         // Bare date = Lima calendar day
         assert_eq!(
-            parse_start_date(&some("2026-10-24")).unwrap().unwrap().to_rfc3339(),
+            parse_start_date(&some("2026-10-24"))
+                .unwrap()
+                .unwrap()
+                .to_rfc3339(),
             "2026-10-24T05:00:00+00:00"
         );
         assert_eq!(
-            parse_end_date(&some("2026-10-24")).unwrap().unwrap().to_rfc3339(),
+            parse_end_date(&some("2026-10-24"))
+                .unwrap()
+                .unwrap()
+                .to_rfc3339(),
             "2026-10-25T04:59:59.999999+00:00"
         );
         // RFC 3339 with offset

@@ -74,8 +74,10 @@ pub struct CdrExportParams {
     pub limit: i64,
 }
 
+/// Covers the longest export window (31 days ≈ 870k CDRs at Oct-2026
+/// volume), so a full-month export is never silently cut short
 fn default_export_limit() -> i64 {
-    100_000
+    1_000_000
 }
 
 /// CDR statistics parameters
@@ -160,7 +162,6 @@ pub struct CdrStats {
     /// Average billable duration in seconds
     pub avg_billsec: Decimal,
 
-
     /// Breakdown by period (if grouped)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time_series: Option<Vec<TimeSeriesPoint>>,
@@ -177,7 +178,6 @@ pub struct TimeSeriesPoint {
 
     /// Number of calls in this period
     pub calls: i64,
-
 
     /// Total duration in seconds
     pub duration: i64,
@@ -218,7 +218,6 @@ pub struct CdrResponse {
 
     /// Billable duration in seconds
     pub billsec: i32,
-
 
     /// Hangup cause
     pub hangup_cause: String,

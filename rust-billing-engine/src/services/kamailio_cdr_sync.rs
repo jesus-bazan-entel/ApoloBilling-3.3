@@ -11,7 +11,8 @@
 // The PG insert and the cursor advance (kamailio_cdr_sync_state) commit in the
 // same transaction, so each acc_cdrs row is imported exactly once.
 use crate::database::DbPool;
-use crate::services::cdr_generator::decode_sip_user;
+use crate::services::cdr_generator::{customer_account_sql, decode_sip_user};
+use crate::services::numbering::{customer_keys, routed_number, to_e164};
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
 use std::str::FromStr;
@@ -146,18 +147,27 @@ impl KamailioCdrSync {
                 sip_code_to_cause(&cdr.sip_code)
             };
             let call_uuid: String = cdr.callid.chars().take(100).collect();
+            let caller = decode_sip_user(&cdr.src_user);
+            let callee = decode_sip_user(&cdr.dst_user);
+            let routed = routed_number(&callee, None);
+            let destination = to_e164(&routed);
+            let customer = customer_keys(&caller, &routed, "inbound");
 
             imported += tx
                 .execute(
-                    "INSERT INTO cdrs
-                     (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
-                      duration, billsec, hangup_cause, direction, freeswitch_server_id)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'inbound', $10)
-                     ON CONFLICT (call_uuid, start_time) DO NOTHING",
+                    &format!(
+                        "INSERT INTO cdrs
+                         (call_uuid, caller_number, called_number, start_time, answer_time,
+                          end_time, duration, billsec, hangup_cause, direction,
+                          freeswitch_server_id, destination_prefix, account_id)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'inbound', $10, $11, {})
+                         ON CONFLICT (call_uuid, start_time) DO NOTHING",
+                        customer_account_sql(12)
+                    ),
                     &[
                         &call_uuid,
-                        &decode_sip_user(&cdr.src_user),
-                        &decode_sip_user(&cdr.dst_user),
+                        &caller,
+                        &callee,
                         &start_time,
                         &answer_time,
                         &end_time,
@@ -165,6 +175,8 @@ impl KamailioCdrSync {
                         &billsec,
                         &hangup_cause,
                         &SERVER_ID,
+                        &destination,
+                        &customer,
                     ],
                 )
                 .await?;

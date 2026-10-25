@@ -347,6 +347,7 @@ impl EventHandler {
             hangup_cause,
             direction: direction.clone(),  // ✅ Dirección real
             server_id: self.server_id.clone(),
+            transformed_number: event.get_header("variable_transformed_number").cloned(),
             pdd_ms: legs.pdd_ms,
             mos: legs.mos,
             rtp_loss_pct: legs.loss_pct,

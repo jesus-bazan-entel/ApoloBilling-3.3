@@ -1,9 +1,12 @@
 // src/services/cdr_generator.rs
 //
-// Writes the CDR of each a-leg at hangup. This SBC node does not bill: CDRs
-// carry no account, rate or cost (those columns stay NULL).
+// Writes the CDR of each a-leg at hangup. This SBC node does not bill: rate and
+// cost stay NULL. `account_id` is the customer (Cliente) whose SIP device is
+// the routed destination (inbound) or the caller (outbound), NULL when the
+// number belongs to no device (e.g. FS Legado customers).
 use crate::database::DbPool;
 use crate::error::EngineError;
+use crate::services::numbering::{customer_keys, routed_number, to_e164};
 use chrono::{DateTime, Utc};
 use tracing::{info, error};
 
@@ -24,6 +27,8 @@ pub struct HangupEvent {
     pub hangup_cause: String,
     pub direction: String,
     pub server_id: String,
+    /// FreeSWITCH `transformed_number` (inbound route strip/prefix), if set
+    pub transformed_number: Option<String>,
     /// Post-Dial Delay (INVITE → first 180/183) in ms
     pub pdd_ms: Option<i32>,
     /// Worst leg's FreeSWITCH-estimated MOS and received-RTP loss percent
@@ -43,18 +48,28 @@ impl CdrGenerator {
                 EngineError::Internal(e.to_string())
             })?;
 
+        let caller = decode_sip_user(&event.caller);
+        let callee = decode_sip_user(&event.callee);
+        let routed = routed_number(&callee, event.transformed_number.as_deref());
+        let destination = to_e164(&routed);
+        let customer = customer_keys(&caller, &routed, &event.direction);
+
         let row = client
             .query_one(
-                "INSERT INTO cdrs
-                 (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
-                  duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms,
-                  mos, rtp_loss_pct)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                 RETURNING id",
+                &format!(
+                    "INSERT INTO cdrs
+                     (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
+                      duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms,
+                      mos, rtp_loss_pct, destination_prefix, account_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                             {})
+                     RETURNING id",
+                    customer_account_sql(16)
+                ),
                 &[
                     &event.uuid,
-                    &decode_sip_user(&event.caller),
-                    &decode_sip_user(&event.callee),
+                    &caller,
+                    &callee,
                     &event.start_time,
                     &event.answer_time,
                     &event.end_time,
@@ -66,6 +81,8 @@ impl CdrGenerator {
                     &event.pdd_ms,
                     &event.mos,
                     &event.rtp_loss_pct,
+                    &destination,
+                    &customer,
                 ],
             )
             .await?;
@@ -78,6 +95,16 @@ impl CdrGenerator {
 
         Ok(cdr_id)
     }
+}
+
+/// Subquery resolving `account_id` from a text[] parameter of
+/// `sip_devices.sip_username` candidates (see `numbering::customer_keys`)
+pub fn customer_account_sql(param: usize) -> String {
+    format!(
+        "(SELECT account_id FROM sip_devices WHERE sip_username = ANY(${}::text[]) \
+         ORDER BY enabled DESC, id LIMIT 1)",
+        param
+    )
 }
 
 /// Percent-decode a SIP URI user part. Carriers send E.164 callers as

@@ -130,7 +130,8 @@ rust-backend/
 ```
 rust-billing-engine/src/
 ├── services/
-│   ├── cdr_generator.rs      # CDR insert at a-leg hangup (no account/rate/cost)
+│   ├── cdr_generator.rs      # CDR insert at a-leg hangup (E.164 destination + customer, no rate/cost)
+│   ├── numbering.rs          # Routed number (strip 31xx), Peru E.164, customer lookup keys
 │   └── kamailio_cdr_sync.rs  # Direct-routed inbound CDRs from Kamailio acc_cdrs
 ├── esl/                      # FreeSWITCH Event Socket Layer
 │   └── event_handler.rs      # active_calls tracking, CDRs, b-leg PDD
@@ -182,7 +183,7 @@ Core tables in `apolo_billing` database:
 
 ### Customers & Calls
 - `accounts` - Customers ("Clientes": number, name, status, COD_PED, location). `status` ≠ active blocks the customer's SIP REGISTER. Billing columns (balance, credit_limit, plan_id, account_type) are unused
-- `cdrs` - Call detail records (duration, billsec, hangup cause, `pdd_ms`, `mos`, `rtp_loss_pct`); partitioned monthly
+- `cdrs` - Call detail records (duration, billsec, hangup cause, `pdd_ms`, `mos`, `rtp_loss_pct`); partitioned monthly. `caller_number`/`called_number` = as exchanged with the carrier (percent-decoded, `called_number` keeps Integratel's `31`+2-digit routing prefix); `destination_prefix` (API/CSV `destination`) = routed destination in E.164; `account_id` = customer whose `sip_devices.sip_username` is the routed destination (inbound) or caller (outbound), NULL for FS Legado customers (~94% of inbound) — migration 023
 - `active_calls` - Currently ongoing calls
 - `noc_events` - Dashboard chart marks (migration 019)
 
@@ -249,7 +250,7 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/accounts/stats` | GET | Total / active customers | Authenticated |
 | `/provisioning` (`/bulk`) | POST | Customer + SIP device (individual / bulk) | Superadmin |
 | `/cdrs` | GET | List CDRs with pagination; dates are RFC 3339 with offset or `YYYY-MM-DD` (Lima day), anything else is 400 | Authenticated |
-| `/cdrs/export` | GET | Streaming export (CSV/JSON); `start_date` required, ≤31 days, CSV times in Lima, RFC 4180 + formula guard, audited | Authenticated |
+| `/cdrs/export` | GET | Streaming export (CSV/JSON) in 1-hour slices (no OFFSET; a month ≈ 5 s); `start_date` required, ≤31 days, default limit 1M, CSV times in Lima, RFC 4180 + formula guard (bare E.164 left intact), audited | Authenticated |
 | `/cdrs/stats` | GET | CDR statistics | Authenticated |
 | `/active-calls` | GET | List active calls | Authenticated |
 | `/stats/noc` | GET | NOC dashboard overview | Authenticated |
@@ -404,6 +405,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 020_noc_live_quality_and_pdd.sql | `cdrs.pdd_ms` (INVITE → first 180/183, written by the billing engine from FS `*_uepoch` vars; NULL on direct Kamailio CDRs) + SELECT on `monitoring_rtpengine_metrics`/`monitoring_kamailio_metrics` for the backend role (dashboard quality = last 15 min of 1-min samples) |
 | 021_cdr_media_quality.sql | `cdrs.mos` / `cdrs.rtp_loss_pct`: worst leg's FreeSWITCH-measured MOS and received-RTP loss (`rtp_audio_in_mos`, `skip_packet_count / media_packet_count`), written by the engine. Still written, but no longer on the dashboard (see *NOC quality indicators*) |
 | 022_drop_internal_routes.sql | Drops `internal_routes` / `system_endpoints` (the *Rutas Internas* module, removed 2026-10-25; backup in `/root/internal_routes-backup-*.sql`) |
+| 023_cdr_destination_e164_account.sql | `cdrs.destination_prefix` repurposed as the routed destination in E.164 + `account_id` from `sip_devices` (SQL mirrors `apolo_routed_number`/`apolo_e164` of the engine's `numbering.rs`); backfills October 2026 (`SET statement_timeout = 0`, ~1 min) |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 
