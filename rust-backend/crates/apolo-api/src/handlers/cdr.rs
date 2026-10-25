@@ -14,7 +14,7 @@ use actix_web::{
 use apolo_core::{
     error::AppError,
     models::Cdr,
-    traits::{CdrRepository, PaginatedResponse, Repository},
+    traits::{CdrListFilter, CdrRepository, PaginatedResponse, Repository},
     AppResult,
 };
 use apolo_auth::AuthenticatedUser;
@@ -73,29 +73,17 @@ pub async fn list_cdrs(
             query.callee.as_deref(),
             start_date,
             end_date,
+            &CdrListFilter {
+                direction: query.direction.map(|d| d.as_str().to_string()),
+                hangup_cause: query.hangup_cause.clone(),
+                answered_only: query.answered_only,
+            },
             query.pagination.limit(),
             query.pagination.offset(),
         )
         .await?;
 
-    // Apply additional filters in memory (direction, answered_only)
-    let mut filtered_cdrs: Vec<Cdr> = cdrs;
-
-    if let Some(direction) = query.direction {
-        filtered_cdrs.retain(|cdr| cdr.direction.to_lowercase() == direction.as_str());
-    }
-
-    if query.answered_only {
-        filtered_cdrs.retain(|cdr| cdr.was_answered());
-    }
-
-    if let Some(ref cause) = query.hangup_cause {
-        let cause_upper = cause.to_uppercase();
-        filtered_cdrs.retain(|cdr| cdr.hangup_cause.to_uppercase().contains(&cause_upper));
-    }
-
-    let response_data: Vec<CdrResponse> =
-        filtered_cdrs.into_iter().map(CdrResponse::from).collect();
+    let response_data: Vec<CdrResponse> = cdrs.into_iter().map(CdrResponse::from).collect();
 
     info!(
         "Retrieved {} CDRs out of {} total",
@@ -241,6 +229,7 @@ pub async fn get_cdr_stats(
             None,
             query.start_date,
             query.end_date,
+            &CdrListFilter::default(),
             1_000_000, // Large limit for stats
             0,
         )
@@ -296,6 +285,10 @@ async fn create_csv_stream(
                     params.callee.as_deref(),
                     parse_start_date(&params.start_date),
                     parse_end_date(&params.end_date),
+                    &CdrListFilter {
+                        direction: params.direction.map(|d| d.as_str().to_string()),
+                        ..Default::default()
+                    },
                     BATCH_SIZE,
                     offset,
                 )
@@ -393,6 +386,10 @@ async fn create_json_stream(
                     params.callee.as_deref(),
                     parse_start_date(&params.start_date),
                     parse_end_date(&params.end_date),
+                    &CdrListFilter {
+                        direction: params.direction.map(|d| d.as_str().to_string()),
+                        ..Default::default()
+                    },
                     BATCH_SIZE,
                     offset,
                 )
@@ -469,6 +466,10 @@ async fn create_jsonl_stream(
                     params.callee.as_deref(),
                     parse_start_date(&params.start_date),
                     parse_end_date(&params.end_date),
+                    &CdrListFilter {
+                        direction: params.direction.map(|d| d.as_str().to_string()),
+                        ..Default::default()
+                    },
                     BATCH_SIZE,
                     offset,
                 )
@@ -677,7 +678,7 @@ fn parse_end_date(date_str: &Option<String>) -> Option<DateTime<Utc>> {
 
     // Try parsing as simple date (END of day in Lima timezone - 23:59:59)
     if let Ok(naive) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        if let Some(naive_dt) = naive.and_hms_opt(23, 59, 59) {
+        if let Some(naive_dt) = naive.and_hms_micro_opt(23, 59, 59, 999_999) {
             // Parse date as Lima timezone, then convert to UTC for PostgreSQL
             let lima_dt = Lima.from_local_datetime(&naive_dt).unwrap();
             return Some(lima_dt.with_timezone(&Utc));

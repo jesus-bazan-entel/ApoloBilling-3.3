@@ -61,6 +61,9 @@ pub struct CdrExportParams {
     /// End date filter (YYYY-MM-DD means end of that day in Lima time)
     pub end_date: Option<String>,
 
+    /// Call direction filter
+    pub direction: Option<CdrDirection>,
+
     /// Export format
     #[serde(default)]
     pub format: ExportFormat,
@@ -115,6 +118,8 @@ pub enum CdrDirection {
     Inbound,
     /// Outbound calls
     Outbound,
+    /// Internal calls
+    Internal,
 }
 
 impl CdrDirection {
@@ -123,6 +128,7 @@ impl CdrDirection {
         match self {
             Self::Inbound => "inbound",
             Self::Outbound => "outbound",
+            Self::Internal => "internal",
         }
     }
 }

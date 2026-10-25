@@ -2245,7 +2245,7 @@ function SipStatusDetailModal({ status, onClose }: SipStatusDetailModalProps) {
                   <div>Via: SIP/2.0/UDP {status.sip_exchange?.local_endpoint};branch=z9hG4bK-check</div>
                   <div>From: &lt;sip:apolo-sbc@local&gt;;tag=check123</div>
                   <div>To: &lt;sip:{status.sip_exchange?.remote_endpoint}&gt;</div>
-                  <div>Call-ID: options-{Date.now()}@apolo-sbc</div>
+                  <div>Call-ID: options-{Date.parse(status.checked_at) || 0}@apolo-sbc</div>
                   <div>CSeq: 1 OPTIONS</div>
                   <div>User-Agent: Apolo-SBC/1.0</div>
                   <div>Max-Forwards: 70</div>

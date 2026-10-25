@@ -1,27 +1,97 @@
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useState } from 'react'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { fetchCDRs, exportCDRs } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
+import QuickRangeBar from '../components/QuickRangeBar'
 import { FileText, Download, Search, Filter, X } from 'lucide-react'
 import type { CDR, CDRFilters } from '../types'
+import {
+  DEFAULT_RANGE,
+  describeRange,
+  isRangeKey,
+  resolveRange,
+  toApiTimestamp,
+  toLimaLocal,
+  type RangeKey,
+} from '../lib/cdrTimeRanges'
+
+// Filters live in the URL (/cdr?range=yesterday&direction=inbound) so a view can
+// be pasted into a ticket or the NOC chat.
+const URL_FILTERS = ['caller', 'callee', 'direction'] as const
+type UrlFilter = (typeof URL_FILTERS)[number]
 
 export default function CDRPage() {
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState<CDRFilters>({})
   const [showFilters, setShowFilters] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['cdrs', page, filters],
-    queryFn: () => fetchCDRs(filters, page, 50),
-    // Refresca automáticamente para mostrar CDRs nuevos sin recargar la página
-    // (mismo patrón que ActiveCalls.tsx). Antes esta query solo corría una vez.
-    refetchInterval: 3000,
+  const rawRange = searchParams.get('range')
+  const range: RangeKey = isRangeKey(rawRange) ? rawRange : DEFAULT_RANGE
+  const customFrom = searchParams.get('from') ?? ''
+  const customTo = searchParams.get('to') ?? ''
+  const filters: Pick<CDRFilters, UrlFilter> = Object.fromEntries(
+    URL_FILTERS.flatMap((k) => {
+      const v = searchParams.get(k)
+      return v ? [[k, v]] : []
+    })
+  )
+
+  const updateParams = useCallback(
+    (changes: Record<string, string | undefined>) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          Object.entries(changes).forEach(([k, v]) => (v ? next.set(k, v) : next.delete(k)))
+          return next
+        },
+        { replace: true }
+      )
+      setPage(1)
+    },
+    [setSearchParams]
+  )
+
+  const selectRange = useCallback(
+    (key: Exclude<RangeKey, 'custom'>) => updateParams({ range: key, from: undefined, to: undefined }),
+    [updateParams]
+  )
+
+  // The range is resolved when the query runs, not when the button is clicked,
+  // so "Hoy" / "Última hora" keep moving on every refresh.
+  const buildFilters = (
+    nowMs: number
+  ): { apiFilters: CDRFilters; resolved: ReturnType<typeof resolveRange> } => {
+    const resolved = resolveRange(range, nowMs, { from: customFrom, to: customTo })
+    return {
+      resolved,
+      apiFilters: {
+        ...filters,
+        start_date: resolved.start ? toApiTimestamp(resolved.start) : undefined,
+        end_date: resolved.end ? toApiTimestamp(resolved.end) : undefined,
+      },
+    }
+  }
+
+  const openEnded = range === 'custom' ? !customTo : resolveRange(range, 0).end === null
+
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['cdrs', page, range, customFrom, customTo, filters],
+    queryFn: async () => {
+      const { apiFilters, resolved } = buildFilters(Date.now())
+      const result = await fetchCDRs(apiFilters, page, 50)
+      return { ...result, rangeLabel: describeRange(resolved) }
+    },
+    placeholderData: keepPreviousData,
+    // New CDRs only appear in ranges that end "now"
+    refetchInterval: autoRefresh && openEnded ? 30_000 : false,
   })
 
   const handleExport = async () => {
     try {
-      const blob = await exportCDRs(filters)
+      const blob = await exportCDRs(buildFilters(Date.now()).apiFilters)
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -123,14 +193,22 @@ export default function CDRPage() {
     },
   ]
 
-  const clearFilters = () => {
-    setFilters({})
-    setPage(1)
-  }
+  const clearFilters = () =>
+    updateParams({ caller: undefined, callee: undefined, direction: undefined })
 
-  const hasActiveFilters = Object.values(filters).some(
-    (v) => v !== undefined && v !== ''
-  )
+  const activeFilterCount = Object.keys(filters).length
+  const hasActiveFilters = activeFilterCount > 0
+
+  // Custom range: datetime-local values are Lima time. Starting from a quick
+  // range pre-fills its current bounds.
+  const setCustomBound = (bound: 'from' | 'to', value: string) => {
+    const current = resolveRange(range, Date.now(), { from: customFrom, to: customTo })
+    updateParams({
+      range: 'custom',
+      from: bound === 'from' ? value : customFrom || (current.start ? toLimaLocal(current.start) : ''),
+      to: bound === 'to' ? value : range === 'custom' ? customTo : current.end ? toLimaLocal(current.end) : '',
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -156,7 +234,7 @@ export default function CDRPage() {
             Filtros
             {hasActiveFilters && (
               <span className="ml-2 bg-[#ff5a0a] text-white text-xs px-2 py-0.5 rounded-full">
-                {Object.values(filters).filter((v) => v !== undefined && v !== '').length}
+                {activeFilterCount}
               </span>
             )}
           </button>
@@ -169,6 +247,20 @@ export default function CDRPage() {
           </button>
         </div>
       </div>
+
+      <QuickRangeBar
+        value={range}
+        onSelect={selectRange}
+        onCustom={() => {
+          setShowFilters(true)
+          if (range !== 'custom') setCustomBound('from', '')
+        }}
+        description={data?.rangeLabel}
+        openEnded={openEnded}
+        autoRefresh={autoRefresh}
+        onToggleAutoRefresh={() => setAutoRefresh((v) => !v)}
+        refreshing={isFetching}
+      />
 
       {/* Filters Panel */}
       {showFilters && (
@@ -188,27 +280,23 @@ export default function CDRPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Fecha Inicio
+                Desde (hora Lima)
               </label>
               <input
-                type="date"
-                value={filters.start_date || ''}
-                onChange={(e) =>
-                  setFilters({ ...filters, start_date: e.target.value })
-                }
+                type="datetime-local"
+                value={range === 'custom' ? customFrom : ''}
+                onChange={(e) => setCustomBound('from', e.target.value)}
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Fecha Fin
+                Hasta (vacío = ahora)
               </label>
               <input
-                type="date"
-                value={filters.end_date || ''}
-                onChange={(e) =>
-                  setFilters({ ...filters, end_date: e.target.value })
-                }
+                type="datetime-local"
+                value={range === 'custom' ? customTo : ''}
+                onChange={(e) => setCustomBound('to', e.target.value)}
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               />
             </div>
@@ -221,9 +309,7 @@ export default function CDRPage() {
                 <input
                   type="text"
                   value={filters.caller || ''}
-                  onChange={(e) =>
-                    setFilters({ ...filters, caller: e.target.value })
-                  }
+                  onChange={(e) => updateParams({ caller: e.target.value })}
                   placeholder="Ej: 1001"
                   className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
                 />
@@ -238,9 +324,7 @@ export default function CDRPage() {
                 <input
                   type="text"
                   value={filters.callee || ''}
-                  onChange={(e) =>
-                    setFilters({ ...filters, callee: e.target.value })
-                  }
+                  onChange={(e) => updateParams({ callee: e.target.value })}
                   placeholder="Ej: 51987654321"
                   className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
                 />
@@ -252,9 +336,7 @@ export default function CDRPage() {
               </label>
               <select
                 value={filters.direction || ''}
-                onChange={(e) =>
-                  setFilters({ ...filters, direction: e.target.value || undefined })
-                }
+                onChange={(e) => updateParams({ direction: e.target.value })}
                 className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
               >
                 <option value="">Todas</option>
@@ -295,7 +377,7 @@ export default function CDRPage() {
             : undefined
         }
         searchable={true}
-        searchPlaceholder="Búsqueda rápida en resultados..."
+        searchPlaceholder="Filtrar solo las filas de esta página…"
       />
     </div>
   )

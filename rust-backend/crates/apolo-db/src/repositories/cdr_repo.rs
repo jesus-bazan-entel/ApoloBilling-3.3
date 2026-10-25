@@ -7,7 +7,7 @@
 
 use apolo_core::{
     models::Cdr,
-    traits::{CdrRepository, Repository},
+    traits::{CdrListFilter, CdrRepository, Repository},
     AppError, AppResult,
 };
 use async_trait::async_trait;
@@ -260,6 +260,7 @@ impl CdrRepository for PgCdrRepository {
         callee: Option<&str>,
         start_date: Option<DateTime<Utc>>,
         end_date: Option<DateTime<Utc>>,
+        filter: &CdrListFilter,
         limit: i64,
         offset: i64,
     ) -> AppResult<(Vec<Cdr>, i64)> {
@@ -348,17 +349,28 @@ impl CdrRepository for PgCdrRepository {
         if let Some(c) = callee {
             raw_where_parts.push(format!("called_number LIKE '{}%'", c.replace('\'', "''")));
         }
+        // RFC 3339 carries the offset; a bare timestamp would be read in the
+        // session TimeZone
         if let Some(start) = start_date {
-            raw_where_parts.push(format!(
-                "start_time >= '{}'",
-                start.format("%Y-%m-%d %H:%M:%S")
-            ));
+            raw_where_parts.push(format!("start_time >= '{}'", start.to_rfc3339()));
         }
         if let Some(end) = end_date {
+            raw_where_parts.push(format!("start_time <= '{}'", end.to_rfc3339()));
+        }
+        if let Some(d) = filter.direction.as_deref().filter(|d| !d.is_empty()) {
             raw_where_parts.push(format!(
-                "start_time <= '{}'",
-                end.format("%Y-%m-%d %H:%M:%S")
+                "LOWER(direction) = '{}'",
+                d.to_lowercase().replace('\'', "''")
             ));
+        }
+        if let Some(c) = filter.hangup_cause.as_deref().filter(|c| !c.is_empty()) {
+            raw_where_parts.push(format!(
+                "UPPER(hangup_cause) LIKE '%{}%'",
+                c.to_uppercase().replace('\'', "''")
+            ));
+        }
+        if filter.answered_only {
+            raw_where_parts.push("answer_time IS NOT NULL AND billsec > 0".to_string());
         }
 
         let raw_where = if raw_where_parts.is_empty() {

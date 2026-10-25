@@ -59,6 +59,18 @@ pub trait AccountRepository: Repository<Account, i32> {
     async fn stats(&self) -> Result<AccountStats, AppError>;
 }
 
+/// CDR filters applied in SQL next to the indexed ones, so pagination and
+/// the total count match what the page shows
+#[derive(Debug, Clone, Default)]
+pub struct CdrListFilter {
+    /// `inbound` / `outbound` / `internal` (case-insensitive)
+    pub direction: Option<String>,
+    /// Substring of the hangup cause (case-insensitive)
+    pub hangup_cause: Option<String>,
+    /// Only answered calls (answer_time set and billsec > 0)
+    pub answered_only: bool,
+}
+
 /// CDR repository trait with specialized methods
 #[async_trait]
 pub trait CdrRepository: Repository<Cdr, i64> {
@@ -73,6 +85,7 @@ pub trait CdrRepository: Repository<Cdr, i64> {
         callee: Option<&str>,
         start_date: Option<chrono::DateTime<chrono::Utc>>,
         end_date: Option<chrono::DateTime<chrono::Utc>>,
+        filter: &CdrListFilter,
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<Cdr>, i64), AppError>;

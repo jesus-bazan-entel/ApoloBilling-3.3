@@ -189,11 +189,11 @@ export const exportCDRs = async (filters?: CDRFilters, format: 'csv' | 'json' = 
     responseType: 'blob',
   })
   if (format !== 'csv') return data
-  return new Blob([adjustCdrCsv(await data.text(), filters)], { type: 'text/csv;charset=utf-8' })
+  return new Blob([adjustCdrCsv(await data.text())], { type: 'text/csv;charset=utf-8' })
 }
 
-// The export endpoint returns times in UTC and ignores the direction filter;
-// apply both here so the file matches the CDR screen.
+// The export endpoint returns times in UTC; convert them so the file matches
+// the CDR screen (direction is filtered server-side).
 const CSV_TIME_COLUMNS = ['start_time', 'answer_time', 'end_time']
 const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000 // Peru: UTC-5 all year
 
@@ -204,22 +204,19 @@ const toLimaTime = (value: string): string => {
   return new Date(ms + LIMA_OFFSET_MS).toISOString().slice(0, 19).replace('T', ' ')
 }
 
-export const adjustCdrCsv = (csv: string, filters?: CDRFilters): string => {
+export const adjustCdrCsv = (csv: string): string => {
   const lines = csv.split('\n').filter((line) => line !== '')
   if (lines.length === 0) return csv
   const header = lines[0].split(',')
   const col = (name: string) => header.indexOf(name)
   const timeCols = CSV_TIME_COLUMNS.map(col).filter((i) => i >= 0)
-  const dirCol = col('direction')
-  const direction = filters?.direction?.toLowerCase()
 
-  const rows = lines.slice(1).flatMap((line) => {
+  const rows = lines.slice(1).map((line) => {
     const cells = line.split(',')
-    if (direction && dirCol >= 0 && cells[dirCol]?.toLowerCase() !== direction) return []
     timeCols.forEach((i) => {
       cells[i] = toLimaTime(cells[i])
     })
-    return [cells.join(',')]
+    return cells.join(',')
   })
   return [header.join(','), ...rows].join('\n') + '\n'
 }
