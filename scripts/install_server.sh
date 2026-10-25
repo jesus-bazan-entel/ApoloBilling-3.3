@@ -827,6 +827,16 @@ deploy_apolo_configs() {
             fi
         fi
 
+        # Stock switch.conf.xml / modules.conf.xml stay, with two tweaks:
+        #   - core DB (SQLite, written on every channel change) on tmpfs, as the
+        #     vanilla config suggests, instead of /var/lib/freeswitch/db
+        #   - no mod_cdr_csv: CDRs go to PostgreSQL via the SBC engine; the CSVs
+        #     were a redundant write per call (1.3 GB in production)
+        sed -i 's#^\( *\)<!-- *<param name="core-db-name" value="/dev/shm/core.db" */> *-->#\1<param name="core-db-name" value="/dev/shm/core.db" />#' \
+            /etc/freeswitch/autoload_configs/switch.conf.xml
+        sed -i 's#^\( *\)<load module="mod_cdr_csv"/>#\1<!-- <load module="mod_cdr_csv"/> -->#' \
+            /etc/freeswitch/autoload_configs/modules.conf.xml
+
         chown -R freeswitch:freeswitch /etc/freeswitch
 
         # The apolo backend user rewrites /etc/freeswitch/dialplan/from-kamailio.xml
