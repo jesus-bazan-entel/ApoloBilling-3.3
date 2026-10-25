@@ -28,6 +28,7 @@ from app.models.monitoring import (
     SystemMetrics, MonitoringAlert, MonitoringConfig
 )
 from app.monitoring.service import MonitoringService, CollectorResult
+from app.monitoring.rates import mariadb_rates
 from app.api.routers import monitoring
 
 # Configure logging
@@ -167,18 +168,19 @@ async def get_overview(db: Session = Depends(get_db)):
         if not mariadb_latest:
             return {"connections_used": 0, "connections_max": 0, "connection_usage_percent": 0, "queries_per_second": 0, "slow_queries_per_minute": 0, "buffer_pool_usage_percent": 0, "replication_lag_seconds": None, "deadlocks_per_minute": 0, "status": "unknown", "last_update": now.isoformat()}
         m = mariadb_latest
+        slow_pm, deadlocks_pm = mariadb_rates(db, m)
         mc = m.max_used_connections or 151
         cp = (m.threads_connected / mc * 100) if mc > 0 else 0
         bp = m.innodb_buffer_pool_used_mb + m.innodb_buffer_pool_free_mb
         bp_p = (m.innodb_buffer_pool_used_mb / bp * 100) if bp > 0 else 0
         st = "healthy"
-        if cp > 90 or m.slow_queries > 10 or m.innodb_deadlocks > 5: st = "critical"
-        elif cp > 70 or m.slow_queries > 5 or m.innodb_deadlocks > 1: st = "degraded"
+        if cp > 90 or slow_pm > 10 or deadlocks_pm > 5: st = "critical"
+        elif cp > 70 or slow_pm > 5 or deadlocks_pm > 1: st = "degraded"
         return {
             "connections_used": m.threads_connected, "connections_max": mc,
             "connection_usage_percent": round(cp, 2), "queries_per_second": round(m.queries_per_second or 0, 2),
-            "slow_queries_per_minute": m.slow_queries, "buffer_pool_usage_percent": round(bp_p, 2),
-            "replication_lag_seconds": m.seconds_behind_master, "deadlocks_per_minute": m.innodb_deadlocks,
+            "slow_queries_per_minute": slow_pm, "buffer_pool_usage_percent": round(bp_p, 2),
+            "replication_lag_seconds": m.seconds_behind_master, "deadlocks_per_minute": deadlocks_pm,
             "status": st, "last_update": m.timestamp.isoformat()
         }
     

@@ -8,6 +8,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
 
 from app.db.session import SessionLocal
+from app.monitoring.rates import mariadb_rates
 from app.models.monitoring import (
     KamailioMetrics, RtpengineMetrics, MariaDBMetrics,
     SystemMetrics, MonitoringAlert, MonitoringConfig,
@@ -488,6 +489,7 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             )
         
         m = mariadb_latest
+        slow_pm, deadlocks_pm = mariadb_rates(db, m)
         max_conn = m.max_used_connections or 151
         conn_pct = (m.threads_connected / max_conn * 100) if max_conn > 0 else 0
         
@@ -495,9 +497,9 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
         bp_pct = (m.innodb_buffer_pool_used_mb / bp_total * 100) if bp_total > 0 else 0
         
         status = "healthy"
-        if conn_pct > 90 or m.slow_queries > 10 or m.innodb_deadlocks > 5:
+        if conn_pct > 90 or slow_pm > 10 or deadlocks_pm > 5:
             status = "critical"
-        elif conn_pct > 70 or m.slow_queries > 5 or m.innodb_deadlocks > 1:
+        elif conn_pct > 70 or slow_pm > 5 or deadlocks_pm > 1:
             status = "degraded"
         
         return MariaDBSummary(
@@ -505,10 +507,10 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             connections_max=max_conn,
             connection_usage_percent=round(conn_pct, 2),
             queries_per_second=round(m.queries_per_second or 0, 2),
-            slow_queries_per_minute=m.slow_queries,
+            slow_queries_per_minute=slow_pm,
             buffer_pool_usage_percent=round(bp_pct, 2),
             replication_lag_seconds=m.seconds_behind_master,
-            deadlocks_per_minute=m.innodb_deadlocks,
+            deadlocks_per_minute=deadlocks_pm,
             status=status,
             last_update=m.timestamp
         )
@@ -844,11 +846,11 @@ def health_check(db: Session = Depends(get_db)):
         components.append(ComponentHealth(component="rtpengine", status="unknown", last_check=now, message="No recent metrics"))
     
     # MariaDB
-    mm = db.query(MariaDBMetrics).filter(MariaDBMetrics.timestamp >= minute_ago).first()
+    mm = db.query(MariaDBMetrics).filter(MariaDBMetrics.timestamp >= minute_ago).order_by(desc(MariaDBMetrics.timestamp)).first()
     if mm:
         status = "healthy"
         conn_pct = (mm.threads_connected / max(mm.max_used_connections, 1)) * 100
-        if conn_pct > 90 or mm.innodb_deadlocks > 5:
+        if conn_pct > 90 or mariadb_rates(db, mm)[1] > 5:
             status = "critical"
         elif conn_pct > 70:
             status = "degraded"

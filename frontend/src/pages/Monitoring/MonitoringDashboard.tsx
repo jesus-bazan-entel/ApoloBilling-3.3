@@ -488,8 +488,8 @@ const MonitoringDashboard: React.FC = () => {
                 ['Abortados', dbDetail?.aborted_connects ?? '—'],
               ]} />
               <DetailTable title="Rendimiento" subtitle="InnoDB + queries" rows={[
-                ['Slow queries', dbDetail?.slow_queries ?? mariadb.slow_queries_per_minute],
-                ['Deadlocks', dbDetail?.innodb_deadlocks ?? mariadb.deadlocks_per_minute],
+                ['Slow queries (desde arranque)', dbDetail?.slow_queries ?? '—'],
+                ['Deadlocks (desde arranque)', dbDetail?.innodb_deadlocks ?? '—'],
                 ['Buffer pool usado', `${dbDetail?.innodb_buffer_pool_used_mb?.toFixed?.(0) ?? '—'} MB`],
                 ['Buffer pool libre', `${dbDetail?.innodb_buffer_pool_free_mb?.toFixed?.(0) ?? '—'} MB`],
                 ['Páginas dirty', dbDetail?.innodb_buffer_pool_pages_dirty ?? '—'],
