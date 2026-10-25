@@ -13,6 +13,7 @@ use apolo_api::handlers::{
     configure_stats,
     configure_unified_routing, configure_users, create_cdr, ws_handler,
 };
+use apolo_api::handlers::unified_routing::sync_app_fs_numbers;
 use apolo_auth::{JwtService, PasswordService};
 use apolo_db::create_pool;
 use apolo_services::SipDeviceService;
@@ -207,6 +208,24 @@ async fn main() -> std::io::Result<()> {
         info!("KAMAILIO_DATABASE_URL not set, Kamailio dialplan features disabled");
         None
     };
+
+    // Fonowin app users must keep going through FreeSWITCH on direct inbound
+    // routes: mirror sip_devices into Kamailio's divert list now and every
+    // minute (device handlers also trigger it right after a change)
+    if let Some(mysql_pool) = kamailio_mysql_pool.clone() {
+        let pg_pool = pool.clone();
+        actix_web::rt::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                match sync_app_fs_numbers(&pg_pool, &mysql_pool).await {
+                    Ok((0, 0)) => {}
+                    Ok((added, removed)) => info!(added, removed, "App FS numbers synced"),
+                    Err(e) => warn!("App FS numbers sync failed: {}", e),
+                }
+            }
+        });
+    }
 
     let bind_addr = format!("{}:{}", host, port);
     info!(

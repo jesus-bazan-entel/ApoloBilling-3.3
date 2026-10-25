@@ -648,8 +648,10 @@ Kamailio gateway's `dr_gateways.strip`/`pri_prefix` (so they take effect AFTER d
 Carrier → Kamailio → FreeSWITCH-SBC → trunk. With `direct_routing=true` the route's `dr_rules` row
 points at a dedicated type=9 gateway on `destination_trunk_id` carrying the route's
 `strip_digits`/`prefix_to_add` and tagged `direct` in `dr_gateways.attrs` field 6, so Kamailio
-delivers straight to the trunk (e.g. FS Legado). Numbers listed in `fs_numbers` (post-transform,
-e.g. Fonowin app users) are diverted in `kamailio.cfg` NEXTHOP via htable `inbound_fs_numbers`
+delivers straight to the trunk (e.g. FS Legado). App users are diverted automatically: the backend mirrors every enabled
+`sip_devices.sip_username` of an active customer (`route_id = 'sip_devices'`, on device
+create/update/delete, provisioning and every 60s — `sync_app_fs_numbers`), plus any number a
+route lists by hand in `fs_numbers` (post-transform). Those numbers are diverted in `kamailio.cfg` NEXTHOP via htable `inbound_fs_numbers`
 (table `kamailio.apolo_inbound_fs_numbers`, reloaded every 30s) back to FreeSWITCH through dr group
 **9100** (`kamailio_fs_ruleid`), keeping the parallel ring. Calls that skip FreeSWITCH have no ESL
 events: their CDRs come from Kamailio dialog CDRs (`acc` `cdr_enable`, table `acc_cdrs`, `via=direct`)

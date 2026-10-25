@@ -9,6 +9,7 @@ use crate::dto::sip_device::{
     SipRegistrationStatusResponse,
 };
 use crate::dto::{ApiResponse, PaginationParams};
+use crate::handlers::unified_routing::spawn_app_fs_numbers_sync;
 use actix_web::{web, HttpResponse};
 use apolo_auth::{AdminUser, AuthenticatedUser};
 use apolo_core::models::AuditLogBuilder;
@@ -16,6 +17,7 @@ use apolo_core::traits::{FreeswitchIpRepository, Repository, SipDeviceRepository
 use apolo_core::AppError;
 use apolo_db::{PgFreeswitchIpRepository, PgSipDeviceRepository};
 use apolo_services::SipDeviceService;
+use sqlx::mysql::MySqlPool;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
@@ -62,9 +64,10 @@ pub async fn list_sip_devices(
 /// Create a new SIP device
 ///
 /// POST /api/v1/sip-devices
-#[instrument(skip(pool, sip_service, _user, req))]
+#[instrument(skip(pool, mysql_pool, sip_service, _user, req))]
 pub async fn create_sip_device(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     sip_service: web::Data<Arc<SipDeviceService>>,
     _user: AuthenticatedUser,
     req: web::Json<SipDeviceCreateRequest>,
@@ -136,6 +139,8 @@ pub async fn create_sip_device(
         audit_data.insert(pool.get_ref()).await;
     }
 
+    spawn_app_fs_numbers_sync(pool.get_ref(), mysql_pool.as_ref());
+
     // Return response with password (only on creation)
     let response = SipDeviceWithPasswordResponse {
         device: SipDeviceResponse::from(created),
@@ -173,9 +178,10 @@ pub async fn get_sip_device(
 /// Update a SIP device
 ///
 /// PUT /api/v1/sip-devices/{id}
-#[instrument(skip(pool, _user, req))]
+#[instrument(skip(pool, mysql_pool, _user, req))]
 pub async fn update_sip_device(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     path: web::Path<i32>,
     _user: AuthenticatedUser,
     req: web::Json<SipDeviceUpdateRequest>,
@@ -282,6 +288,8 @@ pub async fn update_sip_device(
         audit_data.insert(pool.get_ref()).await;
     }
 
+    spawn_app_fs_numbers_sync(pool.get_ref(), mysql_pool.as_ref());
+
     let response = SipDeviceResponse::from(updated);
     Ok(HttpResponse::Ok().json(ApiResponse::with_message(
         response,
@@ -292,9 +300,10 @@ pub async fn update_sip_device(
 /// Delete a SIP device
 ///
 /// DELETE /api/v1/sip-devices/{id}
-#[instrument(skip(pool, admin))]
+#[instrument(skip(pool, mysql_pool, admin))]
 pub async fn delete_sip_device(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     path: web::Path<i32>,
     admin: AdminUser,
 ) -> Result<HttpResponse, AppError> {
@@ -340,6 +349,8 @@ pub async fn delete_sip_device(
         {
             audit_data.insert(pool.get_ref()).await;
         }
+
+        spawn_app_fs_numbers_sync(pool.get_ref(), mysql_pool.as_ref());
 
         Ok(HttpResponse::NoContent().finish())
     } else {

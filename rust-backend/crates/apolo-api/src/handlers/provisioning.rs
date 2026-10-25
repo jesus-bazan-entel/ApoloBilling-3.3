@@ -11,6 +11,7 @@ use crate::dto::provisioning::{
     ProvisionResult,
 };
 use crate::dto::ApiResponse;
+use crate::handlers::unified_routing::spawn_app_fs_numbers_sync;
 use actix_web::{web, HttpResponse};
 use apolo_auth::AdminUser;
 use apolo_core::models::{Account, AccountStatus, AccountType, AuditLogBuilder, SipDevice};
@@ -20,6 +21,7 @@ use apolo_db::{PgAccountRepository, PgSipDeviceRepository};
 use apolo_services::SipDeviceService;
 use chrono::Utc;
 use rust_decimal::Decimal;
+use sqlx::mysql::MySqlPool;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{info, instrument, warn};
@@ -169,9 +171,10 @@ async fn provision_one(
 /// Provision a single customer (account + SIP device).
 ///
 /// POST /api/v1/provisioning
-#[instrument(skip(pool, sip_service, admin, req))]
+#[instrument(skip(pool, mysql_pool, sip_service, admin, req))]
 pub async fn provision(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     sip_service: web::Data<Arc<SipDeviceService>>,
     admin: AdminUser,
     req: web::Json<ProvisionRequest>,
@@ -181,6 +184,7 @@ pub async fn provision(
     match provision_one(pool.get_ref(), sip_service.get_ref(), &req).await? {
         ProvisionOutcome::Created(result) => {
             audit_provision(pool.get_ref(), &admin.username, &result).await;
+            spawn_app_fs_numbers_sync(pool.get_ref(), mysql_pool.as_ref());
             Ok(HttpResponse::Created().json(ApiResponse::with_message(
                 result,
                 "Cliente aprovisionado correctamente",
@@ -193,9 +197,10 @@ pub async fn provision(
 /// Provision many customers from an uploaded template, reporting per-row.
 ///
 /// POST /api/v1/provisioning/bulk
-#[instrument(skip(pool, sip_service, admin, req))]
+#[instrument(skip(pool, mysql_pool, sip_service, admin, req))]
 pub async fn provision_bulk(
     pool: web::Data<PgPool>,
+    mysql_pool: Option<web::Data<MySqlPool>>,
     sip_service: web::Data<Arc<SipDeviceService>>,
     admin: AdminUser,
     req: web::Json<BulkProvisionRequest>,
@@ -272,6 +277,9 @@ pub async fn provision_bulk(
         total = response.total,
         created, skipped, errors, "Bulk provisioning finished"
     );
+    if created > 0 {
+        spawn_app_fs_numbers_sync(pool.get_ref(), mysql_pool.as_ref());
+    }
 
     Ok(HttpResponse::Ok().json(ApiResponse::with_message(
         response,

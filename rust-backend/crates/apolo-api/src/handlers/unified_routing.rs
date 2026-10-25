@@ -14,6 +14,7 @@ use apolo_services::SipDeviceService;
 use serde_json::json;
 use sqlx::mysql::MySqlPool;
 use sqlx::PgPool;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
@@ -4248,6 +4249,103 @@ async fn clear_inbound_fs_divert(
     Ok(())
 }
 
+/// `route_id` tag of the apolo_inbound_fs_numbers rows mirrored from sip_devices
+/// (rows a route lists by hand carry that route's id)
+const SIP_DEVICES_FS_SOURCE: &str = "sip_devices";
+
+/// Mirror the Fonowin app users (enabled SIP devices of active customers) into
+/// kamailio.apolo_inbound_fs_numbers, so direct inbound routes keep sending them
+/// through FreeSWITCH for the parallel ring to the app. Only the difference is
+/// written, in one transaction; a number a route also lists by hand keeps that
+/// route's row. Kamailio reloads the htable every 30s. Returns (added, removed).
+pub async fn sync_app_fs_numbers(
+    pg_pool: &PgPool,
+    mysql_pool: &MySqlPool,
+) -> Result<(usize, usize), AppError> {
+    let wanted: HashSet<String> = sqlx::query_scalar::<_, String>(
+        "SELECT d.sip_username FROM sip_devices d
+         JOIN accounts a ON a.id = d.account_id
+         WHERE d.enabled AND LOWER(a.status) = 'active' AND d.sip_username ~ '^[0-9]+$'",
+    )
+    .fetch_all(pg_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Load app numbers: {}", e)))?
+    .into_iter()
+    .collect();
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT number, route_id FROM apolo_inbound_fs_numbers")
+            .fetch_all(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Load FS numbers: {}", e)))?;
+    let listed: HashSet<&String> = rows.iter().map(|(number, _)| number).collect();
+    let mirrored: HashSet<&String> = rows
+        .iter()
+        .filter(|(_, route_id)| route_id == SIP_DEVICES_FS_SOURCE)
+        .map(|(number, _)| number)
+        .collect();
+
+    let add: Vec<&String> = wanted.iter().filter(|n| !listed.contains(n)).collect();
+    let remove: Vec<&String> = mirrored
+        .into_iter()
+        .filter(|n| !wanted.contains(*n))
+        .collect();
+    if add.is_empty() && remove.is_empty() {
+        return Ok((0, 0));
+    }
+
+    let mut tx = mysql_pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    for chunk in remove.chunks(500) {
+        let sql = format!(
+            "DELETE FROM apolo_inbound_fs_numbers WHERE route_id = ? AND number IN ({})",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut q = sqlx::query(&sql).bind(SIP_DEVICES_FS_SOURCE);
+        for number in chunk {
+            q = q.bind(number.as_str());
+        }
+        q.execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::Database(format!("Remove app numbers: {}", e)))?;
+    }
+    for chunk in add.chunks(500) {
+        // IGNORE: a route listed it by hand since the read above
+        let sql = format!(
+            "INSERT IGNORE INTO apolo_inbound_fs_numbers (number, route_id) VALUES {}",
+            vec!["(?, ?)"; chunk.len()].join(",")
+        );
+        let mut q = sqlx::query(&sql);
+        for number in chunk {
+            q = q.bind(number.as_str()).bind(SIP_DEVICES_FS_SOURCE);
+        }
+        q.execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::Database(format!("Add app numbers: {}", e)))?;
+    }
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    Ok((add.len(), remove.len()))
+}
+
+/// Run sync_app_fs_numbers in the background after a SIP device change, so the
+/// request does not wait on Kamailio's database. No-op without Kamailio.
+pub fn spawn_app_fs_numbers_sync(pg_pool: &PgPool, mysql_pool: Option<&web::Data<MySqlPool>>) {
+    let Some(mysql_pool) = mysql_pool else {
+        return;
+    };
+    let (pg_pool, mysql_pool) = (pg_pool.clone(), mysql_pool.get_ref().clone());
+    actix_web::rt::spawn(async move {
+        match sync_app_fs_numbers(&pg_pool, &mysql_pool).await {
+            Ok((0, 0)) => {}
+            Ok((added, removed)) => info!(added, removed, "App FS numbers synced"),
+            Err(e) => warn!("App FS numbers sync failed: {}", e),
+        }
+    });
+}
+
 /// Runs after the regular inbound sync (which always points the route's dr_rule
 /// at FreeSWITCH). For direct routes: repoint that rule at the trunk's direct
 /// gateway, mirror the route into group 9100 targeting FreeSWITCH, and publish
@@ -4371,7 +4469,11 @@ async fn apply_inbound_direct_routing(
         .await
         .map_err(|e| AppError::Database(format!("Clear FS numbers: {}", e)))?;
     for number in &r.fs_numbers {
-        sqlx::query("INSERT INTO apolo_inbound_fs_numbers (number, route_id) VALUES (?, ?)")
+        // A hand-listed number takes over the row mirrored from sip_devices
+        sqlx::query(
+            "INSERT INTO apolo_inbound_fs_numbers (number, route_id) VALUES (?, ?) \
+             ON DUPLICATE KEY UPDATE route_id = VALUES(route_id)",
+        )
             .bind(number)
             .bind(route_id.to_string())
             .execute(&mut *tx)
