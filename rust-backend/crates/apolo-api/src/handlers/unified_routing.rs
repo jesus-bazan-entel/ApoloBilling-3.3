@@ -4346,11 +4346,34 @@ pub fn spawn_app_fs_numbers_sync(pg_pool: &PgPool, mysql_pool: Option<&web::Data
     });
 }
 
+/// Whether a dr_rule outside the FreeSWITCH divert group sends numbers under
+/// `prefix` to a direct gateway (dr_gateways.attrs field 6 = "direct"). A
+/// catch-all route (empty prefix) never owns another route's direct rules.
+async fn direct_rules_cover_prefix(mysql_pool: &MySqlPool, prefix: &str) -> Result<bool, AppError> {
+    if prefix.is_empty() {
+        return Ok(false);
+    }
+    let rules: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM dr_rules r \
+         JOIN dr_gateways g ON FIND_IN_SET(g.gwid, REPLACE(r.gwlist, ' ', '')) \
+         WHERE r.groupid <> ? AND r.prefix LIKE CONCAT(?, '%') \
+           AND SUBSTRING_INDEX(SUBSTRING_INDEX(g.attrs, ',', 6), ',', -1) = 'direct'",
+    )
+    .bind(INBOUND_FS_GROUP_ID)
+    .bind(prefix)
+    .fetch_one(mysql_pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Look up direct dr_rules: {}", e)))?;
+    Ok(rules > 0)
+}
+
 /// Runs after the regular inbound sync (which always points the route's dr_rule
 /// at FreeSWITCH). For direct routes: repoint that rule at the trunk's direct
 /// gateway, mirror the route into group 9100 targeting FreeSWITCH, and publish
-/// fs_numbers to the htable Kamailio reloads every 30s. Otherwise remove any
-/// leftover divert so the route behaves exactly as before.
+/// fs_numbers to the htable Kamailio reloads every 30s. A route that is not
+/// direct keeps that divert while another dr_rule sends part of its DIDs to a
+/// direct gateway; otherwise any leftover divert is removed so the route
+/// behaves exactly as before.
 async fn apply_inbound_direct_routing(
     pg_pool: &PgPool,
     mysql_pool: &MySqlPool,
@@ -4368,9 +4391,23 @@ async fn apply_inbound_direct_routing(
     .map_err(|e| AppError::Database(e.to_string()))?
     .ok_or_else(|| AppError::NotFound(format!("Inbound route {} not found", route_id)))?;
 
-    let (Some(ruleid), Some(trunk_id), true) =
-        (r.kamailio_ruleid, r.destination_trunk_id, r.direct_routing)
-    else {
+    let prefix = extract_kamailio_prefix(&r.did_pattern);
+    let direct = match (r.kamailio_ruleid, r.destination_trunk_id, r.direct_routing) {
+        (Some(ruleid), Some(trunk_id), true) => Some((ruleid, trunk_id)),
+        _ => None,
+    };
+    // A dr_rule this route doesn't manage (e.g. a canary prefix pointed at the
+    // direct gateway by hand) can still deliver part of its DIDs straight to the
+    // trunk; app numbers there need the divert, or Kamailio answers 500.
+    let direct_elsewhere =
+        direct.is_none() && direct_rules_cover_prefix(mysql_pool, &prefix).await?;
+    if direct_elsewhere {
+        warn!(
+            route = %r.name,
+            prefix = %prefix,
+            "Route is not direct but another dr_rule sends part of its DIDs to a direct gateway: keeping its FreeSWITCH divert"
+        );
+    } else if direct.is_none() {
         clear_inbound_fs_divert(mysql_pool, route_id, r.kamailio_fs_ruleid).await?;
         if r.kamailio_fs_ruleid.is_some() {
             sqlx::query!(
@@ -4382,37 +4419,38 @@ async fn apply_inbound_direct_routing(
             .map_err(|e| AppError::Database(e.to_string()))?;
         }
         return Ok(());
-    };
+    }
 
     // The FreeSWITCH gateway the rule pointed at until now becomes the divert target.
     let fs_gwid = resolve_inbound_target_gwid(
         pg_pool,
         mysql_pool,
-        Some(trunk_id),
+        r.destination_trunk_id,
         &r.destination_host,
         r.destination_port,
         r.destination_profile.as_deref(),
         &r.name,
     )
     .await?;
-    let direct_gwid = ensure_direct_inbound_gateway(
-        pg_pool,
-        mysql_pool,
-        trunk_id,
-        r.strip_digits.unwrap_or(0),
-        r.prefix_to_add.as_deref().unwrap_or("").trim(),
-    )
-    .await?;
+    if let Some((ruleid, trunk_id)) = direct {
+        let direct_gwid = ensure_direct_inbound_gateway(
+            pg_pool,
+            mysql_pool,
+            trunk_id,
+            r.strip_digits.unwrap_or(0),
+            r.prefix_to_add.as_deref().unwrap_or("").trim(),
+        )
+        .await?;
 
-    sqlx::query("UPDATE dr_rules SET gwlist = ?, description = ? WHERE ruleid = ?")
-        .bind(direct_gwid.to_string())
-        .bind(format!("name:{} (direct)", r.name))
-        .bind(ruleid as u32)
-        .execute(mysql_pool)
-        .await
-        .map_err(|e| AppError::Database(format!("Repoint inbound dr_rule: {}", e)))?;
+        sqlx::query("UPDATE dr_rules SET gwlist = ?, description = ? WHERE ruleid = ?")
+            .bind(direct_gwid.to_string())
+            .bind(format!("name:{} (direct)", r.name))
+            .bind(ruleid as u32)
+            .execute(mysql_pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Repoint inbound dr_rule: {}", e)))?;
+    }
 
-    let prefix = extract_kamailio_prefix(&r.did_pattern);
     let priority = r.priority.unwrap_or(100);
     let description = format!("name:{} (via FreeSWITCH)", r.name);
     let fs_ruleid = match r.kamailio_fs_ruleid {
@@ -4486,11 +4524,11 @@ async fn apply_inbound_direct_routing(
 
     info!(
         route_id = %route_id,
-        direct_gwid,
+        direct = direct.is_some(),
         fs_gwid,
         fs_ruleid,
         fs_numbers = r.fs_numbers.len(),
-        "Inbound route set to direct routing"
+        "Inbound route FreeSWITCH divert updated"
     );
     Ok(())
 }
