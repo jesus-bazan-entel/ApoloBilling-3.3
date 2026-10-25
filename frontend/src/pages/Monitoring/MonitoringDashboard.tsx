@@ -287,7 +287,7 @@ const MonitoringDashboard: React.FC = () => {
       reason: {
         explanation: `Sesiones RTP reales vía protocolo NG (comando list sobre UDP 7722): ${rtpengine.active_sessions} call-ids activos. Correlaciona con ${kamailio.active_calls} diálogos SIP y ${rtpengine.port_usage_percent.toFixed(1)}% de puertos en uso. 0 = sin media (N/A), no fallo.`,
         impact: 'high', recommendation: 'Si Active Calls > 0 pero RTP Sessions = 0, revisar rtpengine_offer/answer en Kamailio y firewall UDP del rango port-min/port-max de rtpengine.',
-        relatedMetrics: ['avg_mos', 'port_usage_percent', 'packet_loss_percent'],
+        relatedMetrics: ['port_usage_percent', 'one_sided_sessions'],
       },
       thresholds: [{ name: 'Sin sesiones', metric: 'active_sessions', operator: '==', warning: 0, critical: 0, unit: 'sess', description: 'Solo informativo cuando hay llamadas sin media', enabled: false }],
       calculationMethod: { description: 'Comando NG `list` a 127.0.0.1:7722 (bencode con cookie): cuenta call-ids. Fallback: statistics.sessionstotal y kamcmd rtpengine.get_hash_total.', formula: 'len(NG list.calls)', dataSources: ['rtpengine NG UDP 7722', 'kamcmd rtpengine.get_hash_total'], frequency: 'Cada 60s', latency: '< 5s' },
@@ -455,7 +455,7 @@ const MonitoringDashboard: React.FC = () => {
             </div>
           </TabsContent>
           <TabsContent value="rtpengine" className="p-5">
-            <p className="text-xs text-gray-500 mb-4">Desglose media vía protocolo NG (UDP 7722: comandos <span className="font-mono">list</span>, <span className="font-mono">statistics</span>, <span className="font-mono">query</span>). MOS/jitter/RTT = 0 porque rtpengine no genera muestras RTCP-XR (ver Reason en la card).</p>
+            <p className="text-xs text-gray-500 mb-4">Desglose media vía protocolo NG (UDP 7722: comandos <span className="font-mono">list</span>, <span className="font-mono">statistics</span>, <span className="font-mono">query</span>). Sin MOS, jitter, RTT ni pérdida: en modo kernel rtpengine reenvía el RTCP sin analizarlo.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <DetailTable title="Sesiones y puertos" subtitle="NG list + statistics" rows={[
                 ['Sesiones activas (NG list)', rtpengine.active_sessions],
@@ -469,12 +469,6 @@ const MonitoringDashboard: React.FC = () => {
                 ['Bytes relayed', (rtpDetail?.bytes_in ?? 0).toLocaleString()],
                 ['Throughput instant.', `${rtpengine.media_throughput_mbps.toFixed(2)} Mbps`],
                 ['Timeouts sesión', rtpDetail?.timeout_errors ?? '—'],
-              ]} />
-              <DetailTable title="Calidad (RTCP-XR)" subtitle="Sin muestras = N/A, no fallo" rows={[
-                ['MOS promedio', rtpengine.avg_mos > 0 ? rtpengine.avg_mos.toFixed(2) : 'N/A (sin muestras)'],
-                ['Jitter', rtpengine.avg_jitter_ms > 0 ? `${rtpengine.avg_jitter_ms.toFixed(1)} ms` : 'N/A'],
-                ['RTT', rtpengine.avg_rtt_ms > 0 ? `${rtpengine.avg_rtt_ms.toFixed(1)} ms` : 'N/A'],
-                ['Packet loss', `${rtpengine.packet_loss_percent.toFixed(2)}%`],
               ]} />
               <DetailTable title="Señalización NG" subtitle="Contadores controlstatistics" rows={[
                 ['Offers', rtpDetail?.raw_data?.ng_control?.offercount ?? '—'],
