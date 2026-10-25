@@ -21,3 +21,4 @@ production.
 | 13 | Deprecated but working params | `rtp-timeout-sec` logs "deprecated, use media_timeout" yet still applies per channel in 1.10.12 (`sofia_glue.c`) | Verify in source for the running version before switching syntax |
 | 14 | Configured ≠ in use | `core-db-name` set but FS still on the old file until restart | Collector prints `core_db_note`; re-run after the restart |
 | 15 | Docs site serves a landing page | developer.signalwire.com pages returned only the manual's front page to fetchers | Use `github.com/signalwire/freeswitch-docs` and the source tree at the running tag |
+| 16 | Startup banner counted as limit hits | `grep "Max Sessions"` matched the boot line `Max Sessions [1600]` (once per start), reported as 4 "limit" lines | Count only `Throttle Error!` (sessions-per-second) and `cannot create any … sessions` (max-sessions / min-idle-cpu), from switch_core_session.c |

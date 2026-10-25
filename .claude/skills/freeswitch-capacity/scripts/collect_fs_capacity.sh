@@ -152,7 +152,14 @@ ls -la /var/log/freeswitch/freeswitch.log 2>/dev/null | awk '{print "freeswitch.
 
 section "RECENT PROBLEMS (journal, last 24h)"
 journalctl -u freeswitch --since "-24h" --no-pager 2>/dev/null | grep -ciE "segv|core dumped|exited" | sed 's/^/crash_lines=/'
-grep -acE "Throttle Error|Max Sessions|MAX_SESSIONS|Too many|CRIT" /var/log/freeswitch/freeswitch.log 2>/dev/null | sed 's/^/limit_or_crit_log_lines=/'
+# Real limit hits (switch_core_session.c): "Throttle Error!" = sessions-per-second,
+# "cannot create any [inbound|outbound] sessions" = max-sessions or min-idle-cpu. "Max Sessions [N]"
+# is only the startup banner, so it is not counted.
+LOG=/var/log/freeswitch/freeswitch.log
+echo "sps_throttle_lines=$(grep -ac 'Throttle Error!' $LOG 2>/dev/null || true)"
+echo "session_limit_lines=$(grep -ac 'cannot create any' $LOG 2>/dev/null || true)"
+echo "crit_lines=$(grep -a '\[CRIT\]' $LOG 2>/dev/null | grep -vc 'FreeSWITCH Started' || true)"
+echo "starts_in_log=$(grep -ac 'FreeSWITCH Started' $LOG 2>/dev/null || true)"
 
 section "NEIGHBOURS (optional)"
 command -v kamcmd >/dev/null && echo "kamailio_dialogs: $(kamcmd dlg.stats_active 2>/dev/null | awk '/all:/{print $2}')"
