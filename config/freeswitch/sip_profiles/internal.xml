@@ -50,6 +50,9 @@
       <!-- RTPEngine (via Kamailio) is the media relay; never bypass. -->
       <param name="inbound-bypass-media" value="false"/>
       <param name="bypass-media-after-bridge" value="false"/>
+      <!-- Hang up calls whose RTP stopped (dead peer, lost BYE): 300 s without packets, 1800 s on hold (vanilla values) -->
+      <param name="rtp-timeout-sec" value="300"/>
+      <param name="rtp-hold-timeout-sec" value="1800"/>
 
       <param name="enable-100rel" value="false"/>
 
