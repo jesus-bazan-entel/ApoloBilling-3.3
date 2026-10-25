@@ -112,7 +112,7 @@ verify() {
     sleep 3
     st=$(fscli 'sofia status')
     for p in internal external; do
-        echo "$st" | grep -E "^ *$p +profile" | grep -q RUNNING || { log "profile $p not RUNNING"; return 1; }
+        echo "$st" | grep -E "^ *$p[[:space:]]+profile" | grep -q RUNNING || { log "profile $p not RUNNING"; return 1; }
     done
     for g in $GATEWAYS; do
         echo "$st" | grep -q "external::$g" || { log "gateway $g missing"; return 1; }
