@@ -4,7 +4,7 @@
 //! Implements efficient streaming for large exports to avoid memory pressure.
 
 use crate::dto::{
-    ApiResponse, CdrExportParams, CdrExportRow, CdrFilterParams, CdrResponse, CdrStats,
+    ApiResponse, CdrExportParams, CdrFilterParams, CdrResponse, CdrStats,
     ExportFormat, StatsGroupBy, StatsParams, TimeSeriesPoint,
 };
 use actix_web::{
@@ -15,12 +15,14 @@ use apolo_auth::AuthenticatedUser;
 use apolo_core::{
     error::AppError,
     models::{AuditLogBuilder, Cdr},
-    traits::{CdrListFilter, CdrRepository, PaginatedResponse, Repository},
+    traits::{
+        CdrListFilter, CdrRepository, Repository, CDR_LONG_CALL_SECS, CDR_SHORT_CALL_SECS,
+    },
     AppResult,
 };
-use apolo_db::repositories::cdr_repo::PgCdrRepository;
+use apolo_db::repositories::cdr_repo::{cdr_where, PgCdrRepository};
 use chrono::{DateTime, Datelike, Duration, TimeZone, Timelike, Utc};
-use futures::{stream, StreamExt};
+use futures::stream;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tracing::{debug, error, info, instrument, warn};
@@ -39,10 +41,10 @@ use validator::Validate;
 /// ```
 #[instrument(skip(db, query))]
 pub async fn list_cdrs(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     query: Query<CdrFilterParams>,
     db: Data<PgPool>,
-) -> Result<Json<PaginatedResponse<CdrResponse>>> {
+) -> Result<HttpResponse> {
     // Validate query parameters
     query.validate().map_err(|e| {
         warn!("Invalid query parameters: {}", e);
@@ -63,11 +65,18 @@ pub async fn list_cdrs(
     // Parse date filters (an unparseable date is a 400, never "no filter")
     let start_date = parse_start_date(&query.start_date)?;
     let end_date = parse_end_date(&query.end_date)?;
+    let account_id = resolve_account(db.get_ref(), query.account_id, &query.account).await?;
 
-    // Query with filters
+    // Page 1 takes a snapshot of the newest id; later pages send it back so
+    // CDRs written meanwhile don't shift the rows being paged
+    let snapshot = match query.max_id {
+        Some(id) => id,
+        None => repo.max_id().await?,
+    };
+
     let (cdrs, total) = repo
         .list_filtered(
-            query.account_id,
+            account_id,
             query.caller.as_deref(),
             query.callee.as_deref(),
             start_date,
@@ -76,13 +85,20 @@ pub async fn list_cdrs(
                 direction: query.direction.map(|d| d.as_str().to_string()),
                 hangup_cause: query.hangup_cause.clone(),
                 answered_only: query.answered_only,
+                outcome: query.outcome.clone().filter(|o| !o.is_empty()),
+                min_billsec: query.min_billsec,
+                max_id: Some(snapshot),
             },
             query.pagination.limit(),
             query.pagination.offset(),
         )
         .await?;
 
-    let response_data: Vec<CdrResponse> = cdrs.into_iter().map(CdrResponse::from).collect();
+    let mut response_data: Vec<CdrResponse> = cdrs.into_iter().map(CdrResponse::from).collect();
+    attach_accounts(db.get_ref(), &mut response_data).await?;
+    if masks_numbers(&user) {
+        response_data.iter_mut().for_each(mask_response);
+    }
 
     info!(
         "Retrieved {} CDRs out of {} total",
@@ -90,7 +106,159 @@ pub async fn list_cdrs(
         total
     );
 
-    Ok(Json(query.pagination.paginate(response_data, total)))
+    Ok(HttpResponse::Ok()
+        .insert_header(("X-Cdr-Snapshot", snapshot.to_string()))
+        .json(query.pagination.paginate(response_data, total)))
+}
+
+/// Totals of the filtered set for the CDR page header: ASR, ACD, minutes,
+/// calls cut by platform restarts (grouped into outages) and calls flagged
+/// for review. Takes the same filters as the list.
+///
+/// # Errors
+///
+/// Returns error if validation or the database query fails.
+#[instrument(skip(db, query))]
+pub async fn cdr_summary(
+    _user: AuthenticatedUser,
+    query: Query<CdrFilterParams>,
+    db: Data<PgPool>,
+) -> Result<Json<ApiResponse<serde_json::Value>>> {
+    query.validate().map_err(|e| AppError::Validation(e.to_string()))?;
+
+    let start_date = parse_start_date(&query.start_date)?;
+    let end_date = parse_end_date(&query.end_date)?;
+    let account_id = resolve_account(db.get_ref(), query.account_id, &query.account).await?;
+    let where_clause = cdr_where(
+        account_id,
+        query.caller.as_deref(),
+        query.callee.as_deref(),
+        start_date,
+        end_date,
+        &CdrListFilter {
+            direction: query.direction.map(|d| d.as_str().to_string()),
+            hangup_cause: query.hangup_cause.clone(),
+            answered_only: query.answered_only,
+            outcome: query.outcome.clone().filter(|o| !o.is_empty()),
+            min_billsec: query.min_billsec,
+            max_id: query.max_id,
+        },
+    );
+    let summary = PgCdrRepository::new(db.get_ref().clone())
+        .summary(&where_clause)
+        .await?;
+
+    Ok(Json(ApiResponse::success(serde_json::json!({
+        "total": summary.total,
+        "answered": summary.answered,
+        "billsec": summary.billsec,
+        "without_customer": summary.without_customer,
+        "long_calls": summary.long_calls,
+        "short_answered": summary.short_answered,
+        "long_call_secs": CDR_LONG_CALL_SECS,
+        "short_call_secs": CDR_SHORT_CALL_SECS,
+        "system_cut": summary.system_cut,
+        "system_cut_answered": summary.system_cut_answered,
+        "outages": group_outages(&summary.system_cut_minutes),
+    }))))
+}
+
+/// Calls cut by a restart end within a few minutes of each other: minutes
+/// less than `OUTAGE_GAP_MINUTES` apart are one outage
+fn group_outages(minutes: &[(DateTime<Utc>, i64, i64)]) -> Vec<serde_json::Value> {
+    const OUTAGE_GAP_MINUTES: i64 = 5;
+    let mut groups: Vec<(DateTime<Utc>, DateTime<Utc>, i64, i64)> = Vec::new();
+    for &(minute, calls, answered) in minutes {
+        match groups.last_mut() {
+            Some(g) if minute - g.1 <= Duration::minutes(OUTAGE_GAP_MINUTES) => {
+                g.1 = minute;
+                g.2 += calls;
+                g.3 += answered;
+            }
+            _ => groups.push((minute, minute, calls, answered)),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(from, to, calls, answered)| {
+            serde_json::json!({
+                "from": from,
+                "to": to + Duration::minutes(1),
+                "calls": calls,
+                "answered": answered,
+            })
+        })
+        .collect()
+}
+
+/// `account` (customer number) → account_id; an unknown number matches nothing
+async fn resolve_account(
+    pool: &PgPool,
+    account_id: Option<i32>,
+    account: &Option<String>,
+) -> AppResult<Option<i32>> {
+    let Some(number) = account.as_deref().map(str::trim).filter(|n| !n.is_empty()) else {
+        return Ok(account_id);
+    };
+    let row: Option<(i32,)> = sqlx::query_as("SELECT id FROM accounts WHERE account_number = $1")
+        .bind(number)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to resolve customer: {}", e)))?;
+    Ok(Some(row.map_or(-1, |r| r.0)))
+}
+
+/// Fill customer number/name for the CDRs that have one
+async fn attach_accounts(pool: &PgPool, rows: &mut [CdrResponse]) -> AppResult<()> {
+    let mut ids: Vec<i32> = rows.iter().filter_map(|r| r.account_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let accounts: Vec<(i32, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, account_number, account_name FROM accounts WHERE id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Database(format!("Failed to load customers: {}", e)))?;
+    let by_id: std::collections::HashMap<i32, (String, Option<String>)> =
+        accounts.into_iter().map(|(id, n, name)| (id, (n, name))).collect();
+    for row in rows.iter_mut() {
+        if let Some((number, name)) = row.account_id.and_then(|id| by_id.get(&id)) {
+            row.account_number = Some(number.clone());
+            row.account_name = name.clone();
+        }
+    }
+    Ok(())
+}
+
+/// Phone numbers are personal data (Ley 29733): operators see them masked,
+/// admins in full. Filters still match the full number server-side.
+fn masks_numbers(user: &AuthenticatedUser) -> bool {
+    !user.is_admin()
+}
+
+/// `993171615` → `9931***615`; short numbers keep only their first digits
+fn mask_number(n: &str) -> String {
+    let chars: Vec<char> = n.chars().collect();
+    match chars.len() {
+        0..=3 => n.to_string(),
+        4..=6 => format!("{}***", chars[..2].iter().collect::<String>()),
+        len => format!(
+            "{}***{}",
+            chars[..4].iter().collect::<String>(),
+            chars[len - 3..].iter().collect::<String>()
+        ),
+    }
+}
+
+fn mask_response(r: &mut CdrResponse) {
+    r.caller = mask_number(&r.caller);
+    r.callee = mask_number(&r.callee);
+    r.caller_e164 = r.caller_e164.as_deref().map(mask_number);
+    r.destination = r.destination.as_deref().map(mask_number);
 }
 
 /// Get a single CDR by ID
@@ -106,7 +274,7 @@ pub async fn list_cdrs(
 /// ```
 #[instrument(skip(db))]
 pub async fn get_cdr(
-    _user: AuthenticatedUser,
+    user: AuthenticatedUser,
     path: Path<i64>,
     db: Data<PgPool>,
 ) -> Result<Json<ApiResponse<CdrResponse>>> {
@@ -122,7 +290,13 @@ pub async fn get_cdr(
 
     info!("Retrieved CDR: {}", cdr_id);
 
-    Ok(Json(ApiResponse::success(CdrResponse::from(cdr))))
+    let mut response = vec![CdrResponse::from(cdr)];
+    attach_accounts(db.get_ref(), &mut response).await?;
+    let mut response = response.remove(0);
+    if masks_numbers(&user) {
+        mask_response(&mut response);
+    }
+    Ok(Json(ApiResponse::success(response)))
 }
 
 /// Export CDRs in various formats (CSV, JSON, JSONL)
@@ -173,6 +347,8 @@ pub async fn export_cdrs(
     }
 
     let params = query.into_inner();
+    let account_id = resolve_account(db.get_ref(), params.account_id, &params.account).await?;
+    let masked = masks_numbers(&user);
 
     info!(
         "Starting CDR export: user={}, format={:?}, limit={}, start={}, end={}, direction={:?}",
@@ -191,7 +367,11 @@ pub async fn export_cdrs(
             "direction": params.direction.map(|d| d.as_str()),
             "caller": params.caller,
             "callee": params.callee,
-            "account_id": params.account_id,
+            "account_id": account_id,
+            "account": params.account,
+            "outcome": params.outcome,
+            "min_billsec": params.min_billsec,
+            "masked": masked,
             "limit": params.limit,
         }))
         .build()
@@ -222,7 +402,8 @@ pub async fn export_cdrs(
         format!("attachment; filename=\"{}\"", filename),
     ));
 
-    Ok(response.streaming(export_stream(pool, params, start, end)))
+    let cursor = ExportCursor::new(pool, params, account_id, start, end);
+    Ok(response.streaming(export_stream(cursor, masked)))
 }
 
 /// Get CDR statistics
@@ -304,8 +485,10 @@ pub async fn get_cdr_stats(
 /// thousand rows instead of OFFSET scans of up to ~850k), and consecutive
 /// slices are [lo, hi] / [.., lo - 1µs], so no CDR is skipped or repeated.
 struct ExportCursor {
+    pool: PgPool,
     repo: PgCdrRepository,
     params: CdrExportParams,
+    account_id: Option<i32>,
     start: DateTime<Utc>,
     next_end: Option<DateTime<Utc>>,
     remaining: i64,
@@ -315,13 +498,16 @@ impl ExportCursor {
     fn new(
         pool: PgPool,
         params: CdrExportParams,
+        account_id: Option<i32>,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Self {
         let remaining = params.limit;
         Self {
-            repo: PgCdrRepository::new(pool),
+            repo: PgCdrRepository::new(pool.clone()),
+            pool,
             params,
+            account_id,
             start,
             next_end: Some(end),
             remaining,
@@ -329,7 +515,7 @@ impl ExportCursor {
     }
 
     /// Next non-empty slice, or None once the window or the row limit is exhausted
-    async fn next_batch(&mut self) -> AppResult<Option<Vec<Cdr>>> {
+    async fn next_batch(&mut self) -> AppResult<Option<Vec<CdrResponse>>> {
         while let Some(hi) = self.next_end {
             if self.remaining <= 0 {
                 break;
@@ -340,13 +526,15 @@ impl ExportCursor {
             let (cdrs, _) = self
                 .repo
                 .list_filtered(
-                    self.params.account_id,
+                    self.account_id,
                     self.params.caller.as_deref(),
                     self.params.callee.as_deref(),
                     Some(lo),
                     Some(hi),
                     &CdrListFilter {
                         direction: self.params.direction.map(|d| d.as_str().to_string()),
+                        outcome: self.params.outcome.clone().filter(|o| !o.is_empty()),
+                        min_billsec: self.params.min_billsec,
                         ..Default::default()
                     },
                     self.remaining,
@@ -355,15 +543,17 @@ impl ExportCursor {
                 .await?;
             if !cdrs.is_empty() {
                 self.remaining -= cdrs.len() as i64;
-                return Ok(Some(cdrs));
+                let mut rows: Vec<CdrResponse> = cdrs.into_iter().map(CdrResponse::from).collect();
+                attach_accounts(&self.pool, &mut rows).await?;
+                return Ok(Some(rows));
             }
         }
         Ok(None)
     }
 }
 
-/// One CSV line (RFC 4180, formula-guarded, Lima times)
-fn csv_line(cdr: &Cdr) -> String {
+/// One CSV line (RFC 4180, formula-guarded, Lima times), in `CSV_HEADER` order
+fn csv_line(cdr: &CdrResponse) -> String {
     let lima_time = |dt: Option<DateTime<Utc>>| {
         dt.map(|t| {
             t.with_timezone(&chrono_tz::America::Lima)
@@ -372,26 +562,27 @@ fn csv_line(cdr: &Cdr) -> String {
         })
         .unwrap_or_default()
     };
+    let opt = |v: &Option<String>| v.clone().unwrap_or_default();
     let fields = [
         cdr.id.to_string(),
         cdr.call_uuid.clone(),
         cdr.account_id.map(|id| id.to_string()).unwrap_or_default(),
-        cdr.caller_number.clone(),
-        cdr.called_number.clone(),
-        cdr.destination_prefix.clone().unwrap_or_default(),
+        opt(&cdr.account_number),
+        cdr.caller.clone(),
+        opt(&cdr.caller_e164),
+        cdr.callee.clone(),
+        opt(&cdr.destination),
         lima_time(Some(cdr.start_time)),
         lima_time(cdr.answer_time),
         lima_time(Some(cdr.end_time)),
         cdr.duration.to_string(),
         cdr.billsec.to_string(),
         cdr.hangup_cause.clone(),
+        cdr.sip_code.map(|c| c.to_string()).unwrap_or_default(),
         cdr.direction.clone(),
+        opt(&cdr.source_ip),
     ];
-    let mut line = fields
-        .iter()
-        .map(|f| csv_field(f))
-        .collect::<Vec<_>>()
-        .join(",");
+    let mut line = fields.iter().map(|f| csv_field(f)).collect::<Vec<_>>().join(",");
     line.push('\n');
     line
 }
@@ -399,10 +590,8 @@ fn csv_line(cdr: &Cdr) -> String {
 /// Streaming export body. A database error aborts the stream (the download
 /// fails visibly) instead of ending it early as if the file were complete.
 fn export_stream(
-    pool: PgPool,
-    params: CdrExportParams,
-    start: DateTime<Utc>,
-    end: DateTime<Utc>,
+    cursor: ExportCursor,
+    masked: bool,
 ) -> impl futures::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>> {
     #[derive(Clone, Copy)]
     enum Phase {
@@ -411,8 +600,7 @@ fn export_stream(
         Closed,
     }
 
-    let format = params.format;
-    let cursor = ExportCursor::new(pool, params, start, end);
+    let format = cursor.params.format;
 
     stream::unfold(
         (cursor, Phase::Open, true),
@@ -431,12 +619,14 @@ fn export_stream(
                     Ok(Some(cdrs)) => {
                         let mut out = String::new();
                         let mut first_row = first;
-                        for cdr in cdrs {
+                        for mut cdr in cdrs {
+                            if masked {
+                                mask_response(&mut cdr);
+                            }
                             match format {
                                 ExportFormat::Csv => out.push_str(&csv_line(&cdr)),
                                 ExportFormat::Json | ExportFormat::Jsonl => {
-                                    let row = CdrExportRow::from(cdr);
-                                    let Ok(json) = serde_json::to_string(&row) else {
+                                    let Ok(json) = serde_json::to_string(&cdr) else {
                                         continue;
                                     };
                                     if matches!(format, ExportFormat::Json) && !first_row {
@@ -612,7 +802,7 @@ fn get_period_key(dt: &DateTime<Utc>, group_by: StatsGroupBy) -> (String, DateTi
 const MAX_EXPORT_DAYS: i64 = 31;
 
 /// CSV header; times are Lima local time (UTC-5, no DST)
-const CSV_HEADER: &str = "id,call_uuid,account_id,caller,callee,destination (E.164),start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,direction";
+const CSV_HEADER: &str = "id,call_uuid,account_id,customer,caller,caller (E.164),callee,destination (E.164),start_time (GMT-5),answer_time (GMT-5),end_time (GMT-5),duration,billsec,hangup_cause,sip_code,direction,source_ip";
 
 /// RFC 4180 field: quoted when it holds a comma, quote or line break; values a
 /// spreadsheet would run as a formula (= + - @, tab, CR) are prefixed with '.
@@ -689,6 +879,31 @@ fn parse_end_date(
 mod tests {
     use super::*;
     use apolo_core::models::Cdr;
+
+    #[test]
+    fn test_mask_number() {
+        assert_eq!(mask_number("993171615"), "9931***615");
+        assert_eq!(mask_number("+51993171615"), "+519***615");
+        assert_eq!(mask_number("1001"), "10***");
+        assert_eq!(mask_number("123"), "123");
+    }
+
+    #[test]
+    fn test_group_outages() {
+        let t = |h, m| Utc.with_ymd_and_hms(2026, 10, 25, h, m, 0).unwrap();
+        let minutes = [
+            (t(5, 36), 10, 8),
+            (t(5, 37), 2, 1),
+            (t(14, 59), 30, 25),
+            (t(15, 2), 5, 4),
+            (t(15, 9), 40, 30),
+        ];
+        let outages = group_outages(&minutes);
+        assert_eq!(outages.len(), 3);
+        assert_eq!(outages[0]["calls"], 12);
+        assert_eq!(outages[1]["calls"], 35);
+        assert_eq!(outages[2]["answered"], 30);
+    }
 
     #[test]
     fn test_csv_field_quotes_and_formula_guard() {

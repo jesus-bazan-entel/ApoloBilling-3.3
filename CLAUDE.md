@@ -217,7 +217,9 @@ The engine (`rust-billing-engine`) only records, it never authorizes or rejects 
 PDD caveat: the next hop is almost always FS Legado, which answers 180/183 within one 20 ms FreeSWITCH tick, so `pdd_ms` is ~0–20 ms (PDD to the next hop, not the destination network's). Not shown on the dashboard since 2026-10-25 (see *NOC quality indicators*).
 4. Calls routed Kamailio → trunk directly (no FreeSWITCH) get their CDRs from `kamailio_cdr_sync.rs`
 
-Direction comes from FreeSWITCH's native headers (`Call-Direction`…), with the context as fallback.
+Direction is the SBC's, not FreeSWITCH's (`Call-Direction` is "inbound" on every a-leg): **outbound** = handled in `from-pbx` **with an `accountcode`** (only a directory-authenticated customer device gets one from mod_xml_curl); everything else is inbound, including FS Legado (10.118.0.4), which is ACL-trusted on the internal profile and also lands in `from-pbx`. Fixed 2026-10-25; 1,934 older CDRs (Aug–Oct) corrected from FreeSWITCH's own `accountcode` (cdr-csv archive + log), list in `/root/cdrs-direction-backfill-*.csv`.
+
+**Purpose of the CDR screen:** this is an interconnection SBC, not a retail biller. CDRs serve traffic reconciliation with carriers (Integratel) on MSISDN, date/time, status and duration; `account_id`/customer is informative only (FS Legado customers have no device here, ~95% of inbound). The page shows KPIs (`GET /cdrs/summary`: ASR, ACD, minutes, calls cut by `SYSTEM_SHUTDOWN`/`CRASH` grouped into outages, answered calls ≥2 h or ≤3 s flagged), the raw cause + SIP code, and pages on a snapshot (`X-Cdr-Snapshot` header → `max_id`) so live traffic never shifts rows. Operators see numbers masked (Ley 29733), admins in full. CDR ids are assigned at hangup, so a day filtered by `start_time` has id "gaps": calls that started the day before and ended after midnight.
 
 ### NOC quality indicators
 
@@ -252,6 +254,7 @@ All routes under `/api/v1/`. Authentication via JWT in HTTP-only cookies.
 | `/cdrs` | GET | List CDRs with pagination; dates are RFC 3339 with offset or `YYYY-MM-DD` (Lima day), anything else is 400 | Authenticated |
 | `/cdrs/export` | GET | Streaming export (CSV/JSON) in 1-hour slices (no OFFSET; a month ≈ 5 s); `start_date` required, ≤31 days, default limit 1M, CSV times in Lima, RFC 4180 + formula guard (bare E.164 left intact), audited | Authenticated |
 | `/cdrs/stats` | GET | CDR statistics | Authenticated |
+| `/cdrs/summary` | GET | Totals of the filtered set (ASR, ACD, minutes, outages, flagged calls); same filters as `/cdrs` (+ `outcome`, `min_billsec`, `account`) | Authenticated |
 | `/active-calls` | GET | List active calls | Authenticated |
 | `/stats/noc` | GET | NOC dashboard overview | Authenticated |
 | `/stats/noc/events` | POST/DELETE | Chart marks | Admin |
@@ -406,6 +409,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 021_cdr_media_quality.sql | `cdrs.mos` / `cdrs.rtp_loss_pct`: worst leg's FreeSWITCH-measured MOS and received-RTP loss (`rtp_audio_in_mos`, `skip_packet_count / media_packet_count`), written by the engine. Still written, but no longer on the dashboard (see *NOC quality indicators*) |
 | 022_drop_internal_routes.sql | Drops `internal_routes` / `system_endpoints` (the *Rutas Internas* module, removed 2026-10-25; backup in `/root/internal_routes-backup-*.sql`) |
 | 023_cdr_destination_e164_account.sql | `cdrs.destination_prefix` repurposed as the routed destination in E.164 + `account_id` from `sip_devices` (SQL mirrors `apolo_routed_number`/`apolo_e164` of the engine's `numbering.rs`); backfills October 2026 (`SET statement_timeout = 0`, ~1 min) |
+| 024_cdr_audit_fields.sql | `cdrs.sip_code` (final SIP status to the caller: `sip_term_status`, else 200 if answered, else the relayed `sip:NNN`), `caller_e164` (international CLIs without `+` read as international) and `source_ip` (`sip_network_ip`), written from 2026-10-25 18:35; `apolo_e164` adds Lima 7-digit numbers; backfills `caller_e164` for October |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 

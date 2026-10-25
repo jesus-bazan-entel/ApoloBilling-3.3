@@ -109,43 +109,7 @@ impl EventHandler {
         let caller = event.caller().cloned().unwrap_or_default();
         let callee = event.callee().cloned().unwrap_or_default();
 
-        // 🔍 Detectar dirección de la llamada (inbound/outbound)
-        //
-        // Fix 2026-08-09 (soporte, revisión completa): "context" (from-pbx/
-        // from-kamailio) NO es confiable - describe qué perfil de FreeSWITCH
-        // está *entregando* la llamada en este momento, no quién la originó
-        // (confirmado con volcado de headers en vivo: llamadas de un móvil
-        // externo hacia una extensión no registrada reportan
-        // Caller-Context=from-pbx igual que un usuario interno saliendo).
-        //
-        // FreeSWITCH SÍ trae la dirección real y confiable en headers nativos
-        // (Call-Direction / Caller-Direction / Caller-Logical-Direction /
-        // variable_direction), presentes en prácticamente todas las llamadas
-        // - solo que el código nunca los miraba primero. Se usan como señal
-        // principal; "context" queda solo de último recurso si ninguno viene.
-        let context = event.get_header("Caller-Context")
-            .or_else(|| event.get_header("variable_context"))
-            .map(|s| s.as_str())
-            .unwrap_or("unknown");
-
-        let native_direction = event.get_header("Call-Direction")
-            .or_else(|| event.get_header("Caller-Direction"))
-            .or_else(|| event.get_header("Caller-Logical-Direction"))
-            .or_else(|| event.get_header("variable_direction"))
-            .map(|s| s.to_lowercase())
-            .filter(|d| d == "inbound" || d == "outbound"); // descarta "leg_b" u otros valores no-direccionales
-
-        let direction = native_direction.unwrap_or_else(|| {
-            if context == "from-pbx" || context.starts_with("from-pbx") {
-                "outbound".to_string()
-            } else if context == "from-kamailio" || context.starts_with("from-kamailio") {
-                "inbound".to_string()
-            } else {
-                // Tráfico predominante de esta plataforma es entrante (carrier -> extensión)
-                "inbound".to_string()
-            }
-        });
-
+        let (direction, context) = sbc_direction(event);
         info!("📞 Context: {} → Direction: {}", context, direction);
 
         info!("📞 CHANNEL_CREATE (a-leg): {} - {} → {} [{}]", uuid, caller, callee, direction);
@@ -274,40 +238,11 @@ impl EventHandler {
         let billsec = event.billsec().unwrap_or(0);
         let hangup_cause = event.hangup_cause().cloned().unwrap_or_else(|| "UNKNOWN".to_string());
 
-        // 🔍 Detectar dirección real
-        //
-        // Fix 2026-08-09 (soporte, revisión completa): mismo criterio que
-        // CHANNEL_CREATE - los headers nativos de FreeSWITCH (Call-Direction /
-        // Caller-Direction / Caller-Logical-Direction / variable_direction) son
-        // la señal confiable, "context" solo describe qué perfil está
-        // *entregando* la llamada, no quién la originó. hangup_cause=
-        // USER_NOT_REGISTERED se mantiene como red de seguridad adicional
-        // (solo le puede pasar al destino, nunca a quien origina), por si
-        // algún evento raro llegara sin ninguno de los headers nativos.
-        let context = event.get_header("Caller-Context")
-            .or_else(|| event.get_header("variable_context"))
-            .map(|s| s.as_str())
-            .unwrap_or("unknown");
-
-        let native_direction = event.get_header("Call-Direction")
-            .or_else(|| event.get_header("Caller-Direction"))
-            .or_else(|| event.get_header("Caller-Logical-Direction"))
-            .or_else(|| event.get_header("variable_direction"))
-            .map(|s| s.to_lowercase())
-            .filter(|d| d == "inbound" || d == "outbound");
-
+        // A destination that wasn't registered can only be the called party
         let direction = if hangup_cause == "USER_NOT_REGISTERED" {
             "inbound".to_string()
         } else {
-            native_direction.unwrap_or_else(|| {
-                if context == "from-pbx" || context.starts_with("from-pbx") {
-                    "outbound".to_string()
-                } else if context == "from-kamailio" || context.starts_with("from-kamailio") {
-                    "inbound".to_string()
-                } else {
-                    "inbound".to_string()
-                }
-            })
+            sbc_direction(event).0
         };
 
         info!(
@@ -348,6 +283,8 @@ impl EventHandler {
             direction: direction.clone(),  // ✅ Dirección real
             server_id: self.server_id.clone(),
             transformed_number: event.get_header("variable_transformed_number").cloned(),
+            sip_code: final_sip_code(event),
+            source_ip: event.get_header("variable_sip_network_ip").cloned(),
             pdd_ms: legs.pdd_ms,
             mos: legs.mos,
             rtp_loss_pct: legs.loss_pct,
@@ -356,5 +293,139 @@ impl EventHandler {
         if let Err(e) = self.cdr_generator.generate_cdr(hangup_event).await {
             error!("Error generating CDR for {}: {}", uuid, e);
         }
+    }
+}
+
+/// Final SIP status the caller received. `sip_term_status` is only set when
+/// FreeSWITCH itself sent the final reply; otherwise an answered a-leg got a
+/// 200, and an unanswered one the `sip:NNN` of its own or its bridged leg's
+/// protocol-specific cause (what FreeSWITCH relayed).
+fn final_sip_code(event: &EslEvent) -> Option<i16> {
+    let parse = |key: &str| -> Option<i16> {
+        let v = event.get_header(key)?;
+        v.trim().trim_start_matches("sip:").parse().ok()
+    };
+    parse("variable_sip_term_status")
+        .or_else(|| event.get_header("variable_answer_epoch")
+            .filter(|e| e.trim() != "0" && !e.trim().is_empty())
+            .map(|_| 200))
+        .or_else(|| parse("variable_proto_specific_hangup_cause"))
+        .or_else(|| parse("variable_last_bridge_proto_specific_hangup_cause"))
+        .or_else(|| {
+            // FreeSWITCH refused the call itself (e.g. the bridge failed and
+            // the dialplan ended): it answered with mod_sofia's fixed
+            // hangup_cause_to_sip mapping and set no sip_term_status
+            let refused = event
+                .get_header("variable_sip_hangup_disposition")
+                .is_some_and(|d| d == "send_refuse");
+            refused.then(|| event.hangup_cause().and_then(|c| sofia_refuse_code(c))).flatten()
+        })
+}
+
+/// mod_sofia `hangup_cause_to_sip` for the causes seen on this SBC (its
+/// default for anything else is 480)
+fn sofia_refuse_code(cause: &str) -> Option<i16> {
+    Some(match cause {
+        "UNALLOCATED_NUMBER" | "NO_ROUTE_TRANSIT_NET" | "NO_ROUTE_DESTINATION" => 404,
+        "USER_BUSY" => 486,
+        "NO_USER_RESPONSE" | "NO_ANSWER" | "SUBSCRIBER_ABSENT" | "USER_NOT_REGISTERED" => 480,
+        "CALL_REJECTED" => 603,
+        "NUMBER_CHANGED" | "REDIRECTION_TO_NEW_DESTINATION" => 410,
+        "DESTINATION_OUT_OF_ORDER" | "NETWORK_OUT_OF_ORDER" => 502,
+        "INVALID_NUMBER_FORMAT" => 484,
+        "NORMAL_TEMPORARY_FAILURE" | "SWITCH_CONGESTION" | "NORMAL_CIRCUIT_CONGESTION"
+        | "REQUESTED_CHAN_UNAVAIL" | "SERVICE_UNAVAILABLE" => 503,
+        "RECOVERY_ON_TIMER_EXPIRE" => 504,
+        "INCOMPATIBLE_DESTINATION" | "BEARERCAPABILITY_NOTAVAIL" => 488,
+        "ORIGINATOR_CANCEL" => 487,
+        _ => return None,
+    })
+}
+
+/// Business direction of an a-leg, plus its dialplan context for logging.
+///
+/// FreeSWITCH's own `Call-Direction` is relative to FreeSWITCH, so every
+/// a-leg reports "inbound" (on 2026-10-25 100% of CDRs, including app users
+/// calling mobiles for 53 min). Neither the context nor the profile is enough
+/// either: FS Legado (10.118.0.4) is in the internal profile's ACL, so its
+/// calls to app users also land in `from-pbx` on `sofia/internal` (5,208 of
+/// 5,380 such a-legs 2026-10-17..25). What only a customer's device has is a
+/// directory-authenticated INVITE: mod_xml_curl returns its `accountcode`
+/// (= account id), which ACL-trusted peers never get. So outbound = handled
+/// in `from-pbx` with an `accountcode`; everything else is inbound.
+fn sbc_direction(event: &EslEvent) -> (String, String) {
+    let context = event
+        .get_header("Caller-Context")
+        .or_else(|| event.get_header("variable_context"))
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_string());
+    let authenticated_device = event
+        .get_header("variable_accountcode")
+        .is_some_and(|a| !a.trim().is_empty());
+
+    let direction = if context.starts_with("from-pbx") && authenticated_device {
+        "outbound"
+    } else {
+        "inbound"
+    };
+    (direction.to_string(), context)
+}
+
+#[cfg(test)]
+mod direction_tests {
+    use super::*;
+
+    fn leg(channel: &str, context: &str, accountcode: &str) -> EslEvent {
+        let headers = [
+            ("Caller-Channel-Name", channel),
+            ("Caller-Context", context),
+            ("Call-Direction", "inbound"),
+            ("variable_accountcode", accountcode),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        EslEvent { headers, ..Default::default() }
+    }
+
+    #[test]
+    fn sip_code_fallbacks() {
+        let ev = |pairs: &[(&str, &str)]| EslEvent {
+            headers: pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            ..Default::default()
+        };
+        assert_eq!(final_sip_code(&ev(&[("variable_sip_term_status", "487")])), Some(487));
+        assert_eq!(final_sip_code(&ev(&[("variable_answer_epoch", "1761430000")])), Some(200));
+        assert_eq!(
+            final_sip_code(&ev(&[
+                ("variable_answer_epoch", "0"),
+                ("variable_last_bridge_proto_specific_hangup_cause", "sip:486"),
+            ])),
+            Some(486)
+        );
+        assert_eq!(
+            final_sip_code(&ev(&[
+                ("variable_sip_hangup_disposition", "send_refuse"),
+                ("Hangup-Cause", "CALL_REJECTED"),
+            ])),
+            Some(603)
+        );
+        assert_eq!(final_sip_code(&ev(&[])), None);
+    }
+
+    #[test]
+    fn app_device_is_outbound() {
+        let ev = leg("sofia/internal/17486128@app.fonowin.pe", "from-pbx", "1172");
+        assert_eq!(sbc_direction(&ev).0, "outbound");
+    }
+
+    #[test]
+    fn carrier_and_legado_are_inbound() {
+        let ev = leg("sofia/external/939513001@10.35.12.68", "from-kamailio", "");
+        assert_eq!(sbc_direction(&ev).0, "inbound");
+        // Legado is ACL-trusted on the internal profile: from-pbx, no accountcode
+        let ev = leg("sofia/internal/957185999@10.118.0.4", "from-pbx", "");
+        assert_eq!(sbc_direction(&ev).0, "inbound");
+        assert_eq!(sbc_direction(&EslEvent::default()).0, "inbound");
     }
 }

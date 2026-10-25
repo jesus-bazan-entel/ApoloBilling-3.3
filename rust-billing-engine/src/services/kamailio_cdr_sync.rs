@@ -12,7 +12,7 @@
 // same transaction, so each acc_cdrs row is imported exactly once.
 use crate::database::DbPool;
 use crate::services::cdr_generator::{customer_account_sql, decode_sip_user};
-use crate::services::numbering::{customer_keys, routed_number, to_e164};
+use crate::services::numbering::{caller_to_e164, customer_keys, routed_number, to_e164};
 use chrono::{DateTime, TimeZone, Utc};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
 use std::str::FromStr;
@@ -152,6 +152,12 @@ impl KamailioCdrSync {
             let routed = routed_number(&callee, None);
             let destination = to_e164(&routed);
             let customer = customer_keys(&caller, &routed, "inbound");
+            // Answered dialogs leave the 200 of the INVITE; failed ones the final reply
+            let sip_code: Option<i16> = if answered {
+                Some(200)
+            } else {
+                cdr.sip_code.trim().parse().ok()
+            };
 
             imported += tx
                 .execute(
@@ -159,8 +165,10 @@ impl KamailioCdrSync {
                         "INSERT INTO cdrs
                          (call_uuid, caller_number, called_number, start_time, answer_time,
                           end_time, duration, billsec, hangup_cause, direction,
-                          freeswitch_server_id, destination_prefix, account_id)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'inbound', $10, $11, {})
+                          freeswitch_server_id, destination_prefix, account_id, caller_e164,
+                          sip_code)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'inbound', $10, $11, {},
+                                 $13, $14)
                          ON CONFLICT (call_uuid, start_time) DO NOTHING",
                         customer_account_sql(12)
                     ),
@@ -177,6 +185,8 @@ impl KamailioCdrSync {
                         &SERVER_ID,
                         &destination,
                         &customer,
+                        &caller_to_e164(&caller),
+                        &sip_code,
                     ],
                 )
                 .await?;

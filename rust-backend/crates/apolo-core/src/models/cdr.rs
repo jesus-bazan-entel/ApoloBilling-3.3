@@ -72,6 +72,15 @@ pub struct Cdr {
 
     /// When billing was processed
     pub processed_at: Option<DateTime<Utc>>,
+
+    /// Caller in E.164 (None when not a phone number)
+    pub caller_e164: Option<String>,
+
+    /// Final SIP status sent on the a-leg (None before 2026-10-25)
+    pub sip_code: Option<i16>,
+
+    /// IP that sent the INVITE to FreeSWITCH
+    pub source_ip: Option<String>,
 }
 
 impl Cdr {
@@ -137,6 +146,9 @@ impl Default for Cdr {
             reservation_id: None,
             created_at: now,
             processed_at: None,
+            caller_e164: None,
+            sip_code: None,
+            source_ip: None,
         }
     }
 }

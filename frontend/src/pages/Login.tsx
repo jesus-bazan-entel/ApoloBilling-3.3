@@ -163,6 +163,10 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
 
+  useEffect(() => {
+    document.title = 'WIN · Apolo SBC — Login'
+  }, [])
+
   const loginMutation = useMutation({
     mutationFn: login,
     onSuccess: (data) => {

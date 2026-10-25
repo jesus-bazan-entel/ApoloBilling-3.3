@@ -90,7 +90,7 @@ export const CAUSE_NOTES: Record<string, string> = {
   USER_NOT_REGISTERED:
     'El destino (o el ramal paralelo hacia la app) no tenía registro SIP vigente. FreeSWITCH no tiene un código propio para esta causa y responde 480: usuario, no resta al NER.',
   NORMAL_CLEARING:
-    'Ring paralelo (Legado + app): Legado respondió 486 y la app no estaba registrada. FreeSWITCH contesta 486 al carrier pero guarda la causa Q.850 16.',
+    'Q.850 16 sin respuesta. Caso típico: ring paralelo (Legado + app) en que Legado respondió 486 y la app no estaba registrada; FreeSWITCH contesta 486 al carrier pero guarda la causa 16. El código SIP real de cada llamada está en el CDR desde el 25/10/2026.',
 }
 
 export type StatusLevel = 'good' | 'warning' | 'critical'

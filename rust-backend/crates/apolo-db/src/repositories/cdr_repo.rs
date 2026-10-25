@@ -7,7 +7,10 @@
 
 use apolo_core::{
     models::Cdr,
-    traits::{CdrListFilter, CdrRepository, Repository},
+    traits::{
+        CdrListFilter, CdrRepository, Repository, CDR_LONG_CALL_SECS, CDR_SHORT_CALL_SECS,
+        CDR_SYSTEM_CUT_CAUSES,
+    },
     AppError, AppResult,
 };
 use async_trait::async_trait;
@@ -37,7 +40,8 @@ const CDR_SELECT_COLUMNS: &str = r#"
     rate_id, rate_per_minute, cost,
     hangup_cause, direction,
     freeswitch_server_id, reservation_id,
-    created_at, processed_at
+    created_at, processed_at,
+    caller_e164, sip_code, source_ip
 "#;
 
 #[async_trait]
@@ -336,53 +340,7 @@ impl CdrRepository for PgCdrRepository {
             }
         }
 
-        // Simpler approach: build raw SQL with escaped values for filters
-        // This is safe because we control the values
-        let mut raw_where_parts = Vec::new();
-
-        if let Some(aid) = account_id {
-            raw_where_parts.push(format!("account_id = {}", aid));
-        }
-        if let Some(c) = caller {
-            raw_where_parts.push(format!("caller_number LIKE '{}%'", c.replace('\'', "''")));
-        }
-        // The dialed number carries Integratel's routing prefix (3122…), so the
-        // callee search also looks at the routed E.164 destination
-        if let Some(c) = callee {
-            let c = c.replace('\'', "''");
-            raw_where_parts.push(format!(
-                "(called_number LIKE '{c}%' OR destination_prefix LIKE '%{c}%')"
-            ));
-        }
-        // RFC 3339 carries the offset; a bare timestamp would be read in the
-        // session TimeZone
-        if let Some(start) = start_date {
-            raw_where_parts.push(format!("start_time >= '{}'", start.to_rfc3339()));
-        }
-        if let Some(end) = end_date {
-            raw_where_parts.push(format!("start_time <= '{}'", end.to_rfc3339()));
-        }
-        if let Some(d) = filter.direction.as_deref().filter(|d| !d.is_empty()) {
-            raw_where_parts.push(format!(
-                "LOWER(direction) = '{}'",
-                d.to_lowercase().replace('\'', "''")
-            ));
-        }
-        if let Some(c) = filter.hangup_cause.as_deref().filter(|c| !c.is_empty()) {
-            raw_where_parts.push(format!(
-                "UPPER(hangup_cause) LIKE '%{}%'",
-                c.to_uppercase().replace('\'', "''")
-            ));
-        }
-        if filter.answered_only {
-            raw_where_parts.push("answer_time IS NOT NULL AND billsec > 0".to_string());
-        }
-
-        let raw_where = if raw_where_parts.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", raw_where_parts.join(" AND "))
-        };
+        let raw_where = cdr_where(account_id, caller, callee, start_date, end_date, filter);
 
         let count_sql = format!("SELECT COUNT(*) FROM cdrs {}", raw_where);
         let data_sql = format!(
@@ -412,6 +370,165 @@ impl CdrRepository for PgCdrRepository {
     }
 }
 
+/// WHERE clause shared by the CDR list, its summary and the export. Values
+/// are inlined with quotes escaped (standard_conforming_strings is on).
+pub fn cdr_where(
+    account_id: Option<i32>,
+    caller: Option<&str>,
+    callee: Option<&str>,
+    start_date: Option<DateTime<Utc>>,
+    end_date: Option<DateTime<Utc>>,
+    filter: &CdrListFilter,
+) -> String {
+    let mut parts = Vec::new();
+
+    if let Some(aid) = account_id {
+        parts.push(format!("account_id = {}", aid));
+    }
+    if let Some(c) = caller {
+        let c = c.replace('\'', "''");
+        parts.push(format!(
+            "(caller_number LIKE '{c}%' OR caller_e164 LIKE '%{c}%')"
+        ));
+    }
+    // The dialed number carries Integratel's routing prefix (3122…), so the
+    // callee search also looks at the routed E.164 destination
+    if let Some(c) = callee {
+        let c = c.replace('\'', "''");
+        parts.push(format!(
+            "(called_number LIKE '{c}%' OR destination_prefix LIKE '%{c}%')"
+        ));
+    }
+    // RFC 3339 carries the offset; a bare timestamp would be read in the
+    // session TimeZone
+    if let Some(start) = start_date {
+        parts.push(format!("start_time >= '{}'", start.to_rfc3339()));
+    }
+    if let Some(end) = end_date {
+        parts.push(format!("start_time <= '{}'", end.to_rfc3339()));
+    }
+    if let Some(d) = filter.direction.as_deref().filter(|d| !d.is_empty()) {
+        parts.push(format!(
+            "LOWER(direction) = '{}'",
+            d.to_lowercase().replace('\'', "''")
+        ));
+    }
+    if let Some(c) = filter.hangup_cause.as_deref().filter(|c| !c.is_empty()) {
+        parts.push(format!(
+            "UPPER(hangup_cause) LIKE '%{}%'",
+            c.to_uppercase().replace('\'', "''")
+        ));
+    }
+    if filter.answered_only {
+        parts.push("answer_time IS NOT NULL AND billsec > 0".to_string());
+    }
+    match filter.outcome.as_deref() {
+        Some("answered") => parts.push("answer_time IS NOT NULL".to_string()),
+        Some("unanswered") => parts.push("answer_time IS NULL".to_string()),
+        Some("shutdown") => parts.push(format!("hangup_cause IN ({})", system_cut_list())),
+        Some("flagged") => parts.push(format!(
+            "answer_time IS NOT NULL AND (billsec >= {} OR billsec <= {})",
+            CDR_LONG_CALL_SECS, CDR_SHORT_CALL_SECS
+        )),
+        _ => {}
+    }
+    if let Some(min) = filter.min_billsec {
+        parts.push(format!("billsec >= {}", min));
+    }
+    if let Some(max_id) = filter.max_id {
+        parts.push(format!("id <= {}", max_id));
+    }
+
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", parts.join(" AND "))
+    }
+}
+
+/// `'SYSTEM_SHUTDOWN', 'CRASH'` for an SQL IN list
+pub fn system_cut_list() -> String {
+    CDR_SYSTEM_CUT_CAUSES
+        .iter()
+        .map(|c| format!("'{}'", c))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Totals of a filtered CDR set for the page header
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct CdrSummary {
+    pub total: i64,
+    pub answered: i64,
+    pub billsec: i64,
+    pub without_customer: i64,
+    pub long_calls: i64,
+    pub short_answered: i64,
+    pub system_cut: i64,
+    pub system_cut_answered: i64,
+    /// Calls cut by a platform restart, grouped by the minute they ended
+    pub system_cut_minutes: Vec<(DateTime<Utc>, i64, i64)>,
+}
+
+impl PgCdrRepository {
+    /// Highest CDR id right now (snapshot for stable paging)
+    pub async fn max_id(&self) -> AppResult<i64> {
+        let row: (Option<i64>,) = sqlx::query_as("SELECT max(id) FROM cdrs")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to read max CDR id: {}", e)))?;
+        Ok(row.0.unwrap_or(0))
+    }
+
+    /// Totals for a filtered set (same WHERE as `list_filtered`)
+    pub async fn summary(&self, where_clause: &str) -> AppResult<CdrSummary> {
+        let cut = system_cut_list();
+        let totals_sql = format!(
+            "SELECT COUNT(*)::BIGINT,
+                    COUNT(answer_time)::BIGINT,
+                    COALESCE(SUM(billsec) FILTER (WHERE answer_time IS NOT NULL), 0)::BIGINT,
+                    COUNT(*) FILTER (WHERE account_id IS NULL)::BIGINT,
+                    COUNT(*) FILTER (WHERE answer_time IS NOT NULL AND billsec >= {long})::BIGINT,
+                    COUNT(*) FILTER (WHERE answer_time IS NOT NULL AND billsec <= {short})::BIGINT,
+                    COUNT(*) FILTER (WHERE hangup_cause IN ({cut}))::BIGINT,
+                    COUNT(*) FILTER (WHERE hangup_cause IN ({cut}) AND answer_time IS NOT NULL)::BIGINT
+             FROM cdrs {where_clause}",
+            long = CDR_LONG_CALL_SECS,
+            short = CDR_SHORT_CALL_SECS,
+        );
+        #[allow(clippy::type_complexity)]
+        let t: (i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(&totals_sql)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| AppError::Database(format!("Failed to summarize CDRs: {}", e)))?;
+
+        let cut_where = if where_clause.is_empty() {
+            format!("WHERE hangup_cause IN ({cut})")
+        } else {
+            format!("{where_clause} AND hangup_cause IN ({cut})")
+        };
+        let minutes: Vec<(DateTime<Utc>, i64, i64)> = sqlx::query_as(&format!(
+            "SELECT date_trunc('minute', end_time), COUNT(*)::BIGINT, COUNT(answer_time)::BIGINT
+             FROM cdrs {cut_where} GROUP BY 1 ORDER BY 1"
+        ))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Database(format!("Failed to group system cuts: {}", e)))?;
+
+        Ok(CdrSummary {
+            total: t.0,
+            answered: t.1,
+            billsec: t.2,
+            without_customer: t.3,
+            long_calls: t.4,
+            short_answered: t.5,
+            system_cut: t.6,
+            system_cut_answered: t.7,
+            system_cut_minutes: minutes,
+        })
+    }
+}
+
 /// Helper struct for mapping database rows to domain model
 #[derive(Debug, sqlx::FromRow)]
 struct CdrRow {
@@ -435,6 +552,9 @@ struct CdrRow {
     reservation_id: Option<Uuid>,
     created_at: DateTime<Utc>,
     processed_at: Option<DateTime<Utc>>,
+    caller_e164: Option<String>,
+    sip_code: Option<i16>,
+    source_ip: Option<String>,
 }
 
 impl From<CdrRow> for Cdr {
@@ -460,6 +580,9 @@ impl From<CdrRow> for Cdr {
             reservation_id: row.reservation_id,
             created_at: row.created_at,
             processed_at: row.processed_at,
+            caller_e164: row.caller_e164,
+            sip_code: row.sip_code,
+            source_ip: row.source_ip,
         }
     }
 }
@@ -492,6 +615,9 @@ mod tests {
             reservation_id: None,
             created_at: now,
             processed_at: None,
+            caller_e164: None,
+            sip_code: None,
+            source_ip: None,
         };
 
         let cdr: Cdr = row.into();

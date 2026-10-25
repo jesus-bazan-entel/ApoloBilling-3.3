@@ -1,12 +1,12 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { fetchCDRs, exportCDRs } from '../api/client'
+import { fetchCDRs, fetchCDRSummary, exportCDRs } from '../api/client'
 import DataTable from '../components/DataTable'
 import Badge from '../components/Badge'
 import QuickRangeBar from '../components/QuickRangeBar'
-import { FileText, Download, Search, Filter, X, AlertTriangle } from 'lucide-react'
-import type { CDR, CDRFilters } from '../types'
+import { FileText, Download, Search, Filter, X, AlertTriangle, Copy } from 'lucide-react'
+import type { CDR, CDRFilters, CdrSummary } from '../types'
 import { callOutcome } from '../lib/callStatus'
 import {
   DEFAULT_RANGE,
@@ -19,10 +19,21 @@ import {
   type RangeKey,
 } from '../lib/cdrTimeRanges'
 
-// Filters live in the URL (/cdr?range=yesterday&direction=inbound) so a view can
-// be pasted into a ticket or the NOC chat.
-const URL_FILTERS = ['caller', 'callee', 'direction'] as const
+// Interconnection SBC: this screen serves traffic reconciliation with carriers
+// (Integratel), keyed on MSISDN, date/time, status and duration. Filters live
+// in the URL (/cdr?range=yesterday&direction=inbound) so a view can be pasted
+// into a ticket or the NOC chat. All of them are applied in SQL.
+const URL_FILTERS = ['caller', 'callee', 'direction', 'outcome', 'min_billsec'] as const
 type UrlFilter = (typeof URL_FILTERS)[number]
+
+// Same thresholds the backend uses (CDR_LONG_CALL_SECS / CDR_SHORT_CALL_SECS);
+// the summary returns them, these are only the first-render fallback
+const DEFAULT_LONG_CALL_SECS = 7200
+const DEFAULT_SHORT_CALL_SECS = 3
+
+const inputClass =
+  'w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]'
+const labelClass = 'block text-sm font-medium text-[var(--color-text-secondary)] mb-1'
 
 export default function CDRPage() {
   const [page, setPage] = useState(1)
@@ -31,6 +42,10 @@ export default function CDRPage() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  // Newest CDR id when page 1 was read. Later pages send it back as max_id,
+  // so CDRs written while paging don't shift rows (no repeats, no gaps).
+  const snapshotRef = useRef<number | undefined>(undefined)
+  const [snapshot, setSnapshot] = useState<number | undefined>(undefined)
 
   const rawRange = searchParams.get('range')
   const range: RangeKey = isRangeKey(rawRange) ? rawRange : DEFAULT_RANGE
@@ -85,15 +100,30 @@ export default function CDRPage() {
     queryKey: ['cdrs', page, range, customFrom, customTo, filters],
     queryFn: async () => {
       const { apiFilters, resolved } = buildFilters(Date.now())
-      const result = await fetchCDRs(apiFilters, page, 50)
-      return { ...result, rangeLabel: describeRange(resolved) }
+      const maxId = page > 1 ? snapshotRef.current : undefined
+      const result = await fetchCDRs({ ...apiFilters, max_id: maxId }, page, 50)
+      if (page === 1) {
+        snapshotRef.current = result.snapshot
+        setSnapshot(result.snapshot)
+      }
+      return { ...result, rangeLabel: describeRange(resolved), apiFilters }
     },
     placeholderData: keepPreviousData,
-    // New CDRs only appear in ranges that end "now", and only on page 1: on
-    // later pages a refresh would shift rows under the operator (skipped or
-    // repeated CDRs while paging)
+    // New CDRs only appear in ranges that end "now", and only on page 1: a
+    // refresh takes a new snapshot, later pages stay on theirs
     refetchInterval: autoRefresh && openEnded && page === 1 ? 30_000 : false,
   })
+
+  // Totals for the same rows the table pages through (same snapshot)
+  const { data: summary } = useQuery({
+    queryKey: ['cdrs-summary', snapshot, range, customFrom, customTo, filters],
+    queryFn: () => fetchCDRSummary({ ...data!.apiFilters, max_id: snapshot }),
+    enabled: !!data && snapshot !== undefined,
+    placeholderData: keepPreviousData,
+  })
+
+  const longSecs = summary?.long_call_secs ?? DEFAULT_LONG_CALL_SECS
+  const shortSecs = summary?.short_call_secs ?? DEFAULT_SHORT_CALL_SECS
 
   const handleExport = async () => {
     setExporting(true)
@@ -113,17 +143,19 @@ export default function CDRPage() {
     }
   }
 
+  const sub = 'text-xs text-[var(--color-text-tertiary)]'
+
   const columns = [
     {
       key: 'start_time',
-      header: 'Fecha/Hora',
+      header: 'Inicio (GMT-5)',
       // Lima time, like the filters and the CSV, whatever the PC's zone
       render: (cdr: CDR) => {
         const [date, time] = formatLimaDateTime(new Date(cdr.start_time))
         return (
-          <div>
+          <div className="whitespace-nowrap">
             <div className="text-[var(--color-text-primary)]">{date}</div>
-            <div className="text-xs text-[var(--color-text-tertiary)]">{time}</div>
+            <div className={sub}>{time}</div>
           </div>
         )
       },
@@ -131,53 +163,65 @@ export default function CDRPage() {
     {
       key: 'caller',
       header: 'Origen',
-      render: (cdr: CDR) => (
-        <span className="font-mono text-[var(--color-text-primary)]">{cdr.caller || cdr.caller_number || '-'}</span>
-      ),
+      render: (cdr: CDR) => {
+        const raw = cdr.caller || cdr.caller_number || ''
+        const shown = cdr.caller_e164 || raw || '-'
+        return (
+          <div className="whitespace-nowrap" title={cdr.source_ip ? `INVITE desde ${cdr.source_ip}` : undefined}>
+            <div className="font-mono text-[var(--color-text-primary)]">{shown}</div>
+            {raw && raw !== shown && <div className={`${sub} font-mono`}>recibido: {raw}</div>}
+            {!cdr.caller_e164 && raw && <div className="text-xs text-amber-600">no es un número E.164</div>}
+          </div>
+        )
+      },
     },
     {
       key: 'callee',
       header: 'Destino',
-      render: (cdr: CDR) => (
-        <div>
-          <span className="font-mono text-[var(--color-text-secondary)]">{cdr.callee || cdr.callee_number || '-'}</span>
-          {cdr.destination && (
-            <span className="text-xs text-[var(--color-text-tertiary)] block">{cdr.destination}</span>
-          )}
-        </div>
-      ),
+      render: (cdr: CDR) => {
+        const raw = cdr.callee || cdr.callee_number || ''
+        const shown = cdr.destination || raw || '-'
+        return (
+          <div className="whitespace-nowrap">
+            <div className="font-mono text-[var(--color-text-secondary)]">{shown}</div>
+            {raw && raw !== shown && <div className={`${sub} font-mono`}>marcado: {raw}</div>}
+          </div>
+        )
+      },
     },
     {
       key: 'direction',
-      header: 'Dirección',
+      header: 'Dir.',
       render: (cdr: CDR) => (
-        <Badge
-          variant={
-            cdr.direction === 'outbound'
-              ? 'info'
-              : cdr.direction === 'inbound'
-              ? 'success'
-              : 'default'
-          }
-        >
-          {cdr.direction === 'outbound'
-            ? 'Saliente'
-            : cdr.direction === 'inbound'
-            ? 'Entrante'
-            : 'Interna'}
+        <Badge variant={cdr.direction === 'outbound' ? 'info' : cdr.direction === 'inbound' ? 'success' : 'default'}>
+          {cdr.direction === 'outbound' ? 'Saliente' : cdr.direction === 'inbound' ? 'Entrante' : 'Interna'}
         </Badge>
       ),
     },
     {
-      key: 'duration',
-      header: 'Duración',
-      render: (cdr: CDR) => formatDuration(cdr.duration ?? 0),
-      className: 'text-right',
-    },
-    {
       key: 'billsec',
-      header: 'Conversación',
-      render: (cdr: CDR) => formatDuration(cdr.billsec ?? 0),
+      header: 'Conv. / Total',
+      render: (cdr: CDR) => {
+        const answered = !!cdr.answer_time
+        const long = answered && cdr.billsec >= longSecs
+        const short = answered && cdr.billsec <= shortSecs
+        return (
+          <div className="whitespace-nowrap text-right">
+            <div className="text-[var(--color-text-primary)]">{formatDuration(cdr.billsec ?? 0)}</div>
+            <div className={sub}>total {formatDuration(cdr.duration ?? 0)}</div>
+            {long && (
+              <span title={`Contestada y de ${formatDuration(longSecs)} o más: revisar`}>
+                <Badge variant="warning">Larga</Badge>
+              </span>
+            )}
+            {short && (
+              <span title={`Contestada y de ${shortSecs} s o menos: revisar`}>
+                <Badge variant="warning">Muy corta</Badge>
+              </span>
+            )}
+          </div>
+        )
+      },
       className: 'text-right',
     },
     {
@@ -186,16 +230,36 @@ export default function CDRPage() {
       render: (cdr: CDR) => {
         const outcome = callOutcome(cdr)
         return (
-          <span title={cdr.hangup_cause}>
+          <div className="min-w-[9rem]">
             <Badge variant={outcome.variant}>{outcome.label}</Badge>
-          </span>
+            <div className={`${sub} font-mono mt-0.5`}>
+              {cdr.hangup_cause || '—'}
+              {' · SIP '}
+              {cdr.sip_code ?? <span title="El código SIP se registra desde el 25/10/2026">n/d</span>}
+            </div>
+          </div>
         )
       },
+    },
+    {
+      key: 'call_uuid',
+      header: 'ID llamada',
+      render: (cdr: CDR) => (
+        <button
+          type="button"
+          onClick={() => navigator.clipboard?.writeText(cdr.call_uuid)}
+          title={`${cdr.call_uuid}\nCDR #${cdr.id} · clic para copiar`}
+          className="flex items-center font-mono text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+        >
+          {cdr.call_uuid.slice(0, 8)}
+          <Copy className="w-3 h-3 ml-1" />
+        </button>
+      ),
     },
   ]
 
   const clearFilters = () =>
-    updateParams({ caller: undefined, callee: undefined, direction: undefined })
+    updateParams(Object.fromEntries(URL_FILTERS.map((k) => [k, undefined])))
 
   const activeFilterCount = Object.keys(filters).length
   const hasActiveFilters = activeFilterCount > 0
@@ -278,6 +342,10 @@ export default function CDRPage() {
         refreshing={isFetching}
       />
 
+      {summary && summary.system_cut > 0 && filters.outcome !== 'shutdown' && (
+        <OutageBanner summary={summary} onShow={() => updateParams({ outcome: 'shutdown' })} />
+      )}
+
       {/* Filters Panel */}
       {showFilters && (
         <div className="bg-[var(--color-bg-card)] rounded-xl shadow-sm border border-[var(--color-border-primary)] p-6">
@@ -295,75 +363,91 @@ export default function CDRPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Desde (hora Lima)
-              </label>
+              <label className={labelClass}>Desde (hora Lima)</label>
               <input
                 type="datetime-local"
                 value={range === 'custom' ? customFrom : ''}
                 onChange={(e) => setCustomBound('from', e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
+                className={inputClass}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Hasta (vacío = ahora)
-              </label>
+              <label className={labelClass}>Hasta (vacío = ahora)</label>
               <input
                 type="datetime-local"
                 value={range === 'custom' ? customTo : ''}
                 onChange={(e) => setCustomBound('to', e.target.value)}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
+                className={inputClass}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Número Origen
-              </label>
+              <label className={labelClass}>Número Origen</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   value={filters.caller || ''}
                   onChange={(e) => updateParams({ caller: e.target.value })}
-                  placeholder="Ej: 1001"
-                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
+                  placeholder="Ej: 17486128"
+                  className={`${inputClass} pl-10`}
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Número Destino
-              </label>
+              <label className={labelClass}>Número Destino</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   value={filters.callee || ''}
                   onChange={(e) => updateParams({ callee: e.target.value })}
-                  placeholder="Ej: 51987654321"
-                  className="w-full pl-10 pr-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
+                  placeholder="Ej: 993171615"
+                  className={`${inputClass} pl-10`}
                 />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
-                Dirección
-              </label>
+              <label className={labelClass}>Dirección</label>
               <select
                 value={filters.direction || ''}
                 onChange={(e) => updateParams({ direction: e.target.value })}
-                className="w-full px-3 py-2 border border-[var(--color-border-primary)] rounded-lg focus:ring-2 focus:ring-[#ff5a0a] focus:border-[#ff5a0a]"
+                className={inputClass}
               >
                 <option value="">Todas</option>
                 <option value="outbound">Saliente</option>
                 <option value="inbound">Entrante</option>
-                <option value="internal">Interna</option>
               </select>
+            </div>
+            <div>
+              <label className={labelClass}>Estado</label>
+              <select
+                value={filters.outcome || ''}
+                onChange={(e) => updateParams({ outcome: e.target.value })}
+                className={inputClass}
+              >
+                <option value="">Todos</option>
+                <option value="answered">Contestadas</option>
+                <option value="unanswered">No contestadas</option>
+                <option value="shutdown">Cortadas por el sistema</option>
+                <option value="flagged">Marcadas para revisión</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Conversación mínima (s)</label>
+              <input
+                type="number"
+                min={0}
+                value={filters.min_billsec || ''}
+                onChange={(e) => updateParams({ min_billsec: e.target.value })}
+                placeholder="Ej: 60"
+                className={inputClass}
+              />
             </div>
           </div>
         </div>
       )}
+
+      {summary && <SummaryStrip summary={summary} longSecs={longSecs} shortSecs={shortSecs} />}
 
       {/* Summary */}
       {data && (
@@ -371,7 +455,9 @@ export default function CDRPage() {
           <div className="flex items-center">
             <FileText className="w-5 h-5 text-[var(--color-text-muted)] mr-2" />
             <span className="text-[var(--color-text-secondary)]">
-              Mostrando {(data.data ?? data.items ?? []).length} de {data.total} registros
+              Página {page}: {(data.data ?? data.items ?? []).length} de {data.total.toLocaleString('es-PE')}{' '}
+              registros
+              {page > 1 && ' · lista fija desde la página 1 (las llamadas nuevas aparecen al volver a ella)'}
             </span>
           </div>
         </div>
@@ -392,9 +478,93 @@ export default function CDRPage() {
               }
             : undefined
         }
-        searchable={true}
-        searchPlaceholder="Filtrar solo las filas de esta página…"
       />
+    </div>
+  )
+}
+
+/** ASR, ACD, minutes and review counters of the whole filtered set */
+function SummaryStrip({ summary, longSecs, shortSecs }: { summary: CdrSummary; longSecs: number; shortSecs: number }) {
+  const nf = new Intl.NumberFormat('es-PE')
+  const pct = (n: number, d: number) => (d > 0 ? `${new Intl.NumberFormat('es-PE', { maximumFractionDigits: 1 }).format((100 * n) / d)} %` : '—')
+  const tiles: { label: string; value: string; hint: string; tone?: 'warn' | 'bad' }[] = [
+    { label: 'Llamadas', value: nf.format(summary.total), hint: 'Intentos en el rango y filtros' },
+    {
+      label: 'Contestadas (ASR)',
+      value: pct(summary.answered, summary.total),
+      hint: `${nf.format(summary.answered)} con hora de contestación`,
+    },
+    {
+      label: 'Duración media (ACD)',
+      value: summary.answered > 0 ? formatDuration(Math.round(summary.billsec / summary.answered)) : '—',
+      hint: 'Conversación promedio de las contestadas',
+    },
+    {
+      label: 'Minutos conversados',
+      value: nf.format(Math.round(summary.billsec / 60)),
+      hint: 'Suma de la conversación de las contestadas',
+    },
+    {
+      label: 'Marcadas para revisión',
+      value: nf.format(summary.long_calls + summary.short_answered),
+      hint: `${nf.format(summary.long_calls)} de ${formatDuration(longSecs)} o más · ${nf.format(summary.short_answered)} contestadas de ${shortSecs} s o menos`,
+      tone: summary.long_calls + summary.short_answered > 0 ? 'warn' : undefined,
+    },
+    {
+      label: 'Cortadas por el sistema',
+      value: nf.format(summary.system_cut),
+      hint: `${nf.format(summary.system_cut_answered)} estaban contestadas`,
+      tone: summary.system_cut > 0 ? 'bad' : undefined,
+    },
+  ]
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
+      {tiles.map((t) => (
+        <div
+          key={t.label}
+          title={t.hint}
+          className="bg-[var(--color-bg-card)] rounded-lg border border-[var(--color-border-primary)] p-3"
+        >
+          <div className="text-xs text-[var(--color-text-tertiary)]">{t.label}</div>
+          <div
+            className={`text-xl font-semibold tabular-nums ${
+              t.tone === 'bad' ? 'text-red-600' : t.tone === 'warn' ? 'text-amber-600' : 'text-[var(--color-text-primary)]'
+            }`}
+          >
+            {t.value}
+          </div>
+          <div className="text-xs text-[var(--color-text-tertiary)] truncate">{t.hint}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Calls cut by platform restarts in the range, grouped into outages */
+function OutageBanner({ summary, onShow }: { summary: CdrSummary; onShow: () => void }) {
+  const hhmm = (iso: string) => formatLimaDateTime(new Date(iso))[1].slice(0, 5)
+  const day = (iso: string) => formatLimaDateTime(new Date(iso))[0].slice(0, 5)
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+      <div className="flex items-start">
+        <AlertTriangle className="w-4 h-4 mr-2 mt-0.5 shrink-0" />
+        <div>
+          <strong>
+            {summary.system_cut.toLocaleString('es-PE')} llamadas cortadas por reinicio o caída del sistema
+          </strong>{' '}
+          ({summary.system_cut_answered.toLocaleString('es-PE')} estaban contestadas; afectan duración facturable y SLA)
+          <ul className="mt-1 list-disc pl-5">
+            {summary.outages.map((o) => (
+              <li key={o.from}>
+                {day(o.from)} {hhmm(o.from)}–{hhmm(o.to)} (GMT-5): {o.calls} llamadas, {o.answered} contestadas
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <button onClick={onShow} className="shrink-0 underline font-medium">
+        Ver llamadas
+      </button>
     </div>
   )
 }

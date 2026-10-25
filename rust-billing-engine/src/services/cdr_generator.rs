@@ -6,7 +6,7 @@
 // number belongs to no device (e.g. FS Legado customers).
 use crate::database::DbPool;
 use crate::error::EngineError;
-use crate::services::numbering::{customer_keys, routed_number, to_e164};
+use crate::services::numbering::{caller_to_e164, customer_keys, routed_number, to_e164};
 use chrono::{DateTime, Utc};
 use tracing::{info, error};
 
@@ -29,6 +29,10 @@ pub struct HangupEvent {
     pub server_id: String,
     /// FreeSWITCH `transformed_number` (inbound route strip/prefix), if set
     pub transformed_number: Option<String>,
+    /// Final SIP status sent on the a-leg (`sip_term_status`)
+    pub sip_code: Option<i16>,
+    /// IP that sent the INVITE (`sip_network_ip`)
+    pub source_ip: Option<String>,
     /// Post-Dial Delay (INVITE → first 180/183) in ms
     pub pdd_ms: Option<i32>,
     /// Worst leg's FreeSWITCH-estimated MOS and received-RTP loss percent
@@ -60,9 +64,10 @@ impl CdrGenerator {
                     "INSERT INTO cdrs
                      (call_uuid, caller_number, called_number, start_time, answer_time, end_time,
                       duration, billsec, hangup_cause, direction, freeswitch_server_id, pdd_ms,
-                      mos, rtp_loss_pct, destination_prefix, account_id)
+                      mos, rtp_loss_pct, destination_prefix, account_id, caller_e164, sip_code,
+                      source_ip)
                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                             {})
+                             {}, $17, $18, $19)
                      RETURNING id",
                     customer_account_sql(16)
                 ),
@@ -83,6 +88,9 @@ impl CdrGenerator {
                     &event.rtp_loss_pct,
                     &destination,
                     &customer,
+                    &caller_to_e164(&caller),
+                    &event.sip_code,
+                    &event.source_ip,
                 ],
             )
             .await?;

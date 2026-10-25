@@ -12,6 +12,7 @@ import type {
   ActiveCall,
   PaginatedResponse,
   CDRFilters,
+  CdrSummary,
   DialplanRoute,
 } from '../types'
 
@@ -128,7 +129,7 @@ export const fetchCDRs = async (
   filters?: CDRFilters,
   page = 1,
   perPage = 50
-): Promise<PaginatedResponse<CDR>> => {
+): Promise<PaginatedResponse<CDR> & { snapshot?: number }> => {
   const params = new URLSearchParams()
   params.append('page', page.toString())
   params.append('per_page', perPage.toString())
@@ -141,7 +142,10 @@ export const fetchCDRs = async (
     })
   }
 
-  const { data } = await api.get(`/cdrs?${params.toString()}`)
+  const response = await api.get(`/cdrs?${params.toString()}`)
+  const { data } = response
+  // Newest CDR id when the list was read: later pages send it back as max_id
+  const snapshot = Number(response.headers['x-cdr-snapshot']) || undefined
 
   // Transform API response format to expected format
   // API returns: { data: [...], pagination: { total, page, per_page, total_pages } }
@@ -153,9 +157,20 @@ export const fetchCDRs = async (
       page: data.pagination.page,
       per_page: data.pagination.per_page,
       total_pages: data.pagination.total_pages,
+      snapshot,
     }
   }
   return data
+}
+
+/** Totals of the filtered set: ASR, ACD, minutes, outages, flagged calls */
+export const fetchCDRSummary = async (filters: CDRFilters): Promise<CdrSummary> => {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') params.append(key, value.toString())
+  })
+  const { data } = await api.get(`/cdrs/summary?${params.toString()}`)
+  return data.data
 }
 
 export const fetchCDR = async (id: number): Promise<CDR> => {

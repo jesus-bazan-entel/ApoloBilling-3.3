@@ -40,6 +40,28 @@ pub struct CdrFilterParams {
     /// Only show answered calls
     #[serde(default)]
     pub answered_only: bool,
+
+    /// Customer number (accounts.account_number); resolved to account_id
+    pub account: Option<String>,
+
+    /// `answered` / `unanswered` / `shutdown` / `flagged`
+    #[validate(custom(function = "validate_outcome"))]
+    pub outcome: Option<String>,
+
+    /// Minimum talk time in seconds
+    #[validate(range(min = 0, max = 86400))]
+    pub min_billsec: Option<i32>,
+
+    /// Snapshot from the first page (`X-Cdr-Snapshot`): later pages ignore
+    /// CDRs written after it, so rows never shift while paging
+    pub max_id: Option<i64>,
+}
+
+fn validate_outcome(value: &str) -> Result<(), validator::ValidationError> {
+    match value {
+        "" | "answered" | "unanswered" | "shutdown" | "flagged" => Ok(()),
+        _ => Err(validator::ValidationError::new("outcome")),
+    }
 }
 
 /// CDR export parameters
@@ -63,6 +85,17 @@ pub struct CdrExportParams {
 
     /// Call direction filter
     pub direction: Option<CdrDirection>,
+
+    /// Customer number (accounts.account_number); resolved to account_id
+    pub account: Option<String>,
+
+    /// `answered` / `unanswered` / `shutdown` / `flagged`
+    #[validate(custom(function = "validate_outcome"))]
+    pub outcome: Option<String>,
+
+    /// Minimum talk time in seconds
+    #[validate(range(min = 0, max = 86400))]
+    pub min_billsec: Option<i32>,
 
     /// Export format
     #[serde(default)]
@@ -227,6 +260,19 @@ pub struct CdrResponse {
 
     /// Was the call answered
     pub answered: bool,
+
+    /// Caller in E.164
+    pub caller_e164: Option<String>,
+
+    /// Final SIP status sent on the a-leg (None before 2026-10-25)
+    pub sip_code: Option<i16>,
+
+    /// IP that sent the INVITE
+    pub source_ip: Option<String>,
+
+    /// Customer number / name (filled by the handler)
+    pub account_number: Option<String>,
+    pub account_name: Option<String>,
 }
 
 impl From<apolo_core::models::Cdr> for CdrResponse {
@@ -247,6 +293,11 @@ impl From<apolo_core::models::Cdr> for CdrResponse {
             hangup_cause: cdr.hangup_cause,
             direction: cdr.direction,
             answered,
+            caller_e164: cdr.caller_e164,
+            sip_code: cdr.sip_code,
+            source_ip: cdr.source_ip,
+            account_number: None,
+            account_name: None,
         }
     }
 }

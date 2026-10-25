@@ -38,6 +38,9 @@ fn create_mock_cdr(id: i64, answered: bool) -> Cdr {
         reservation_id: None,
         created_at: now,
         processed_at: Some(now),
+        caller_e164: None,
+        sip_code: None,
+        source_ip: None,
     }
 }
 

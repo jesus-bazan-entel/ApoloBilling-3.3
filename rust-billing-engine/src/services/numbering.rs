@@ -26,7 +26,8 @@ pub fn routed_number(callee: &str, transformed: Option<&str>) -> String {
 
 /// E.164 form of a Peruvian (or already international) number, or None when
 /// the value is not a recognisable phone number (extensions, short codes,
-/// garbage such as `DD30D984541863`).
+/// garbage such as `DD30D984541863`). Mirrored by `apolo_e164()` in
+/// migration 024 (keep both in sync).
 ///
 /// National plan (Peru, +51): mobiles are 9 digits starting with 9; fixed
 /// lines are 8 digits, Lima `1` + 7 digits and provinces a 2-digit area code
@@ -60,7 +61,24 @@ pub fn to_e164(number: &str) -> Option<String> {
     if is_pe_national(digits) {
         return Some(format!("+51{}", digits));
     }
+    // Lima number dialed without its area code
+    if digits.len() == 7 && matches!(digits.as_bytes()[0], b'2'..=b'9') {
+        return Some(format!("+511{}", digits));
+    }
     None
+}
+
+/// E.164 of a caller. Carriers present international CLIs without '+' or
+/// '00' (`34641413618`, `491607604153`), so 10-15 digits that are not a
+/// Peruvian number are read as international.
+pub fn caller_to_e164(number: &str) -> Option<String> {
+    to_e164(number).or_else(|| {
+        let n = number.trim();
+        let international = (10..=15).contains(&n.len())
+            && !n.starts_with('0')
+            && n.bytes().all(|b| b.is_ascii_digit());
+        international.then(|| format!("+{}", n))
+    })
 }
 
 /// National significant number of a Peruvian E.164 (`+5117473046` →
@@ -123,12 +141,26 @@ mod tests {
         assert_eq!(to_e164("5117473046").as_deref(), Some("+5117473046"));
         assert_eq!(to_e164("+18505551234").as_deref(), Some("+18505551234"));
         assert_eq!(to_e164("0018505551234").as_deref(), Some("+18505551234"));
+        assert_eq!(to_e164("2407352").as_deref(), Some("+5112407352"));
+    }
+
+    #[test]
+    fn caller_international_without_plus() {
+        assert_eq!(caller_to_e164("34641413618").as_deref(), Some("+34641413618"));
+        assert_eq!(caller_to_e164("491607604153").as_deref(), Some("+491607604153"));
+        assert_eq!(caller_to_e164("5113555555").as_deref(), Some("+5113555555"));
+        assert_eq!(caller_to_e164("17486128").as_deref(), Some("+5117486128"));
+        assert_eq!(caller_to_e164("DD30D984541863"), None);
+        assert_eq!(caller_to_e164("0123456789"), None);
+        // Destinations don't get the international guess
+        assert_eq!(to_e164("34641413618"), None);
     }
 
     #[test]
     fn e164_rejects_non_numbers() {
         assert_eq!(to_e164("DD30D984541863"), None);
         assert_eq!(to_e164("1001"), None);
+        assert_eq!(to_e164("0123456"), None);
         assert_eq!(to_e164("123"), None);
         assert_eq!(to_e164("312217473046"), None);
         assert_eq!(to_e164("23123456"), None);

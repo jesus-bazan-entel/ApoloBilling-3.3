@@ -2,14 +2,17 @@
 //
 // A call is answered when it has an answer time (the backend's ASR uses the
 // same rule: COUNT(answer_time)); the hangup cause only explains why an
-// unanswered call failed. NORMAL_CLEARING alone does not mean "completed":
-// unanswered NORMAL_CLEARING is a parallel-ring bridge whose answering leg was
-// busy (FreeSWITCH answers 486 but keeps Q.850 16).
+// unanswered call failed. Labels describe the cause, they don't guess: an
+// unanswered NORMAL_CLEARING (Q.850 16) is shown as such, and the screens
+// also show the raw cause and the real SIP code the caller received.
 
 // Causes of unanswered calls in operator language. Unknown causes fall back to the raw name.
 const CAUSE_LABELS: Record<string, string> = {
   ORIGINATOR_CANCEL: 'Cancelada por quien llama',
-  NORMAL_CLEARING: 'Ocupado en ring paralelo',
+  NORMAL_CLEARING: 'Cierre normal sin contestar',
+  SYSTEM_SHUTDOWN: 'Cortada por reinicio del sistema',
+  CRASH: 'Cortada por caída del sistema',
+  MANAGER_REQUEST: 'Cortada por un operador',
   CALL_REJECTED: 'Rechazada',
   USER_BUSY: 'Ocupado',
   NO_ANSWER: 'Sin respuesta',
@@ -44,10 +47,16 @@ const USER_SIDE = new Set([
   'USER_NOT_REGISTERED',
 ])
 
+/** The platform, not a party, ended the call (same list as the backend) */
+export const SYSTEM_CUT_CAUSES = new Set(['SYSTEM_SHUTDOWN', 'CRASH'])
+
 export function callOutcome(cdr: {
   answer_time?: string | null
   hangup_cause?: string | null
 }): { label: string; variant: OutcomeVariant } {
+  if (cdr.answer_time && SYSTEM_CUT_CAUSES.has(cdr.hangup_cause ?? '')) {
+    return { label: 'Contestada · cortada por el sistema', variant: 'error' }
+  }
   if (cdr.answer_time) return { label: 'Contestada', variant: 'success' }
   const cause = cdr.hangup_cause || ''
   if (!cause) return { label: 'Desconocido', variant: 'default' }

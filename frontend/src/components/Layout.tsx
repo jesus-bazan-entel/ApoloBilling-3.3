@@ -113,6 +113,15 @@ export default function Layout({ children }: LayoutProps) {
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
 
+  // Browser tab names the current page (index.html only knows "Login")
+  useEffect(() => {
+    const item = [mainSection, adminSection, systemSection]
+      .flatMap((section) => section.items)
+      .filter((i) => location.pathname === i.href || (i.href !== '/' && location.pathname.startsWith(i.href)))
+      .sort((a, b) => b.href.length - a.href.length)[0]
+    document.title = `WIN · Apolo SBC — ${item?.name ?? 'Panel'}`
+  }, [location.pathname])
+
   const changePasswordMutation = useMutation({
     mutationFn: changePassword,
     onSuccess: () => {

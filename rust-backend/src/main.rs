@@ -73,6 +73,7 @@ fn configure_routes(cfg: &mut web::ServiceConfig) {
                     .route("", web::post().to(create_cdr))
                     .route("/export", web::get().to(cdr::export_cdrs))
                     .route("/stats", web::get().to(cdr::get_cdr_stats))
+                    .route("/summary", web::get().to(cdr::cdr_summary))
                     .route("/{id}", web::get().to(cdr::get_cdr)),
             ),
     );

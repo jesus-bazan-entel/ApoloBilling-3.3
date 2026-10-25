@@ -25,6 +25,10 @@ mod tests {
             direction: Some(CdrDirection::Outbound),
             hangup_cause: None,
             answered_only: false,
+            account: None,
+            outcome: Some("answered".to_string()),
+            min_billsec: None,
+            max_id: None,
         };
 
         assert_eq!(params.pagination.page, 1);

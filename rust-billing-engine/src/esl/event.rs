@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EslEvent {
     pub headers: HashMap<String, String>,
     pub body: Option<String>,

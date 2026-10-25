@@ -69,7 +69,22 @@ pub struct CdrListFilter {
     pub hangup_cause: Option<String>,
     /// Only answered calls (answer_time set and billsec > 0)
     pub answered_only: bool,
+    /// `answered` / `unanswered` / `shutdown` (cut by a system restart) /
+    /// `flagged` (answered and very long or very short, see `CDR_LONG_CALL_SECS`)
+    pub outcome: Option<String>,
+    /// Minimum talk time in seconds
+    pub min_billsec: Option<i32>,
+    /// Snapshot: ignore CDRs written after this id, so paging a live range
+    /// never repeats or skips rows
+    pub max_id: Option<i64>,
 }
+
+/// Answered calls at least this long are flagged for review
+pub const CDR_LONG_CALL_SECS: i32 = 7200;
+/// Answered calls this short or shorter are flagged for review
+pub const CDR_SHORT_CALL_SECS: i32 = 3;
+/// Hangup causes that mean the platform cut the call, not a party
+pub const CDR_SYSTEM_CUT_CAUSES: &[&str] = &["SYSTEM_SHUTDOWN", "CRASH"];
 
 /// CDR repository trait with specialized methods
 #[async_trait]

@@ -65,6 +65,35 @@ export interface CDR {
   destination_prefix?: string
   account_id?: number
   answered?: boolean
+  /** Caller in E.164 (caller keeps what the carrier sent) */
+  caller_e164?: string | null
+  /** Final SIP status sent on the a-leg; null before 2026-10-25 */
+  sip_code?: number | null
+  /** IP that sent the INVITE to FreeSWITCH */
+  source_ip?: string | null
+  account_number?: string | null
+  account_name?: string | null
+}
+
+export interface CdrOutage {
+  from: string
+  to: string
+  calls: number
+  answered: number
+}
+
+export interface CdrSummary {
+  total: number
+  answered: number
+  billsec: number
+  without_customer: number
+  long_calls: number
+  short_answered: number
+  long_call_secs: number
+  short_call_secs: number
+  system_cut: number
+  system_cut_answered: number
+  outages: CdrOutage[]
 }
 
 // Active Call for real-time monitoring
@@ -176,6 +205,14 @@ export interface CDRFilters {
   min_duration?: number
   max_duration?: number
   hangup_cause?: string
+  /** Customer number (accounts.account_number) */
+  account?: string
+  /** answered / unanswered / shutdown / flagged */
+  outcome?: string
+  /** Minimum talk time in seconds */
+  min_billsec?: string
+  /** Snapshot id from page 1 (stable paging) */
+  max_id?: number
 }
 
 // Dialplan Route for FreeSWITCH configuration
