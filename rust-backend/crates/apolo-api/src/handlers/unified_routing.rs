@@ -4663,6 +4663,14 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             if route.inherit_codec.unwrap_or(true) {
                 xml.push_str("        <action application=\"set\" data=\"inherit_codec=true\"/>\n");
             }
+            // Bypass media: FS rewrites the SDP so RTP flows between the far
+            // ends (through RTPEngine) and never touches this host; FS stays a
+            // signalling-only B2BUA. Set before the bridge, as the originate
+            // reads it when it starts.
+            let bypass_media = route.bypass_media.unwrap_or(false);
+            if bypass_media {
+                xml.push_str("        <action application=\"set\" data=\"bypass_media=true\"/>\n");
+            }
             // Don't relay the callee's display (Remote-Party-ID from the
             // destination, e.g. Legado's "Outbound Call") back to the carrier
             // in the 200 OK P-Asserted-Identity; keep the dialed DID instead.
@@ -4673,8 +4681,12 @@ async fn sync_inbound_routes_to_freeswitch(pool: &PgPool) -> Result<(), AppError
             xml.push_str("        <action application=\"set\" data=\"effective_callee_id_name=${destination_number}\"/>\n");
             xml.push_str("        <action application=\"set\" data=\"effective_callee_id_number=${destination_number}\"/>\n");
 
-            // Early media: send 183 Session Progress with ringback tone
-            if route.send_early_media {
+            // Early media: send 183 Session Progress with ringback tone. Not
+            // with bypass media: pre_answer would anchor the media on FS, and
+            // the originate drops that early media again to enter bypass.
+            if route.send_early_media && bypass_media {
+                warn!(route = %route.name, "send_early_media ignored: the route uses bypass_media");
+            } else if route.send_early_media {
                 xml.push_str("        <action application=\"set\" data=\"ringback=${us-ring}\"/>\n");
                 xml.push_str("        <action application=\"set\" data=\"instant_ringback=true\"/>\n");
                 xml.push_str("        <action application=\"pre_answer\"/>\n");
