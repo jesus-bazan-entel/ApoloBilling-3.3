@@ -180,7 +180,7 @@ export default function AuditLogs() {
               <p className="text-sm font-medium text-[var(--color-text-secondary)]">Acciones Más Frecuentes (30 días)</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {stats.top_actions?.slice(0, 5).map((item: any) => (
+              {stats.top_actions?.slice(0, 5).map((item: { action: string; count: number }) => (
                 <span
                   key={item.action}
                   className="px-2 py-1 bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] rounded text-xs border border-[var(--color-border-primary)]"

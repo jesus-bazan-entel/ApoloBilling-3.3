@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
   CheckCircle, AlertTriangle, XCircle, Info,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp,
@@ -40,6 +40,8 @@ function StatusBadge({ status }: { status: KPIStatus }) {
 }
 
 function Sparkline({ data, color }: { data: Array<{ timestamp: string; value: number }>; color: string }) {
+  // useId's punctuation isn't valid inside url(#…)
+  const gid = `sg-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   if (!data || data.length < 2) return null;
   const values = data.map(d => d.value);
   const min = Math.min(...values);
@@ -53,7 +55,6 @@ function Sparkline({ data, color }: { data: Array<{ timestamp: string; value: nu
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
   const area = `0,${H} ${points} ${W},${H}`;
-  const gid = `sg-${Math.random().toString(36).slice(2, 8)}`;
   return (
     <svg width={W} height={H} className="overflow-visible">
       <defs>

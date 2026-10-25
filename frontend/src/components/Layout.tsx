@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { checkHealth, getCurrentUser, logout, changePassword } from '../api/client'
 import { useEffect, useState } from 'react'
-import { useTheme } from '../contexts/ThemeContext'
+import { useTheme } from '../contexts/theme'
 import {
   LayoutDashboard,
   Users,

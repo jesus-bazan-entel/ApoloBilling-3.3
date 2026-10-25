@@ -33,7 +33,13 @@ import {
   Monitor,
   Search,
 } from 'lucide-react'
-import type { SipDevice, SipDeviceWithPassword, Account } from '../types'
+import type {
+  SipDevice,
+  SipDeviceWithPassword,
+  Account,
+  SipDeviceCreateRequest,
+  SipDeviceUpdateRequest,
+} from '../types'
 
 export default function SipDevicesPage() {
   const [showModal, setShowModal] = useState(false)
@@ -88,7 +94,7 @@ export default function SipDevicesPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<SipDevice> }) =>
+    mutationFn: ({ id, data }: { id: number; data: SipDeviceUpdateRequest }) =>
       updateSipDevice(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sip-devices'] })
@@ -372,7 +378,7 @@ function DeviceModal({
   accounts: Account[]
   error: string
   onClose: () => void
-  onSave: (data: any) => void
+  onSave: (data: SipDeviceCreateRequest) => void
 }) {
   const [formData, setFormData] = useState({
     account_id: device?.account_id || (accounts[0]?.id || 0),
@@ -395,7 +401,7 @@ function DeviceModal({
     e.preventDefault()
     // Only forward `password` when the operator typed something; empty →
     // backend auto-generates (preserves existing behavior).
-    const payload: any = { ...formData }
+    const payload: SipDeviceCreateRequest = { ...formData }
     const trimmed = customPassword.trim()
     if (!device && trimmed) {
       payload.password = trimmed

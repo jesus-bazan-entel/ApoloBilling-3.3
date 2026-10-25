@@ -44,7 +44,7 @@ export default function Users() {
       setShowModal(false)
       resetForm()
     },
-    onError: (error: any) => {
+    onError: (error: Error & { response?: { data?: { message?: string } } }) => {
       setFormError(error.response?.data?.message || 'Error al crear usuario')
     },
   })
@@ -57,7 +57,7 @@ export default function Users() {
       setEditingUser(null)
       resetForm()
     },
-    onError: (error: any) => {
+    onError: (error: Error & { response?: { data?: { message?: string } } }) => {
       setFormError(error.response?.data?.message || 'Error al actualizar usuario')
     },
   })

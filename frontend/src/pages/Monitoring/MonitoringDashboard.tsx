@@ -59,7 +59,6 @@ const MonitoringDashboard: React.FC = () => {
     'kamailio.active_calls', 'rtpengine.active_sessions',
     'mariadb.threads_connected', 'system.cpu_percent',
   ]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   const { data: overview, isLoading, error, refetch } = useQuery({
     queryKey: ['monitoringOverview'],
@@ -126,7 +125,7 @@ const MonitoringDashboard: React.FC = () => {
     refetchInterval: 30000,
   });
 
-  useEffect(() => { if (alertsData) setAlerts(alertsData); }, [alertsData]);
+  const alerts: Alert[] = alertsData ?? [];
 
   useEffect(() => {
     if (selectedMetrics.length === 0 || !overview) return;
