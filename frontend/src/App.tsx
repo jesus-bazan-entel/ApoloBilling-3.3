@@ -9,7 +9,6 @@ import Accounts from './pages/Accounts'
 import Users from './pages/Users'
 import AuditLogs from './pages/AuditLogs'
 import UnifiedRouting from './pages/UnifiedRouting'
-import InternalRouting from './pages/InternalRouting'
 import SipDevices from './pages/SipDevices'
 import Provisioning from './pages/Provisioning'
 import Login from './pages/Login'
@@ -118,14 +117,6 @@ function AppRoutes() {
                   element={
                     <ProtectedRoute requiredRole="superadmin">
                       <UnifiedRouting />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/internal-routing"
-                  element={
-                    <ProtectedRoute requiredRole="superadmin">
-                      <InternalRouting />
                     </ProtectedRoute>
                   }
                 />

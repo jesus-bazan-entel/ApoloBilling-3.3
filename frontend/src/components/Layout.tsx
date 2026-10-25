@@ -4,7 +4,6 @@ import { checkHealth, getCurrentUser, logout, changePassword } from '../api/clie
 import { useEffect, useState } from 'react'
 import { useTheme } from '../contexts/ThemeContext'
 import {
-  ArrowRightLeft,
   LayoutDashboard,
   Users,
   FileText,
@@ -64,7 +63,6 @@ const adminSection: NavSection = {
     { name: 'Aprovisionamiento', href: '/provisioning', icon: UserPlus },
     { name: 'Dispositivos SIP', href: '/sip-devices', icon: Headphones },
     { name: 'Rutas Externas', href: '/routing', icon: Router },
-    { name: 'Rutas Internas', href: '/internal-routing', icon: ArrowRightLeft },
   ],
 }
 
