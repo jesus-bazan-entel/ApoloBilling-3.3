@@ -1,0 +1,139 @@
+
+===== NODE =====
+host=winproxy date=2026-10-25 14:17:11 -05
+virtualization=kvm
+cpus=8 mem_total_mb=9911 mem_avail_mb=7006
+load=0.76 0.39 0.38
+
+===== FREESWITCH STATUS =====
+FreeSWITCH Version 1.10.12-release-10222002881-a88d069d6f+git~20240802T210227Z~a88d069d6f~64bit (-release-10222002881-a88d069d6fgit a88d069 2024-08-02 21:02:27Z 64bit)
+
+UP 0 years, 0 days, 4 hours, 7 minutes, 28 seconds, 803 milliseconds, 538 microseconds
+FreeSWITCH (Version 1.10.12 -release-10222002881-a88d069d6fgit a88d069 2024-08-02 21:02:27Z 64bit) is ready
+14733 session(s) since startup
+105 session(s) - peak 158, last 5min 109 
+2 session(s) per Sec out of max 100, peak 12, last 5min 6 
+1600 session(s) max
+min idle cpu 0.00/90.10
+Current Stack Size/Max 240K/8192K
+
+calls=65
+channels=105
+registrations=29
+pid=2090993 threads=153 rss_mb=225
+started=Sun Oct 25 10:09:41 2026
+NRestarts=0
+ActiveEnterTimestamp=Sun 2026-10-25 10:09:44 -05
+
+===== PROCESS CPU (5s sample, % of ONE core) =====
+fs_cpu_pct_one_core=26.00
+
+===== HOST CPU / DISK (5s vmstat) =====
+       r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+avg: idle=93% iowait=0% steal=0% disk_read_kBps=3 disk_write_kBps=91
+
+===== CORE LIMITS (switch.conf.xml) =====
+max-sessions             1600
+sessions-per-second      100
+rtp-start-port           20002
+rtp-end-port             32768
+loglevel                 info
+core-db-name             /dev/shm/core.db
+core-db-dsn              
+max-db-handles           50
+min-idle-cpu             
+enable-clock-nanosleep   
+enable-monotonic-timing  
+core_db_files: /var/lib/freeswitch/db/core.db 696320B
+core_db_note: core-db-name=/dev/shm/core.db is configured but not in use yet (takes effect at the next FreeSWITCH restart)
+
+===== SYSTEMD LIMITS =====
+LimitSTACK=250000
+LimitNOFILE=100000
+LimitNPROC=60000
+IOSchedulingClass=1
+CPUSchedulingPolicy=2
+
+===== SIP PROFILES =====
+                     Name	   Type	                                      Data	State
+=================================================================================================
+            external-ipv6	profile	                  sip:mod_sofia@[::1]:5062	RUNNING (0)
+                 external	profile	             sip:mod_sofia@10.118.0.6:5062	RUNNING (94)
+       external::sbc-push	gateway	            sip:FreeSWITCH@10.118.0.5:5060	NOREG
+       external::kamailio	gateway	            sip:freeswitch@10.118.0.6:5080	NOREG
+external::freeswitch-legado	gateway	            sip:FreeSWITCH@10.118.0.4:5060	NOREG
+            internal-ipv6	profile	                  sip:mod_sofia@[::1]:5060	RUNNING (0)
+                 internal	profile	             sip:mod_sofia@10.118.0.6:5060	RUNNING (0)
+=================================================================================================
+4 profiles 0 aliases
+
+--- external-ipv6
+  sip-port                     $${external_sip_port}
+  rtp-ip                       $${local_ip_v6}
+  rtp-timer-name               soft
+  inbound-late-negotiation     true
+  rtp-timeout-sec              300
+  rtp-hold-timeout-sec         1800
+  inbound-codec-prefs          $${global_codec_prefs}
+  outbound-codec-prefs         $${outbound_codec_prefs}
+--- external
+  sip-port                     5062
+  rtp-ip                       10.118.0.6
+  inbound-bypass-media         false
+  bypass-media-after-bridge    false
+  rtp-timeout-sec              300
+  rtp-hold-timeout-sec         1800
+  enable-timer                 true
+  session-timeout              1800
+--- inbound
+  sip-port                     5082
+  rtp-ip                       10.10.22.4
+  inbound-bypass-media         false
+  rtp-timeout-sec              300
+  rtp-hold-timeout-sec         1800
+--- internal-ipv6
+  sip-port                     $${internal_sip_port}
+  rtp-ip                       $${local_ip_v6}
+  rtp-timer-name               soft
+  inbound-late-negotiation     true
+  rtp-timeout-sec              300
+  rtp-hold-timeout-sec         1800
+  inbound-codec-prefs          $${global_codec_prefs}
+  outbound-codec-prefs         $${global_codec_prefs}
+--- internal
+  sip-port                     5060
+  rtp-ip                       10.118.0.6
+  inbound-bypass-media         false
+  bypass-media-after-bridge    false
+  rtp-timeout-sec              300
+  rtp-hold-timeout-sec         1800
+  enable-timer                 true
+  session-timeout              1800
+
+===== MEDIA IN USE (live channels) =====
+channels_sampled=90
+  read=PCMA     write=PCMA     90
+distinct_codecs=PCMA
+transcoding_hint=no (single codec)
+
+===== DTMF PAYLOAD TYPE / PTIME BY LEG (first 20 channels) =====
+     10 outbound gateway remote_media=10.118.0.4 telephone-event_pt=101 ptime=20
+     10 inbound  remote_media=10.124.193.169 telephone-event_pt=97 ptime=20
+
+===== MODULES =====
+mod_amr mod_av mod_b64 mod_commands mod_conference mod_console mod_db mod_dialplan_asterisk mod_dialplan_xml mod_dptools mod_enum mod_esf mod_event_socket mod_expr mod_fifo mod_fsv mod_g723_1 mod_g729 mod_hash mod_httapi mod_local_stream mod_logfile mod_loopback mod_lua mod_native_file mod_opus mod_pgsql mod_png mod_rtc mod_say_en mod_signalwire mod_sndfile mod_sofia mod_spandsp mod_tone_stream mod_valet_parking mod_verto mod_voicemail mod_xml_curl
+timer_modules: soft
+
+===== DISK WRITERS PER CALL =====
+/var/log/freeswitch/cdr-csv 4.0K newest=
+freeswitch.log size=492614070
+
+===== RECENT PROBLEMS (journal, last 24h) =====
+crash_lines=0
+limit_or_crit_log_lines=4
+
+===== NEIGHBOURS (optional) =====
+kamailio_dialogs: 45
+rtpengine_kernel_table: present (1662 lines in /proc/rtpengine/0/list)
+
+done (read-only).

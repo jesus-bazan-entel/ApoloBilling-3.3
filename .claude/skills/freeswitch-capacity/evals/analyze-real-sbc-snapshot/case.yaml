@@ -1,0 +1,12 @@
+schema_version: "1.1"
+name: analyze-real-sbc-snapshot
+expected_outcome: |
+  A Spanish capacity report built from the snapshot: units made explicit
+  (65 calls vs 105 channels), binding limit identified as max-sessions
+  (~1600 / ~2 sessions per call ≈ 780 calls, about 10x the 158-session peak),
+  no transcoding, CPU per call computed, Sunday off-peak caveat, and a graded
+  plan that starts with low-risk hygiene (core DB on /dev/shm pending restart,
+  log level, rtp timeouts already set) and treats media-mode changes as tested
+  canaries, not first steps. Each section has a plain-language box.
+context:
+  scaffold_script: place-files.sh

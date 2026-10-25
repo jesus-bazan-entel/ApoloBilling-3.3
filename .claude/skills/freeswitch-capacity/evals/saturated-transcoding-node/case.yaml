@@ -1,0 +1,13 @@
+schema_version: "1.1"
+name: saturated-transcoding-node
+expected_outcome: |
+  A Spanish report that recognises a genuinely saturated node: 468-session peak
+  against max-sessions 500 (~94%), CPS peak 27 of 30, a tiny RTP port range
+  (16384-17384 → ~500 legs), CPU at ~310% of one core on 4 vCPUs with iowait
+  and steal, G729/PCMA transcoding on every call, loglevel debug, a 4.1 GB
+  cdr-csv and many limit/CRIT log lines. The plan prioritises immediate
+  low-risk relief (loglevel, cdr_csv, core DB, raising limits and the RTP
+  range within CPU headroom), then removing transcoding (codec alignment),
+  host fixes, and horizontal scaling, with gates and rollbacks.
+context:
+  scaffold_script: place-files.sh
