@@ -2,25 +2,25 @@
 ===== NODE =====
 host=fs-pbx-02 date=2026-10-25 14:17:11 -05
 virtualization=vmware
-cpus=4 mem_total_mb=9911 mem_avail_mb=7006
-load=0.76 0.39 0.38
+cpus=4 mem_total_mb=9911 mem_avail_mb=5120
+load=3.62 3.48 3.11
 
 ===== FREESWITCH STATUS =====
 FreeSWITCH Version 1.10.12-release-10222002881-a88d069d6f+git~20240802T210227Z~a88d069d6f~64bit (-release-10222002881-a88d069d6fgit a88d069 2024-08-02 21:02:27Z 64bit)
 
 UP 0 years, 0 days, 4 hours, 7 minutes, 28 seconds, 803 milliseconds, 538 microseconds
 FreeSWITCH (Version 1.10.12 -release-10222002881-a88d069d6fgit a88d069 2024-08-02 21:02:27Z 64bit) is ready
-14733 session(s) since startup
+38912 session(s) since startup
 412 session(s) - peak 468, last 5min 430 
 9 session(s) per Sec out of max 30, peak 27, last 5min 11 
 500 session(s) max
-min idle cpu 0.00/90.10
+min idle cpu 0.00/17.40
 Current Stack Size/Max 240K/8192K
 
 calls=205
 channels=412
 registrations=29
-pid=2090993 threads=153 rss_mb=225
+pid=2090993 threads=447 rss_mb=612
 started=Sun Oct 25 10:09:41 2026
 NRestarts=0
 ActiveEnterTimestamp=Sun 2026-10-25 10:09:44 -05
@@ -121,7 +121,7 @@ transcoding_hint=yes (more than one codec across legs: check bridged pairs)
      10 inbound  remote_media=10.124.193.169 telephone-event_pt=97 ptime=20
 
 ===== MODULES =====
-mod_amr mod_av mod_b64 mod_commands mod_conference mod_console mod_db mod_dialplan_asterisk mod_dialplan_xml mod_dptools mod_enum mod_esf mod_event_socket mod_expr mod_fifo mod_fsv mod_g723_1 mod_g729 mod_hash mod_httapi mod_local_stream mod_logfile mod_loopback mod_lua mod_native_file mod_opus mod_pgsql mod_png mod_rtc mod_say_en mod_signalwire mod_sndfile mod_sofia mod_spandsp mod_tone_stream mod_valet_parking mod_verto mod_voicemail mod_xml_curl
+mod_amr mod_av mod_b64 mod_cdr_csv mod_commands mod_conference mod_console mod_db mod_dialplan_asterisk mod_dialplan_xml mod_dptools mod_enum mod_esf mod_event_socket mod_expr mod_fifo mod_fsv mod_g723_1 mod_g729 mod_hash mod_httapi mod_local_stream mod_logfile mod_loopback mod_lua mod_native_file mod_opus mod_pgsql mod_png mod_rtc mod_say_en mod_signalwire mod_sndfile mod_sofia mod_spandsp mod_tone_stream mod_valet_parking mod_verto mod_voicemail mod_xml_curl
 timer_modules: soft
 
 ===== DISK WRITERS PER CALL =====
