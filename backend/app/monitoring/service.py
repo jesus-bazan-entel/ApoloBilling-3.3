@@ -755,8 +755,8 @@ class MariaDBCollector:
         self.config = {
             'host': 'localhost',
             'port': 3306,
-            'user': 'apolo',  # Correct user
-            'password': 'ApoloNext.2026',
+            'user': os.environ.get('MONITORING_MYSQL_USER', 'apolo'),
+            'password': os.environ.get('MONITORING_MYSQL_PASSWORD', 'ApoloNext.2026'),
             'database': 'kamailio',
             'connection_timeout': 3
         }

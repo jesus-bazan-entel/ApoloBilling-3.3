@@ -44,8 +44,12 @@ BEGIN
     END IF;
 
     -- cdrs exists but is empty (fresh install) - safe to drop and recreate
-    -- partitioned directly.
+    -- partitioned directly. schema.sql's cdrs.id is a serial that OWNS
+    -- cdrs_id_seq: release it first or DROP TABLE takes the sequence along and
+    -- the new table's nextval('cdrs_id_seq') aborts the whole block.
+    ALTER SEQUENCE IF EXISTS cdrs_id_seq OWNED BY NONE;
     DROP TABLE cdrs;
+    CREATE SEQUENCE IF NOT EXISTS cdrs_id_seq;
 
     CREATE TABLE cdrs (
         id                    bigint NOT NULL DEFAULT nextval('cdrs_id_seq'::regclass),
@@ -84,6 +88,8 @@ BEGIN
     -- Starter partitions; extend forward over time (see housekeeping note
     -- below) - DEFAULT catches anything outside the declared ranges instead
     -- of failing inserts.
+    ALTER SEQUENCE cdrs_id_seq OWNED BY cdrs.id;
+
     CREATE TABLE cdrs_y2026m04 PARTITION OF cdrs FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
     CREATE TABLE cdrs_y2026m05 PARTITION OF cdrs FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
     CREATE TABLE cdrs_y2026m06 PARTITION OF cdrs FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');

@@ -411,6 +411,7 @@ Migrations are located in `database/migrations/` and should be run in order:
 | 023_cdr_destination_e164_account.sql | `cdrs.destination_prefix` repurposed as the routed destination in E.164 + `account_id` from `sip_devices` (SQL mirrors `apolo_routed_number`/`apolo_e164` of the engine's `numbering.rs`); backfills October 2026 (`SET statement_timeout = 0`, ~1 min) |
 | 024_cdr_audit_fields.sql | `cdrs.sip_code` (final SIP status to the caller: `sip_term_status`, else 200 if answered, else the relayed `sip:NNN`), `caller_e164` (international CLIs without `+` read as international) and `source_ip` (`sip_network_ip`), written from 2026-10-25 18:35; `apolo_e164` adds Lima 7-digit numbers; backfills `caller_e164` for October |
 | 025_cdr_egress.sql | `cdrs.egress_number` / `egress_ip` / `egress_gateway`: where the call left the SBC, from the b-leg (`sip_to_user`, `sip_network_ip`, `sip_gateway_name`; parallel ring keeps the answered leg, else the first), written from 2026-10-25 18:55. October inbound DIDs backfilled with the number only (`${destination_number:4}` of the dialplan); `egress_ip` NULL marks those as rebuilt |
+| 026_cdr_partition_maintenance.sql | `apolo_ensure_cdr_partitions(n)`: creates the current + next n monthly `cdrs` partitions (Lima-midnight bounds), moving rows already in `cdrs_default` into them; daily via `/etc/cron.d/apolo-cdr-partitions` (installer). 016 used to stop at 2026-10 |
 
 Kamailio (MySQL) schema additions live in `database/kamailio/*.sql` (applied by `install_server.sh` → `configure_kamailio`).
 

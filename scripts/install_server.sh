@@ -28,6 +28,8 @@
 #   --external-media-ip   RTPEngine 'external' interface
 #   --carrier-sip-ip      Peer PSTN carrier's SIP IP
 #   --carrier-media-ip    Peer PSTN carrier's RTP IP
+#   --legacy-pbx-ip       Optional downstream PBX trusted on the internal profile
+#   --subscriber-domain   SIP domain of subscriber devices (default app.fonowin.pe)
 #===============================================================================
 
 set -e
@@ -46,7 +48,11 @@ LOG_FILE="/var/log/apolo_install.log"
 SKIP_VOIP=false
 
 # FreeSWITCH SignalWire Token
-FS_TOKEN="pat_MnRB4EuW3FidLn7fY376ss93"
+FS_TOKEN="${FS_TOKEN:-pat_MnRB4EuW3FidLn7fY376ss93}"
+
+# dSIPRouter commit the reference SBC was built from (Kamailio 5.8 +
+# rtpengine mr11.5); master moves and its installer changes what it writes.
+DSIP_REF="${DSIP_REF:-9fd2f01d679c34c08ecbd5abbc6d60e864caa1ac}"
 
 # Default Credentials (can be overridden with environment variables)
 DB_USER="${DB_USER:-apolo}"
@@ -84,6 +90,11 @@ INTERNAL_MEDIA_IP="${INTERNAL_MEDIA_IP:-}"
 EXTERNAL_MEDIA_IP="${EXTERNAL_MEDIA_IP:-}"
 CARRIER_SIP_IP="${CARRIER_SIP_IP:-}"
 CARRIER_MEDIA_IP="${CARRIER_MEDIA_IP:-}"
+# Optional downstream legacy PBX trusted on the internal profile (pbx-acl) whose
+# calls are inbound to subscribers (reference site: FS Legado 10.118.0.4).
+LEGACY_PBX_IP="${LEGACY_PBX_IP:-}"
+# SIP domain the subscriber devices register with (sofia_contact lookups).
+SUBSCRIBER_DOMAIN="${SUBSCRIBER_DOMAIN:-app.fonowin.pe}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 # If true, apply_database_schema will wipe the `public` schema before loading
 # schema.sql. Required for re-running a broken install. Default: false.
@@ -118,6 +129,14 @@ for arg in "$@"; do
             ;;
         --carrier-media-ip=*)
             CARRIER_MEDIA_IP="${arg#*=}"
+            shift
+            ;;
+        --legacy-pbx-ip=*)
+            LEGACY_PBX_IP="${arg#*=}"
+            shift
+            ;;
+        --subscriber-domain=*)
+            SUBSCRIBER_DOMAIN="${arg#*=}"
             shift
             ;;
         --non-interactive|-y)
@@ -617,10 +636,11 @@ install_dsiprouter() {
     # because those edits get re-applied by `./dsiprouter.sh install` below.
     if [[ ! -d /opt/dsiprouter ]]; then
         git clone https://github.com/dOpensource/dsiprouter.git
+        git -C /opt/dsiprouter checkout --quiet "$DSIP_REF"
     else
         cd /opt/dsiprouter
         git fetch origin master
-        git reset --hard origin/master
+        git reset --hard "$DSIP_REF"
         git clean -fd
     fi
 
@@ -825,6 +845,35 @@ deploy_apolo_configs() {
                 log_info "Patching FS remaining 10.118.0.6 → $INTERNAL_SIP_IP"
                 sed -i "s|10\.118\.0\.6|${INTERNAL_SIP_IP}|g" "${fs_files[@]}"
             fi
+        fi
+
+        # The repo's ACLs and dialplans also carry the reference site's LAN
+        # (10.118.0.0/28), its legacy PBX (10.118.0.4) and its subscriber
+        # domain (app.fonowin.pe). Without the LAN rewrite kamailio-acl rejects
+        # Kamailio's own INVITEs on any other subnet.
+        local acl=/etc/freeswitch/autoload_configs/acl.conf.xml
+        local fs_dp=(/etc/freeswitch/dialplan/from-pbx.xml /etc/freeswitch/dialplan/from-kamailio.xml)
+        if [[ -f "$acl" && "$INTERNAL_IP_NET" != "10.118.0.0/28" ]]; then
+            log_info "Patching FS ACLs: 10.118.0.0/28 → $INTERNAL_IP_NET"
+            sed -i "s|cidr=\"10\.118\.0\.0/28\"|cidr=\"${INTERNAL_IP_NET}\"|g" "$acl"
+        fi
+        if [[ -n "$LEGACY_PBX_IP" ]]; then
+            if [[ "$LEGACY_PBX_IP" != "10.118.0.4" ]]; then
+                log_info "Patching legacy PBX: 10.118.0.4 → $LEGACY_PBX_IP"
+                [[ -f "$acl" ]] && sed -i "s|cidr=\"10\.118\.0\.4/32\"|cidr=\"${LEGACY_PBX_IP}/32\"|g" "$acl"
+                # Dialplan regex "^10\.118\.0\.4$" → "^<ip with escaped dots>$"
+                local legacy_re="${LEGACY_PBX_IP//./\\\\.}"
+                sed -i 's|\^10\\\.118\\\.0\\\.4\$|^'"$legacy_re"'$|g' "${fs_dp[@]}" 2>/dev/null || true
+            fi
+        else
+            log_info "No legacy PBX: removing 10.118.0.4 from pbx-acl and the from-pbx match"
+            [[ -f "$acl" ]] && sed -i '/cidr="10\.118\.0\.4\/32"/d' "$acl"
+            # An empty network_addr never happens, so the extension stays inert.
+            sed -i 's|\^10\\\.118\\\.0\\\.4\$|^$|g' "${fs_dp[@]}" 2>/dev/null || true
+        fi
+        if [[ "$SUBSCRIBER_DOMAIN" != "app.fonowin.pe" ]]; then
+            log_info "Patching subscriber domain: app.fonowin.pe → $SUBSCRIBER_DOMAIN"
+            sed -i "s|@app\.fonowin\.pe|@${SUBSCRIBER_DOMAIN}|g" "${fs_dp[@]}" 2>/dev/null || true
         fi
 
         # Stock switch.conf.xml / modules.conf.xml stay, with two tweaks:
@@ -1443,6 +1492,73 @@ apply_migrations() {
 }
 
 #===============================================================================
+# CDR partitions ahead of time (migration 026)
+#===============================================================================
+configure_cdr_partitions() {
+    log_section "Configuring monthly CDR partitions"
+
+    cat > /etc/cron.d/apolo-cdr-partitions <<'CRON'
+# ApoloBilling: keep cdrs partitions 3 months ahead (migration 026)
+15 2 * * * postgres psql -q -d apolo_billing -c "SELECT apolo_ensure_cdr_partitions(3)" >> /var/log/postgresql/apolo-cdr-partitions.log 2>&1
+CRON
+    chmod 644 /etc/cron.d/apolo-cdr-partitions
+
+    log_success "Daily cdrs partition check scheduled at 02:15"
+}
+
+#===============================================================================
+# SBC monitoring collector (NOC dashboard: trunk health, one-way audio)
+#===============================================================================
+# monitoring_service.py (FastAPI :8080) samples Kamailio/RTPEngine/MariaDB/host
+# every minute into the monitoring_* tables and SIP-OPTIONS-probes every
+# routing_trunks row through Kamailio. Its tables are SQLAlchemy models with
+# no SQL migration, so they are created here from the models.
+install_monitoring() {
+    log_section "Installing SBC Monitoring Service"
+
+    local venv="$APOLO_DIR/venv-monitoring"
+    apt-get install -y python3-venv
+    python3 -m venv "$venv"
+    "$venv/bin/pip" install --quiet fastapi uvicorn sqlalchemy psycopg2-binary \
+        pydantic pydantic-settings psutil mysql-connector-python
+
+    local db_url="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/apolo_billing"
+    (cd "$APOLO_DIR" && DATABASE_URL="$db_url" PYTHONPATH="$APOLO_DIR/backend" "$venv/bin/python" -c \
+        "from app.db.session import Base, engine; import app.models.monitoring; Base.metadata.create_all(engine)")
+    reassign_schema_ownership
+
+    cat > /etc/systemd/system/apolo-monitoring.service <<UNIT
+[Unit]
+Description=ApoloBilling SBC Monitoring Service
+After=network.target postgresql.service mariadb.service
+Wants=postgresql.service mariadb.service
+
+[Service]
+Type=simple
+# root: kamcmd's control socket and rtpengine's /proc counters
+User=root
+WorkingDirectory=$APOLO_DIR
+Environment=PYTHONPATH=$APOLO_DIR/backend
+Environment=DATABASE_URL=$db_url
+Environment=MONITORING_MYSQL_USER=$DB_USER
+Environment=MONITORING_MYSQL_PASSWORD=$DB_PASSWORD
+ExecStart=$venv/bin/python -m monitoring_service
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    chmod 600 /etc/systemd/system/apolo-monitoring.service
+    systemctl daemon-reload
+    systemctl enable apolo-monitoring
+
+    log_success "Monitoring service installed (apolo-monitoring, :8080)"
+}
+
+#===============================================================================
 # Build ApoloBilling
 #===============================================================================
 build_apolo() {
@@ -1610,6 +1726,9 @@ start_services() {
     systemctl start apolo-billing-engine
     sleep 2
     systemctl start apolo-frontend
+    if systemctl is-enabled --quiet apolo-monitoring 2>/dev/null; then
+        systemctl start apolo-monitoring
+    fi
 
     log_success "All services started"
 }
@@ -1750,8 +1869,12 @@ main() {
     fi
     create_env_files
     apply_database_schema
+    configure_cdr_partitions
     build_apolo
     install_services
+    if [[ "$SKIP_VOIP" == "false" ]]; then
+        install_monitoring
+    fi
     configure_nginx
     start_services
     create_admin_user

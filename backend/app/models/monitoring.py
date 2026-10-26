@@ -226,7 +226,7 @@ class MonitoringAlert(Base):
     __tablename__ = "monitoring_alerts"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)  # indexed by ix_monitoring_alerts_timestamp below
     
     # Alert identification
     alert_name = Column(String(128), nullable=False)

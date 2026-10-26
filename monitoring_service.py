@@ -12,7 +12,8 @@ from contextlib import asynccontextmanager
 # Add project root to path
 sys.path.insert(0, '/opt/ApoloBilling')
 
-os.environ['DATABASE_URL'] = "postgresql://apolo_user:apolo_password_2024@127.0.0.1:5432/apolo_billing"
+# The unit's Environment= wins; the literal is this site's original value.
+os.environ.setdefault('DATABASE_URL', "postgresql://apolo_user:apolo_password_2024@127.0.0.1:5432/apolo_billing")
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
