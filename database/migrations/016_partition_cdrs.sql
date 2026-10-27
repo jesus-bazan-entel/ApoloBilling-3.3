@@ -88,6 +88,10 @@ BEGIN
     -- Starter partitions; extend forward over time (see housekeeping note
     -- below) - DEFAULT catches anything outside the declared ranges instead
     -- of failing inserts.
+    -- OWNED BY requires the sequence and the table to share an owner; the
+    -- installer may already have reassigned the released sequence.
+    EXECUTE format('ALTER SEQUENCE cdrs_id_seq OWNER TO %I',
+                   (SELECT pg_get_userbyid(relowner) FROM pg_class WHERE relname = 'cdrs' AND relkind = 'p'));
     ALTER SEQUENCE cdrs_id_seq OWNED BY cdrs.id;
 
     CREATE TABLE cdrs_y2026m04 PARTITION OF cdrs FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');

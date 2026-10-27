@@ -688,6 +688,16 @@ install_freeswitch() {
 
     log_info "Using SignalWire token for installation..."
 
+    # dSIPRouter writes /etc/apt/preferences pinning Debian bookworm at 990, so
+    # apt would pick Debian's sofia-sip 1.12 over SignalWire's 1.13 and
+    # libfreeswitch1 becomes uninstallable. The reference node had this pin
+    # added by hand (2026-04-13).
+    cat > /etc/apt/preferences.d/freeswitch <<'PIN'
+Package: *
+Pin: origin freeswitch.signalwire.com
+Pin-Priority: 1001
+PIN
+
     # Install FreeSWITCH using fsget script
     curl -sSL https://freeswitch.org/fsget | bash -s $FS_TOKEN release install
 
@@ -1113,7 +1123,7 @@ EOF
 
     # Apolo schema additions on the Kamailio DB (idempotent, MariaDB 10.5+)
     local f
-    for f in $(ls database/kamailio/*.sql 2>/dev/null | sort); do
+    for f in $(ls "$APOLO_DIR"/database/kamailio/*.sql 2>/dev/null | sort); do
         log_info "Applying Kamailio migration: $(basename "$f")"
         mysql -u "$DB_USER" -p"$DB_PASSWORD" kamailio < "$f" 2>&1 | sed 's/^/    /'
     done
@@ -1519,7 +1529,9 @@ install_monitoring() {
     local venv="$APOLO_DIR/venv-monitoring"
     apt-get install -y python3-venv
     python3 -m venv "$venv"
-    "$venv/bin/pip" install --quiet fastapi uvicorn sqlalchemy psycopg2-binary \
+    # SQLAlchemy 2.1 maps postgresql:// to psycopg (v3); psycopg2 stays for the
+    # older code paths.
+    "$venv/bin/pip" install --quiet fastapi uvicorn sqlalchemy "psycopg[binary]" psycopg2-binary \
         pydantic pydantic-settings psutil mysql-connector-python
 
     local db_url="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/apolo_billing"
