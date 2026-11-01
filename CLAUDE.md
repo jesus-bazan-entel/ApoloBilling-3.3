@@ -438,6 +438,14 @@ ApoloBilling integrates with Kamailio/dSIPRouter for SIP routing and carrier man
 
 ### Kamailio Database (MySQL)
 
+Kamailio's own credentials are not in `kamailio.cfg`: it includes `/etc/kamailio/kamailio-db.cfg`
+(0640 root:kamailio, MySQL user `kamailio_sbc`, written by `install_server.sh`). No synchronous MySQL
+on the INVITE path since 2026-11-01: the source gateway comes from htable `src_gw` (view
+`apolo_src_gw`, `database/kamailio/003_*.sql`, reloaded every 30s) and `acc`/`acc_cdrs` are inserted
+through `async_workers` (`acc db_insert_mode=2`); `db_mysql timeout_interval=1`. `pike` bans only
+untrusted sources (>50 req/s, not in `address`). Apply cfg changes with
+`scripts/maint/restart_kamailio_safe.sh` (validation, low-traffic gate, auto-rollback).
+
 Optional connection via `KAMAILIO_DATABASE_URL` environment variable. Tables managed:
 
 | Table | Purpose |

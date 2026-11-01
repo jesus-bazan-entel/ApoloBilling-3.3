@@ -7,7 +7,7 @@
 # verification and automatic rollback to the previous config.
 #
 # Steps:
-#   1. Build candidate = repo cfg + DB credentials taken from the live cfg.
+#   1. Build candidate = repo cfg (credentials come from kamailio-db.cfg).
 #   2. Show the diff live → candidate and ask for confirmation (unless --yes).
 #   3. kamailio -c + test-start of a scratch copy (catches socket errors that
 #      `kamailio -c` misses, e.g. force_send_socket on a non-listened port).
@@ -58,10 +58,14 @@ fail() { log "ERROR: $*"; exit 1; }
 [ "$(id -u)" -eq 0 ] || fail "run as root"
 
 #--- 1. candidate ----------------------------------------------------------------
-CRED=$(grep -oP 'mysql://[^@/]+@' "$LIVE_CFG" | head -1)
-[ -n "$CRED" ] || fail "could not read DB credentials from $LIVE_CFG"
-sed "s#mysql://kamailio:YOUR_KAMAILIO_DB_PASSWORD@#$CRED#g" "$REPO_CFG" > "$WORK/kamailio.cfg"
-grep -q YOUR_KAMAILIO_DB_PASSWORD "$WORK/kamailio.cfg" && fail "placeholder left in candidate"
+# Since 2026-11-01 the repo cfg carries no credentials: it includes
+# /etc/kamailio/kamailio-db.cfg (DBURL/SQLCONN_*, written by install_server.sh),
+# so the candidate is the repo file as-is.
+DB_CFG=/etc/kamailio/kamailio-db.cfg
+[ -s "$DB_CFG" ] || fail "$DB_CFG missing (see install_server.sh deploy_configs)"
+grep -q '#!define DBURL' "$DB_CFG" || fail "$DB_CFG does not define DBURL"
+cp "$REPO_CFG" "$WORK/kamailio.cfg"
+grep -q YOUR_KAMAILIO_DB_PASSWORD "$WORK/kamailio.cfg" && fail "old credential placeholder in candidate"
 
 #--- 2. diff ---------------------------------------------------------------------
 log "Diff live → candidate (ignoring trailing spaces):"
@@ -108,6 +112,10 @@ if [ "$FORCE" -eq 0 ]; then
 fi
 
 #--- 5-6. install, restart, verify -----------------------------------------------
+ht_items() {
+    kamcmd htable.stats 2>/dev/null \
+        | awk -v t="$1" '$1=="name:"{n=($2==t)} n && $1=="all:"{print $2; exit}' | grep . || echo 0
+}
 verify() {
     local since=$1 pid0 pid1 cnt
     for i in $(seq 1 15); do systemctl is-active -q kamailio && break; sleep 1; done
@@ -115,9 +123,16 @@ verify() {
     sleep 2
     $PING $EXT_SIP 5060 $EXT_SIP >/dev/null || { log "no OPTIONS reply on $EXT_SIP:5060"; return 1; }
     $PING $INT_SIP $INT_PORT $INT_SIP >/dev/null || { log "no OPTIONS reply on $INT_SIP:$INT_PORT"; return 1; }
-    cnt=$(kamcmd htable.dump inbound_fs_numbers 2>/dev/null | grep -c 'name:')
+    # htable.stats, not htable.dump: dump fails with "reply too big" once
+    # inbound_fs_numbers mirrors every app number (3,225 entries on 2026-11-01).
+    cnt=$(ht_items inbound_fs_numbers)
     log "htable inbound_fs_numbers: $cnt entries"
     [ "$cnt" -gt 0 ] || { log "htable inbound_fs_numbers empty"; return 1; }
+    if grep -q 'src_gw=>' "$LIVE_CFG"; then
+        cnt=$(ht_items src_gw)
+        log "htable src_gw: $cnt entries"
+        [ "$cnt" -gt 0 ] || { log "htable src_gw empty"; return 1; }
+    fi
     pid0=$(systemctl show -p MainPID --value kamailio)
     log "Stability window ${STABLE_SECS}s (MainPID $pid0)..."
     sleep "$STABLE_SECS"

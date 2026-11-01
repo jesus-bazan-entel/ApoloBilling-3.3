@@ -1,0 +1,16 @@
+# Apolo SBC: rsyslog.conf writes daemon.* to /var/log/daemon.log but Debian 12's
+# /etc/logrotate.d/rsyslog no longer lists it -> it grew to 23 GB (May-Oct 2026).
+/var/log/daemon.log
+{
+	daily
+	rotate 7
+	maxsize 1G
+	missingok
+	notifempty
+	compress
+	delaycompress
+	sharedscripts
+	postrotate
+		/usr/lib/rsyslog/rsyslog-rotate
+	endscript
+}

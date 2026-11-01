@@ -9,6 +9,8 @@ capture_kamailio() {
     local d=$1 f t
     mkdir -p "$d/etc/kamailio" "$d/dsip" "$d/default" "$d/systemd" "$d/misc"
     cp -a "$KAM_CFG" /etc/kamailio/kamctlrc "$d/etc/kamailio/"
+    # MySQL credentials included by kamailio.cfg (since 2026-11-01)
+    [[ -f /etc/kamailio/kamailio-db.cfg ]] && cp -a /etc/kamailio/kamailio-db.cfg "$d/etc/kamailio/"
     # symlinked includes (tls.cfg, stir-shaken.cfg, transnexus.cfg → /etc/dsiprouter)
     : > "$d/links.txt"
     for f in /etc/kamailio/*; do
@@ -49,6 +51,9 @@ apply_kamailio() {
     command -v kamailio >/dev/null || { log_err "Kamailio no está instalado"; return 1; }
 
     cp "$d/etc/kamailio/kamailio.cfg" "$d/etc/kamailio/kamctlrc" /etc/kamailio/
+    if [[ -f $d/etc/kamailio/kamailio-db.cfg ]]; then
+        install -m 0640 -o root -g kamailio "$d/etc/kamailio/kamailio-db.cfg" /etc/kamailio/kamailio-db.cfg
+    fi
     install_tree "$d/dsip/etc" /etc
     tar -C / -xzf "$d/dsip/certs.tgz"
     while IFS='|' read -r link target; do
@@ -67,7 +72,7 @@ apply_kamailio() {
     log_ok "IPs: privada $NEW_SIG_INT ($net), pública $NEW_SIG_EXT"
 
     # credentials
-    replace_old_secrets "$KAM_CFG" /etc/kamailio/kamctlrc
+    replace_old_secrets "$KAM_CFG" /etc/kamailio/kamctlrc /etc/kamailio/kamailio-db.cfg
     pass=$(cred_of kamailio "$MY_USER_PASSWORDS")
     [[ -n $pass ]] && sed -i -E "s/^(DBRWPW|DBROPW)=.*/\1=\"$pass\"/" /etc/kamailio/kamctlrc
     TOKEN="$KAM_API_TOKEN" perl -i -pe 's/^(server\.api_token\s*=\s*")[^"]*/$1$ENV{TOKEN}/' "$KAM_CFG"

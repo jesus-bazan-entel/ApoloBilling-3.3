@@ -218,7 +218,7 @@ collect_routes() {
 # wherever it is hardcoded (e.g. the monitoring collector's MariaDB login).
 discover_old_passwords() {
     declare -gA OLD_PG=() OLD_MY=()
-    local -a files=(/etc/kamailio/kamailio.cfg /etc/systemd/system/apolo-*.service)
+    local -a files=(/etc/kamailio/kamailio.cfg /etc/kamailio/kamailio-db.cfg /etc/systemd/system/apolo-*.service)
     mapfile -t -O "${#files[@]}" files < <(find /opt/ApoloBilling -maxdepth 3 -name .env -type f -not -path '*/node_modules/*')
     local scheme user pass
     while read -r scheme user pass; do
