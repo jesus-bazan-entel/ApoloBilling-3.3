@@ -899,12 +899,19 @@ deploy_apolo_configs() {
             sed -i "s|@app\.fonowin\.pe|@${SUBSCRIBER_DOMAIN}|g" "${fs_dp[@]}" 2>/dev/null || true
         fi
 
-        # Stock switch.conf.xml / modules.conf.xml stay, with two tweaks:
+        # Stock switch.conf.xml / modules.conf.xml stay, with these tweaks:
         #   - core DB (SQLite, written on every channel change) on tmpfs, as the
         #     vanilla config suggests, instead of /var/lib/freeswitch/db
+        #   - capacity as in production: max-sessions 1600 (~800 B2BUA calls)
+        #     and sessions-per-second 200 (~100 new calls/s; raised from 100 on
+        #     2026-11-01). Stock is 1000 / 30.
         #   - no mod_cdr_csv: CDRs go to PostgreSQL via the SBC engine; the CSVs
         #     were a redundant write per call (1.3 GB in production)
         sed -i 's#^\( *\)<!-- *<param name="core-db-name" value="/dev/shm/core.db" */> *-->#\1<param name="core-db-name" value="/dev/shm/core.db" />#' \
+            /etc/freeswitch/autoload_configs/switch.conf.xml
+        sed -i -E \
+            -e 's#(<param name="max-sessions" value=")[0-9]+("/>)#\11600\2#' \
+            -e 's#(<param name="sessions-per-second" value=")[0-9]+("/>)#\1200\2#' \
             /etc/freeswitch/autoload_configs/switch.conf.xml
         sed -i 's#^\( *\)<load module="mod_cdr_csv"/>#\1<!-- <load module="mod_cdr_csv"/> -->#' \
             /etc/freeswitch/autoload_configs/modules.conf.xml
