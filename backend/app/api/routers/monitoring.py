@@ -223,7 +223,7 @@ def _fetch_base_series(db, component, col, start, tier):
 
 def query_timeseries(
     db: Session, component: str, metric: str, hours: int,
-    resolution: str = "auto", max_points: int = 500,
+    resolution: str = "auto", max_points: int = 500, agg: str = "avg",
 ) -> "MetricsTimeSeries":
     """Shared history query across all components with tiered rollups.
 
@@ -277,8 +277,12 @@ def query_timeseries(
         data = [{"timestamp": r[0].isoformat(), "value": r[1]} for r in rows]
     else:
         rollup_model = MonitoringKpiHourly if tier == "hourly" else MonitoringKpiDaily
+        # agg=max charts each bucket's peak (e.g. concurrent calls over 24h,
+        # where an hourly average flattens the busy-hour peaks). Derived
+        # metrics above always use the average: a max of a counter is not a rate.
+        value_col = rollup_model.max_value if agg == "max" else rollup_model.avg_value
         rows = db.query(
-            rollup_model.bucket_start, rollup_model.avg_value
+            rollup_model.bucket_start, value_col
         ).filter(
             rollup_model.component == component,
             rollup_model.metric == metric,
@@ -587,9 +591,10 @@ def get_kamailio_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
+    agg: str = Query("avg", pattern="^(avg|max)$"),
     db: Session = Depends(get_db)
 ):
-    return query_timeseries(db, "kamailio", metric, hours, resolution, max_points)
+    return query_timeseries(db, "kamailio", metric, hours, resolution, max_points, agg)
 
 
 # ==================== RTPENGINE ENDPOINTS ====================
@@ -618,9 +623,10 @@ def get_rtpengine_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
+    agg: str = Query("avg", pattern="^(avg|max)$"),
     db: Session = Depends(get_db)
 ):
-    return query_timeseries(db, "rtpengine", metric, hours, resolution, max_points)
+    return query_timeseries(db, "rtpengine", metric, hours, resolution, max_points, agg)
 
 
 # ==================== MARIADB ENDPOINTS ====================
@@ -649,9 +655,10 @@ def get_mariadb_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
+    agg: str = Query("avg", pattern="^(avg|max)$"),
     db: Session = Depends(get_db)
 ):
-    return query_timeseries(db, "mariadb", metric, hours, resolution, max_points)
+    return query_timeseries(db, "mariadb", metric, hours, resolution, max_points, agg)
 
 
 # ==================== SYSTEM ENDPOINTS ====================
@@ -680,9 +687,10 @@ def get_system_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
+    agg: str = Query("avg", pattern="^(avg|max)$"),
     db: Session = Depends(get_db)
 ):
-    return query_timeseries(db, "system", metric, hours, resolution, max_points)
+    return query_timeseries(db, "system", metric, hours, resolution, max_points, agg)
 
 
 # ==================== ALERTS ENDPOINTS ====================

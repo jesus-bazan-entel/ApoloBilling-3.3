@@ -136,7 +136,9 @@ const MonitoringDashboard: React.FC = () => {
       for (const key of selectedMetrics) {
         const [component, metric] = key.split('.');
         try {
-          const r = await apiClient.get(`/monitoring/${component}/timeseries`, { params: { metric, hours } });
+          // 24h: hourly peak, not the hourly average (which flattens busy-hour peaks)
+          const params = timeRange === '24h' ? { metric, hours, agg: 'max' } : { metric, hours };
+          const r = await apiClient.get(`/monitoring/${component}/timeseries`, { params });
           results[key] = r.data;
         } catch (e) { console.error(e); }
       }
@@ -359,7 +361,7 @@ const MonitoringDashboard: React.FC = () => {
             ))}
           </div>
         </div>
-        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución automática carrier-class: ≤12h raw 1-min · ≤93d hourly (avg) · mayor daily (avg).</p>
+        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución automática carrier-class: ≤12h raw 1-min · 24h hourly (máx) · ≤93d hourly (avg) · mayor daily (avg).</p>
         <p className="text-[11px] text-gray-400 mb-4">
           Histórico: raw 30 días · hourly 93 días · daily 400 días.
           {histStatus?.tiers?.raw?.tables?.kamailio?.oldest
@@ -380,7 +382,7 @@ const MonitoringDashboard: React.FC = () => {
             const color = kpis.find(k => k.key === key)?.color || '#ff5a0a';
             return (
               <div key={key} className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-sm font-medium mb-2">{key} <span className="text-xs font-normal text-gray-400">({h.length} pts)</span></h3>
+                <h3 className="text-sm font-medium mb-2">{key} <span className="text-xs font-normal text-gray-400">({h.length} pts{timeRange === '24h' ? ' · máx/hora' : ''})</span></h3>
                 {h.length === 0 ? (
                   <div className="h-56 flex items-center justify-center text-sm text-gray-500">Sin datos en este rango (histórico en llenado).</div>
                 ) : (
