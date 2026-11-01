@@ -118,8 +118,8 @@ async fn noc_totals(
     })
 }
 
-/// Attempts / answered per 15-min slot and calls in progress at each slot's
-/// midpoint, for the local day starting at `day_start`.
+/// Attempts / answered per 15-min slot and the peak of calls in progress
+/// within each slot, for the local day starting at `day_start`.
 async fn noc_day_slots(
     pool: &PgPool,
     day_start: DateTime<Utc>,
@@ -151,18 +151,39 @@ async fn noc_day_slots(
         }
     }
 
+    // Peak of calls in progress within each slot (sweep line: +1 at start, -1
+    // at end, running sum). A 0-weight marker at every slot start carries the
+    // level in from the previous slot, so a slot without starts/ends still
+    // reports the calls that span it. At equal timestamps ends sort before
+    // starts (ORDER BY t, d). Until 2026-11-01 this sampled one instant at the
+    // slot midpoint, which hid the short peaks (chart topped out near 60-69
+    // while the real peak was 78-88). Calls are capped at 6 h, as before.
     // Calls are written at hangup, so the last minutes of today undercount
     // calls still in progress; the live counter comes from active_calls.
     let concurrent = sqlx::query(
         r#"
-        SELECT g AS slot, (
-            SELECT COUNT(*)::BIGINT FROM cdrs c
-            WHERE c.start_time <= t
-              AND c.start_time > t - INTERVAL '6 hours'
-              AND COALESCE(c.end_time, c.start_time + make_interval(secs => c.duration)) > t
-        ) AS concurrent
-        FROM generate_series(0, $2 - 1) AS g,
-             LATERAL (SELECT $1 + make_interval(mins => g * $3) + make_interval(secs => $3 * 30) AS t) x
+        WITH c AS (
+            SELECT start_time AS s,
+                   LEAST(COALESCE(end_time, start_time + make_interval(secs => duration)),
+                         start_time + INTERVAL '6 hours') AS e
+            FROM cdrs
+            WHERE start_time > $1 - INTERVAL '6 hours'
+              AND start_time < $1 + make_interval(mins => $2 * $3)
+        ),
+        ev AS (
+            SELECT s AS t, 1 AS d FROM c
+            UNION ALL SELECT e, -1 FROM c
+            UNION ALL SELECT $1 + make_interval(mins => g * $3), 0
+                      FROM generate_series(0, $2 - 1) AS g
+        ),
+        lv AS (
+            SELECT t, SUM(d) OVER (ORDER BY t, d ROWS UNBOUNDED PRECEDING) AS n FROM ev
+        )
+        SELECT FLOOR(EXTRACT(EPOCH FROM t - $1) / ($3 * 60))::INTEGER AS slot,
+               MAX(n)::BIGINT AS concurrent
+        FROM lv
+        WHERE t >= $1 AND t < $1 + make_interval(mins => $2 * $3)
+        GROUP BY 1
         "#,
     )
     .bind(day_start)

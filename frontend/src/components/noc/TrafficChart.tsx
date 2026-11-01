@@ -22,7 +22,7 @@ type Metric = 'attempts' | 'answered' | 'concurrent'
 const METRICS: Array<{ id: Metric; label: string; help: string }> = [
   { id: 'attempts', label: 'Intentos', help: 'Llamadas iniciadas por intervalo de 15 min' },
   { id: 'answered', label: 'Contestadas', help: 'Llamadas contestadas por intervalo de 15 min' },
-  { id: 'concurrent', label: 'Simultáneas', help: 'Llamadas en curso a mitad de cada intervalo de 15 min' },
+  { id: 'concurrent', label: 'Simultáneas', help: 'Pico de llamadas en curso dentro de cada intervalo de 15 min' },
 ]
 
 interface Point {
