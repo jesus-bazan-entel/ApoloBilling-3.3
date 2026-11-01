@@ -8,12 +8,19 @@ import {
   Activity, Cpu, MemoryStick, Phone, Volume2, Database, Server,
   Loader2, AlertCircle, ChevronDown, MousePointerClick
 } from 'lucide-react';
-import { XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, ComposedChart, Area, Line, ReferenceLine } from 'recharts';
 import apiClient from '../../api/client';
 import KPICard from '../../components/Monitoring/KPICard';
 import type {
   TimeSeriesResponse, DashboardOverview, Alert, KPICardData, KPIStatus,
 } from '../../types/monitoring';
+
+// Series where a LOW value is the bad one (mirror of LOWER_IS_WORSE in the
+// backend): their chart shows the worst (minimum) of each bucket, not the max.
+const LOWER_IS_WORSE = new Set(['kamailio.success_rate', 'kamailio.trunk_health']);
+const seriesKey = (k: { component: string; metric: string }) => `${k.component}.${k.metric}`;
+const fmtNum = (v: number | null | undefined) =>
+  v == null ? '—' : v.toLocaleString('es-PE', { maximumFractionDigits: Math.abs(v) < 10 ? 2 : 1 });
 
 const StatusBadge = ({ status, label }: { status: string; label: string }) => {
   if (status === 'unknown') {
@@ -136,9 +143,9 @@ const MonitoringDashboard: React.FC = () => {
       for (const key of selectedMetrics) {
         const [component, metric] = key.split('.');
         try {
-          // 24h: hourly peak, not the hourly average (which flattens busy-hour peaks)
-          const params = timeRange === '24h' ? { metric, hours, agg: 'max' } : { metric, hours };
-          const r = await apiClient.get(`/monitoring/${component}/timeseries`, { params });
+          // agg=peak: worst value of each bucket (busy hour), with avg/min/max alongside.
+          // An hourly average hides the peaks that capacity is dimensioned for.
+          const r = await apiClient.get(`/monitoring/${component}/timeseries`, { params: { metric, hours, agg: 'peak' } });
           results[key] = r.data;
         } catch (e) { console.error(e); }
       }
@@ -343,7 +350,7 @@ const MonitoringDashboard: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpis.map(k => <KPICard key={k.key} data={{ ...k, sparklineData: historyData[k.key]?.data || k.sparklineData }} />)}
+        {kpis.map(k => <KPICard key={k.key} data={{ ...k, sparklineData: historyData[seriesKey(k)]?.data || k.sparklineData }} />)}
       </div>
 
       <div className="rounded-xl border bg-white dark:bg-gray-800 p-5">
@@ -361,7 +368,7 @@ const MonitoringDashboard: React.FC = () => {
             ))}
           </div>
         </div>
-        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución automática carrier-class: ≤12h raw 1-min · 24h hourly (máx) · ≤93d hourly (avg) · mayor daily (avg).</p>
+        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución carrier-class: 1h/6h muestra cada minuto; 24h/7d/30d muestra el pico de cada hora (línea sólida), el promedio (punteada) y el rango mín–máx (sombra). Success Rate y Trunk Health muestran el peor valor (mínimo). La línea horizontal marca el pico del período.</p>
         <p className="text-[11px] text-gray-400 mb-4">
           Histórico: raw 30 días · hourly 93 días · daily 400 días.
           {histStatus?.tiers?.raw?.tables?.kamailio?.oldest
@@ -370,32 +377,70 @@ const MonitoringDashboard: React.FC = () => {
         </p>
         <div className="flex flex-wrap gap-2 mb-4">
           {kpis.map(k => (
-            <button key={k.key} onClick={() => toggleMetric(k.key)}
-              className={`text-xs px-2 py-1 rounded-full border ${selectedMetrics.includes(k.key) ? 'bg-[#ff5a0a] text-white border-[#ff5a0a]' : 'bg-white text-gray-600'}`}>
+            <button key={k.key} onClick={() => toggleMetric(seriesKey(k))}
+              className={`text-xs px-2 py-1 rounded-full border ${selectedMetrics.includes(seriesKey(k)) ? 'bg-[#ff5a0a] text-white border-[#ff5a0a]' : 'bg-white text-gray-600'}`}>
               {k.title}
             </button>
           ))}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {selectedMetrics.map(key => {
-            const h = historyData[key]?.data || [];
-            const color = kpis.find(k => k.key === key)?.color || '#ff5a0a';
+            const kpi = kpis.find(k => seriesKey(k) === key);
+            const series = historyData[key];
+            const raw = series?.data || [];
+            const color = kpi?.color || '#ff5a0a';
+            const gid = `g-${key.replace(/\./g, '-')}`;
+            const lowerWorse = LOWER_IS_WORSE.has(key);
+            // Band/avg only where a point aggregates several samples (hourly rollups)
+            const hasBand = raw.some(p => p.min != null && p.max != null && p.min !== p.max);
+            const h = raw.map(p => ({ ...p, band: p.min != null && p.max != null ? [p.min, p.max] : null }));
+            const valid = raw.filter((p): p is typeof p & { value: number } => p.value != null);
+            const worst = valid.length
+              ? valid.reduce((a, b) => (lowerWorse ? b.value < a.value : b.value > a.value) ? b : a)
+              : null;
+            const avgs = raw.map(p => p.avg ?? p.value).filter((v): v is number => v != null);
+            const mean = avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : null;
+            const stepMin = raw.length > 1
+              ? Math.round((parseUtc(raw[1].timestamp).getTime() - parseUtc(raw[0].timestamp).getTime()) / 60000)
+              : 0;
+            const stepLabel = stepMin >= 60 ? `${Math.round(stepMin / 60)} h` : `${stepMin} min`;
+            const unit = series?.unit && series.unit !== 'count' ? ` ${series.unit}` : '';
+            const peakWord = lowerWorse ? 'Peor' : 'Pico';
             return (
               <div key={key} className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-sm font-medium mb-2">{key} <span className="text-xs font-normal text-gray-400">({h.length} pts{timeRange === '24h' ? ' · máx/hora' : ''})</span></h3>
+                <h3 className="text-sm font-medium">
+                  {kpi?.title ?? key}{' '}
+                  <span className="text-xs font-normal text-gray-400">
+                    {key} · {h.length} pts{stepMin > 0 ? ` · ${hasBand ? `${lowerWorse ? 'mín.' : 'pico'} cada ${stepLabel}` : `cada ${stepLabel}`}` : ''}
+                  </span>
+                </h3>
+                {worst && (
+                  <p className="text-xs text-gray-600 mb-2">
+                    {peakWord} del período: <b style={{ color }}>{fmtNum(worst.value)}{unit}</b> · {fmtDateTime(worst.timestamp)}
+                    {mean != null && <> · Promedio: <b>{fmtNum(mean)}{unit}</b></>}
+                  </p>
+                )}
                 {h.length === 0 ? (
                   <div className="h-56 flex items-center justify-center text-sm text-gray-500">Sin datos en este rango (histórico en llenado).</div>
                 ) : (
                 <div className="h-56">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={h} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <defs><linearGradient id={`g-${key.replace(/\./g, '-')}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.3} /><stop offset="95%" stopColor={color} stopOpacity={0} /></linearGradient></defs>
+                    <ComposedChart data={h} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={color} stopOpacity={0.3} /><stop offset="95%" stopColor={color} stopOpacity={0} /></linearGradient></defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                       <XAxis dataKey="timestamp" tickFormatter={fmtTick} fontSize={11} />
                       <YAxis fontSize={11} />
-                      <RechartsTooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }} labelFormatter={(t) => fmtDateTime(t)} />
-                      <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2} fill={`url(#g-${key.replace(/\./g, '-')})`} />
-                    </AreaChart>
+                      <RechartsTooltip
+                        contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: 8 }}
+                        labelFormatter={(t) => fmtDateTime(t)}
+                        formatter={(v) => Array.isArray(v) ? `${fmtNum(Number(v[0]))} – ${fmtNum(Number(v[1]))}${unit}` : `${fmtNum(v == null ? null : Number(v))}${unit}`}
+                      />
+                      {hasBand && <Area type="monotone" dataKey="band" name="Rango mín–máx" stroke="none" fill={color} fillOpacity={0.1} isAnimationActive={false} />}
+                      <Area type="monotone" dataKey="value" name={hasBand ? (lowerWorse ? 'Peor (mín.)' : 'Pico') : (kpi?.title ?? 'Valor')} stroke={color} strokeWidth={2} fill={`url(#${gid})`} isAnimationActive={false} />
+                      {hasBand && <Line type="monotone" dataKey="avg" name="Promedio" stroke="#6b7280" strokeWidth={1.5} strokeDasharray="4 3" dot={false} isAnimationActive={false} />}
+                      {worst && <ReferenceLine y={worst.value} stroke={color} strokeDasharray="2 4" ifOverflow="extendDomain"
+                        label={{ value: `${peakWord} ${fmtNum(worst.value)}`, position: 'insideTopRight', fontSize: 10, fill: color }} />}
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
                 )}

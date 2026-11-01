@@ -39,7 +39,7 @@ export interface KPICardData {
   value: string | number;
   unit?: string;
   trend?: number;
-  sparklineData?: Array<{ timestamp: string; value: number }>;
+  sparklineData?: Array<{ timestamp: string; value: number | null }>;
   color: string;
   status: KPIStatus;
   icon: React.ReactNode;
@@ -151,5 +151,15 @@ export interface TimeSeriesResponse {
   metric: string;
   component: string;
   unit: string;
-  data: Array<{ timestamp: string; value: number }>;
+  /** value per `agg`; avg/min/max of the bucket on gauges (absent on rate/ratio KPIs).
+   *  value is null on an interval with no data (e.g. success rate with no attempts). */
+  data: TimeSeriesPoint[];
+}
+
+export interface TimeSeriesPoint {
+  timestamp: string;
+  value: number | null;
+  avg?: number | null;
+  min?: number | null;
+  max?: number | null;
 }

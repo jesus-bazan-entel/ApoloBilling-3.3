@@ -169,11 +169,24 @@ DERIVED_METRICS = {
 
 
 def _success_rate(b):
+    """Per-interval INVITE success: delta(2xx) / delta(2xx+4xx+5xx).
+
+    The columns are Kamailio's cumulative counters (since its start); a ratio
+    of the raw counters would be the lifetime average, not this interval's.
+    Intervals with a counter reset (Kamailio restart) or no attempts are None.
+    """
     out = []
+    prev = None
     for (ts, _), vals in _align_series(b["invite_200ok"], b["invite_4xx"], b["invite_5xx"]):
-        ok, e4, e5 = vals
-        tot = (ok or 0) + (e4 or 0) + (e5 or 0)
-        out.append((ts, round(100.0 * (ok or 0) / tot, 2) if tot > 0 else 100.0))
+        vals = [v or 0 for v in vals]
+        if prev is not None:
+            d = [c - p for c, p in zip(vals, prev)]
+            tot = sum(d)
+            if min(d) >= 0 and tot > 0:
+                out.append((ts, round(100.0 * d[0] / tot, 2)))
+            else:
+                out.append((ts, None))
+        prev = vals
     return out
 
 
@@ -221,6 +234,63 @@ def _fetch_base_series(db, component, col, start, tier):
     return [(r[0], r[1]) for r in rows]
 
 
+# Gauges where a LOW value is the bad one: their "peak" (agg=peak) is the
+# bucket minimum (worst hour), for every other gauge it is the maximum.
+LOWER_IS_WORSE = {
+    ("kamailio", "success_rate"),
+    ("kamailio", "trunk_health"),
+    ("kamailio", "dispatcher_health"),
+}
+
+
+def _fetch_stats_series(db, component, col, start, tier):
+    """[(ts, avg, min, max)] of a base column. Raw rows have avg=min=max."""
+    model = ROLLUP_SOURCE_MODELS[component]
+    if tier != "raw":
+        rollup_model = MonitoringKpiHourly if tier == "hourly" else MonitoringKpiDaily
+        rows = db.query(
+            rollup_model.bucket_start, rollup_model.avg_value,
+            rollup_model.min_value, rollup_model.max_value,
+        ).filter(
+            rollup_model.component == component, rollup_model.metric == col,
+            rollup_model.bucket_start >= start,
+        ).order_by(rollup_model.bucket_start).all()
+        # Fall back to raw when the window predates the rollup backfill.
+        if rows:
+            return [(r[0], r[1], r[2], r[3]) for r in rows]
+    rows = db.query(model.timestamp, getattr(model, col)).filter(
+        model.timestamp >= start).order_by(model.timestamp).all()
+    return [(r[0], r[1], r[1], r[1]) for r in rows if r[1] is not None]
+
+
+def _agg_values(vals, agg):
+    if not vals:
+        return None
+    if agg == "max":
+        return max(vals)
+    if agg == "min":
+        return min(vals)
+    return round(sum(vals) / len(vals), 2)
+
+
+def _downsample(data, max_points, agg):
+    """Bucket consecutive points down to max_points, keeping the bucket's
+    peak/avg/min instead of dropping points (a stride would lose the busy hour)."""
+    import math
+    size = math.ceil(len(data) / max_points)
+    out = []
+    for i in range(0, len(data), size):
+        chunk = data[i:i + size]
+        p = {"timestamp": chunk[0]["timestamp"],
+             "value": _agg_values([c["value"] for c in chunk if c["value"] is not None], agg)}
+        if "avg" in chunk[0]:
+            p["avg"] = _agg_values([c["avg"] for c in chunk if c["avg"] is not None], "avg")
+            p["min"] = _agg_values([c["min"] for c in chunk if c["min"] is not None], "min")
+            p["max"] = _agg_values([c["max"] for c in chunk if c["max"] is not None], "max")
+        out.append(p)
+    return out
+
+
 def query_timeseries(
     db: Session, component: str, metric: str, hours: int,
     resolution: str = "auto", max_points: int = 500, agg: str = "avg",
@@ -229,6 +299,13 @@ def query_timeseries(
 
     Supports real DB columns plus frontend KPI aliases (avg_mos -> mos_avg)
     and derived KPIs (calls_per_second, success_rate, *_usage_percent, ...).
+
+    Gauges (real columns and single-column KPIs) return per point
+    `value` (per `agg`) plus `avg`/`min`/`max` of the bucket, so a chart can
+    draw the busy-hour peak with the average and the min-max band.
+    `agg=peak` is the worst value of each bucket: max, or min for
+    LOWER_IS_WORSE metrics. Multi-counter KPIs (rates, ratios) only return
+    `value`, computed per interval.
     """
     model = ROLLUP_SOURCE_MODELS.get(component)
     if model is None:
@@ -236,6 +313,8 @@ def query_timeseries(
 
     # 1) Alias KPI name -> real column
     metric = METRIC_ALIASES.get((component, metric), metric)
+    if agg == "peak":
+        agg = "min" if (component, metric) in LOWER_IS_WORSE else "max"
 
     valid_metrics = [c.key for c in model.__table__.columns if c.key not in ['id', 'timestamp', 'raw_data']]
     derived = DERIVED_METRICS.get((component, metric))
@@ -243,64 +322,47 @@ def query_timeseries(
     tier = _resolve_tier(hours, resolution)
     start = datetime.utcnow() - timedelta(hours=hours)
 
-    if derived is not None:
-        base_cols, combine = derived
-        if metric == "connection_usage_percent":
-            # Needs live max_connections (stored per-row in max_used_connections
-            # since the connection-limit fix).
-            max_row = db.query(MariaDBMetrics.max_used_connections).order_by(
-                MariaDBMetrics.timestamp.desc()).first()
-            max_conn = (max_row[0] if max_row and max_row[0] else 151) or 151
-            base = _fetch_base_series(db, component, "threads_connected", start, tier)
-            data = [{"timestamp": ts.isoformat(),
-                     "value": round(100.0 * (v or 0) / max_conn, 2)} for ts, v in base]
-        elif metric == "dispatcher_health":
-            # Not chartable as health string: expose active-destination count.
-            base = _fetch_base_series(db, component, "dispatcher_active_destinations", start, tier)
-            data = [{"timestamp": ts.isoformat(), "value": v} for ts, v in base]
-        elif metric == "trunk_health":
-            # Chart the number of trunks answering OPTIONS.
-            base = _fetch_base_series(db, component, "trunks_online", start, tier)
-            data = [{"timestamp": ts.isoformat(), "value": v} for ts, v in base]
-        else:
-            for col in base_cols:
-                if col not in valid_metrics:
-                    raise HTTPException(400, f"Invalid metric. Valid: {valid_metrics}")
-            series = {c: _fetch_base_series(db, component, c, start, tier) for c in base_cols}
-            data = [{"timestamp": ts.isoformat(), "value": v} for ts, v in combine(series)]
-    elif metric not in valid_metrics:
-        raise HTTPException(400, f"Invalid metric. Valid: {valid_metrics}")
-    elif tier == "raw":
-        rows = db.query(
-            model.timestamp, getattr(model, metric)
-        ).filter(model.timestamp >= start).order_by(model.timestamp).all()
-        data = [{"timestamp": r[0].isoformat(), "value": r[1]} for r in rows]
-    else:
-        rollup_model = MonitoringKpiHourly if tier == "hourly" else MonitoringKpiDaily
-        # agg=max charts each bucket's peak (e.g. concurrent calls over 24h,
-        # where an hourly average flattens the busy-hour peaks). Derived
-        # metrics above always use the average: a max of a counter is not a rate.
-        value_col = rollup_model.max_value if agg == "max" else rollup_model.avg_value
-        rows = db.query(
-            rollup_model.bucket_start, value_col
-        ).filter(
-            rollup_model.component == component,
-            rollup_model.metric == metric,
-            rollup_model.bucket_start >= start,
-        ).order_by(rollup_model.bucket_start).all()
-        # Fall back to raw when the requested window predates rollup backfill
-        # (e.g. first hours after deploying history tiers).
-        if not rows:
-            rows = db.query(
-                model.timestamp, getattr(model, metric)
-            ).filter(model.timestamp >= start).order_by(model.timestamp).all()
-        data = [{"timestamp": r[0].isoformat(), "value": r[1]} for r in rows]
+    # Single-column gauges: (base column, scale factor)
+    gauge = None
+    if derived is None:
+        if metric not in valid_metrics:
+            raise HTTPException(400, f"Invalid metric. Valid: {valid_metrics}")
+        gauge = (metric, 1.0)
+    elif metric == "connection_usage_percent":
+        # Needs live max_connections (stored per-row in max_used_connections
+        # since the connection-limit fix).
+        max_row = db.query(MariaDBMetrics.max_used_connections).order_by(
+            MariaDBMetrics.timestamp.desc()).first()
+        max_conn = (max_row[0] if max_row and max_row[0] else 151) or 151
+        gauge = ("threads_connected", 100.0 / max_conn)
+    elif metric == "dispatcher_health":
+        # Not chartable as health string: expose active-destination count.
+        gauge = ("dispatcher_active_destinations", 1.0)
+    elif metric == "trunk_health":
+        # Chart the number of trunks answering OPTIONS.
+        gauge = ("trunks_online", 1.0)
 
-    # Downsample to max_points (stride + always keep last point)
+    if gauge is not None:
+        col, k = gauge
+        stats = _fetch_stats_series(db, component, col, start, tier)
+        data = []
+        for ts, a, lo, hi in stats:
+            a, lo, hi = (None if x is None else round(x * k, 2) for x in (a, lo, hi))
+            value = hi if agg == "max" else lo if agg == "min" else a
+            data.append({"timestamp": ts.isoformat(), "value": value,
+                         "avg": a, "min": lo, "max": hi})
+    else:
+        base_cols, combine = derived
+        for col in base_cols:
+            if col not in valid_metrics:
+                raise HTTPException(400, f"Invalid metric. Valid: {valid_metrics}")
+        series = {c: _fetch_base_series(db, component, c, start, tier) for c in base_cols}
+        data = [{"timestamp": ts.isoformat(), "value": v} for ts, v in combine(series)]
+        if agg not in ("max", "min"):
+            agg = "avg"
+
     if max_points and len(data) > max_points:
-        import math
-        stride = math.ceil(len(data) / max_points)
-        data = data[::stride]
+        data = _downsample(data, max_points, agg)
     return MetricsTimeSeries(
         metric=metric, component=component, unit=_get_unit(metric), data=data,
     )
@@ -387,8 +449,16 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             )
         
         k = kamailio_latest
-        total_invites = k.invite_200ok + k.invite_4xx + k.invite_5xx
-        success_rate = (k.invite_200ok / total_invites * 100) if total_invites > 0 else 100
+        # Success rate over the last 5 min (deltas of Kamailio's cumulative
+        # counters; their raw ratio would be the average since Kamailio started).
+        success_rate = 100.0
+        first_5m = min(kamailio_5m, key=lambda r: r.timestamp) if kamailio_5m else None
+        if first_5m is not None and first_5m.timestamp < k.timestamp:
+            d_ok = (k.invite_200ok or 0) - (first_5m.invite_200ok or 0)
+            d_4 = (k.invite_4xx or 0) - (first_5m.invite_4xx or 0)
+            d_5 = (k.invite_5xx or 0) - (first_5m.invite_5xx or 0)
+            if min(d_ok, d_4, d_5) >= 0 and d_ok + d_4 + d_5 > 0:
+                success_rate = 100.0 * d_ok / (d_ok + d_4 + d_5)
         
         shm_total = k.shm_used_mb + k.shm_free_mb
         shm_pct = (k.shm_used_mb / shm_total * 100) if shm_total > 0 else 0
@@ -591,7 +661,7 @@ def get_kamailio_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
-    agg: str = Query("avg", pattern="^(avg|max)$"),
+    agg: str = Query("avg", pattern="^(avg|max|min|peak)$"),
     db: Session = Depends(get_db)
 ):
     return query_timeseries(db, "kamailio", metric, hours, resolution, max_points, agg)
@@ -623,7 +693,7 @@ def get_rtpengine_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
-    agg: str = Query("avg", pattern="^(avg|max)$"),
+    agg: str = Query("avg", pattern="^(avg|max|min|peak)$"),
     db: Session = Depends(get_db)
 ):
     return query_timeseries(db, "rtpengine", metric, hours, resolution, max_points, agg)
@@ -655,7 +725,7 @@ def get_mariadb_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
-    agg: str = Query("avg", pattern="^(avg|max)$"),
+    agg: str = Query("avg", pattern="^(avg|max|min|peak)$"),
     db: Session = Depends(get_db)
 ):
     return query_timeseries(db, "mariadb", metric, hours, resolution, max_points, agg)
@@ -687,7 +757,7 @@ def get_system_timeseries(
     hours: int = Query(1, ge=1, le=MAX_TIMESERIES_HOURS),
     resolution: str = Query("auto", pattern="^(auto|raw|hourly|daily)$"),
     max_points: int = Query(500, ge=10, le=5000),
-    agg: str = Query("avg", pattern="^(avg|max)$"),
+    agg: str = Query("avg", pattern="^(avg|max|min|peak)$"),
     db: Session = Depends(get_db)
 ):
     return query_timeseries(db, "system", metric, hours, resolution, max_points, agg)

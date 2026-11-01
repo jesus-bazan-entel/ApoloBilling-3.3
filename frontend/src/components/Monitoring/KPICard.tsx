@@ -72,6 +72,9 @@ function Sparkline({ data, color }: { data: Array<{ timestamp: string; value: nu
 export const KPICard: React.FC<KPICardProps> = ({ data, compact = false }) => {
   const [expanded, setExpanded] = useState(false);
   const st = statusConfig[data.status] || statusConfig.unknown;
+  // Intervals without data come as null (e.g. success rate with no attempts)
+  const spark = (data.sparklineData ?? []).filter(
+    (d): d is { timestamp: string; value: number } => d.value != null);
 
   return (
     <div
@@ -104,8 +107,8 @@ export const KPICard: React.FC<KPICardProps> = ({ data, compact = false }) => {
         </div>
 
         <div className="flex items-center gap-3 mb-1 min-h-[34px]">
-          {data.sparklineData && data.sparklineData.length > 1
-            ? <Sparkline data={data.sparklineData} color={data.color} />
+          {spark.length > 1
+            ? <Sparkline data={spark} color={data.color} />
             : <span className="text-xs text-gray-400">sin histórico</span>}
           {data.trend !== undefined && data.trend !== 0 && (
             <span className={`flex items-center gap-1 text-xs font-semibold ${data.trend >= 0 ? 'text-green-600' : 'text-red-600'}`}>
