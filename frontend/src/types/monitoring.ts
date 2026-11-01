@@ -67,6 +67,15 @@ export interface KamailioSummary {
   active_calls: number;
   calls_per_second: number;
   success_rate: number;
+  /** NER (ITU-T E.425) from CDRs over ner_window_min; null = fewer than ner_min_attempts calls */
+  ner?: number | null;
+  asr?: number | null;
+  call_attempts?: number;
+  network_failures?: number;
+  ner_window_min?: number;
+  ner_warn?: number;
+  ner_crit?: number;
+  ner_min_attempts?: number;
   shm_usage_percent: number;
   active_transactions: number;
   dispatcher_health: string;

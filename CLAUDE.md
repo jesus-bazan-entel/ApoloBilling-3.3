@@ -663,12 +663,21 @@ imported by `rust-billing-engine/src/services/kamailio_cdr_sync.rs` (needs `KAMA
 The code stays: ticking *Enrutar directo* on a route re-enables it, and the app-number mirror
 keeps running so `fs_numbers` is ready. Gw 960 and divert rule 2070 (group 9100) are inert.
 
-**Trunk health (migration 018):** the monitoring collector (`backend/app/monitoring/service.py`,
-`KamailioCollector._probe_trunks`) sends SIP OPTIONS every 60s to each enabled `routing_trunks` row
-through Kamailio's own sockets (`kamcmd tm.t_uac_wait_block`: public trunks from the carrier-facing
-listener, private from the LAN one), updates `routing_trunks.sip_status`/`last_options_*`, logs to
+**Trunk health (migration 018):** Kamailio itself sends SIP OPTIONS every 20 s to each enabled
+`routing_trunks` row (`keepalive` module, asynchronous; INTERNAL_IP_NET peers from the LAN listener,
+the rest from the carrier-facing one, forced in `event_route[tm:local-request]`) and records every
+reply in htables `ka_status` (`code|epoch|latency_ms|reason`) / `ka_ok` (last reply <500 and ≠408)
+in `reply_route`. The monitoring collector (`backend/app/monitoring/service.py`,
+`KamailioCollector._probe_trunks`) keeps the keepalive list in sync (`keepalive.add/del`, owner
+`apolo`), reads the htables every 60s, updates `routing_trunks.sip_status`/`last_options_*`, logs to
 `routing_sip_status_log` (7-day retention) and stores `trunks_online/total` for the dashboard's
 *Trunk Health* card, which replaced *Dispatcher Health* (the dispatcher table is empty since 2026-10-24).
+Hysteresis: down only after 3 intervals (65 s) without a reply proving the trunk alive. keepalive's
+own state (`keepalive.list`) treats only 2xx as up, so SBC Push (answers 479) shows "down" there.
+Without the `ka_status` htable (older cfg) the collector falls back to the old blocking probe
+(`kamcmd tm.t_uac_wait_block`, sequential): it holds Kamailio's single ctl process until the reply
+(up to `fr_timer` 30 s) — parallel probes queued behind Integratel's slow busy-hour replies and made
+all trunks look down together (09:00–18:00, 2026-10-26..30).
 
 **Parallel ring (`parallel_trunk_id`):** an inbound route can ring a second destination at the
 same time as the primary (first to answer wins). Selecting a trunk (e.g. an SBC Push) makes the

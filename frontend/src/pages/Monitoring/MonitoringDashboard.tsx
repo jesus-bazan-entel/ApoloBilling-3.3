@@ -17,7 +17,7 @@ import type {
 
 // Series where a LOW value is the bad one (mirror of LOWER_IS_WORSE in the
 // backend): their chart shows the worst (minimum) of each bucket, not the max.
-const LOWER_IS_WORSE = new Set(['kamailio.success_rate', 'kamailio.trunk_health']);
+const LOWER_IS_WORSE = new Set(['kamailio.success_rate', 'kamailio.ner', 'kamailio.trunk_health']);
 const seriesKey = (k: { component: string; metric: string }) => `${k.component}.${k.metric}`;
 const fmtNum = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('es-PE', { maximumFractionDigits: Math.abs(v) < 10 ? 2 : 1 });
@@ -172,6 +172,9 @@ const MonitoringDashboard: React.FC = () => {
   const trunksTotal = kamailio.trunks_total ?? trunks.length;
   const trunksDown = trunks.filter(t => t.sip_status !== 'reachable');
   const trunkHealth = kamailio.trunk_health ?? 'unknown';
+  const nerWarn = kamailio.ner_warn ?? 99;
+  const nerCrit = kamailio.ner_crit ?? 97;
+  const nerWin = kamailio.ner_window_min ?? 15;
 
   const buildKPIData = (): KPICardData[] => [
     {
@@ -186,7 +189,7 @@ const MonitoringDashboard: React.FC = () => {
           : 'Sin diálogos activos. Puede ser horario valle o corte de tráfico entrante.',
         impact: 'high',
         recommendation: 'Si cae a 0 en horario pico, revisar carriers, drouting y logs de Kamailio (acc/auth).',
-        relatedMetrics: ['calls_per_second', 'success_rate', 'trunk_health'],
+        relatedMetrics: ['calls_per_second', 'ner', 'trunk_health'],
       },
       thresholds: [{ name: 'Sin tráfico', metric: 'active_calls', operator: '==', warning: 0, critical: 0, unit: 'calls', description: '0 llamadas en horario pico = posible corte', enabled: true }],
       calculationMethod: {
@@ -195,7 +198,7 @@ const MonitoringDashboard: React.FC = () => {
         steps: [
           { step: 1, title: 'Kamailio dialog', description: 'El módulo dialog trackea cada INVITE hasta BYE/timeout.' },
           { step: 2, title: 'kamcmd', description: 'El colector ejecuta `kamcmd dlg.stats_active` cada 60s.' },
-          { step: 3, title: 'Persistencia', description: 'Se guarda confirmed_dialogs → active_calls en monitoring_kamailio_metrics.' },
+          { step: 4, title: 'Persistencia', description: 'Se guarda confirmed_dialogs → active_calls en monitoring_kamailio_metrics.' },
         ],
         dataSources: ['kamcmd dlg.stats_active', 'PostgreSQL monitoring_kamailio_metrics'],
         frequency: 'Cada 60s', latency: '< 1 min',
@@ -222,35 +225,46 @@ const MonitoringDashboard: React.FC = () => {
                   : 'Las llamadas hacia ese troncal fallarán o saldrán por el failover de su grupo.'),
         impact: 'high',
         recommendation: 'Ver el troncal en Enrutamiento → Troncales (estado y último OPTIONS). Comprobar conectividad y firewall hacia host:puerto, y que el peer acepte OPTIONS desde la IP del SBC.',
-        relatedMetrics: ['active_calls', 'success_rate', 'invite_5xx'],
+        relatedMetrics: ['active_calls', 'ner', 'invite_5xx'],
       },
       thresholds: [
         { name: 'Troncales caídos', metric: 'trunks_offline', operator: '>', warning: 0, critical: Math.ceil(trunksTotal / 2), unit: 'troncales', description: '>50% sin respuesta = critical', enabled: true },
       ],
       calculationMethod: {
-        description: 'Cada 60s el colector pide a Kamailio un SIP OPTIONS a cada troncal habilitado de routing_trunks, enviado desde el mismo socket que el tráfico real: público (carrier) para troncales public, LAN para private.',
-        formula: 'responde = código < 500 y ≠ 408; online==total→healthy; caídos/total>0.5→critical; resto→degraded; sin datos en 5 min→unknown',
+        description: 'Kamailio sondea cada troncal habilitado de routing_trunks con SIP OPTIONS desde el mismo socket que el tráfico real: LAN (10.118.0.6:5080) para destinos en INTERNAL_IP_NET, carrier (10.124.193.41:5060) para el resto.',
+        formula: 'responde = código < 500 y ≠ 408; caído = 65s (3 OPTIONS) sin respuesta válida (histéresis, como ds_probing_threshold de dispatcher); vuelve con 1 respuesta; online==total→healthy; caídos/total>0.5→critical; resto→degraded; sin datos en 5 min→unknown',
         steps: [
           { step: 1, title: 'Troncales', description: 'Lee los troncales habilitados de routing_trunks (Enrutamiento).' },
-          { step: 2, title: 'OPTIONS vía Kamailio', description: '`kamcmd tm.t_uac_wait_block OPTIONS sip:host:puerto` con timeout de 4s. La latencia incluye el sondeo de kamcmd (~100 ms).' },
+          { step: 2, title: 'OPTIONS desde Kamailio', description: 'Kamailio envía OPTIONS cada 20s a cada troncal (módulo keepalive, asíncrono) desde el socket que usa el tráfico real, y guarda código, hora y latencia de cada respuesta (htables ka_status / ka_ok). El colector las lee cada 60s y mantiene la lista de destinos sincronizada con Enrutamiento.' },
+          { step: 3, title: 'Histéresis', description: 'Un troncal se declara caído solo tras 65s (3 intervalos) sin una respuesta que lo pruebe vivo; un OPTIONS perdido queda en el log pero no cambia el estado.' },
           { step: 3, title: 'Persistencia', description: 'Actualiza routing_trunks.sip_status, registra en routing_sip_status_log (7 días) y guarda trunks_online/total en monitoring_kamailio_metrics.' },
         ],
-        dataSources: ['kamcmd tm.t_uac_wait_block', 'routing_trunks', 'routing_sip_status_log', 'monitoring_kamailio_metrics.trunks_*'],
+        dataSources: ['Kamailio keepalive + htables ka_status/ka_ok', 'routing_trunks', 'routing_sip_status_log', 'monitoring_kamailio_metrics.trunks_*'],
         frequency: 'Cada 60s', latency: '< 1 min',
       },
     },
     {
-      key: 'kamailio.success_rate', title: 'Success Rate', value: (kamailio.success_rate ?? 100).toFixed(1), unit: '%',
-      sparklineData: [], color: '#22c55e',
-      status: (kamailio.success_rate ?? 100) < 95 ? 'critical' : (kamailio.success_rate ?? 100) < 98 ? 'warning' : 'healthy',
-      icon: <CheckCircle className="w-5 h-5" />, subtitle: 'Kamailio · Calidad', component: 'kamailio', metric: 'success_rate',
+      key: 'kamailio.ner', title: 'NER', value: kamailio.ner != null ? kamailio.ner.toFixed(2) : '—', unit: '%',
+      sparklineData: historyData['kamailio.ner']?.data || [], color: '#22c55e',
+      status: kamailio.ner == null ? 'unknown'
+        : kamailio.ner < nerCrit ? 'critical' : kamailio.ner < nerWarn ? 'warning' : 'healthy',
+      icon: <CheckCircle className="w-5 h-5" />, subtitle: `Red · últimos ${nerWin} min`, component: 'kamailio', metric: 'ner',
       reason: {
-        explanation: `De cada 100 INVITEs, ${(kamailio.success_rate ?? 100).toFixed(1)} terminan en 2xx. 100% = señalización sana extremo a extremo.`,
-        impact: 'high', recommendation: 'Si baja de 98%, revisar 4xx (auth/rutas) y 5xx (carriers/PBX) en acc y Trunk Health.',
-        relatedMetrics: ['invite_4xx', 'invite_5xx', 'trunk_health'],
+        explanation: kamailio.ner == null
+          ? `Solo ${kamailio.call_attempts ?? 0} intentos en los últimos ${nerWin} min (mínimo ${kamailio.ner_min_attempts ?? 20}): muestra insuficiente para un porcentaje fiable.`
+          : `De ${kamailio.call_attempts} intentos en ${nerWin} min, ${kamailio.network_failures} fallaron por la red. ASR ${kamailio.asr?.toFixed(1)}% (contestadas). ` +
+            'Las no contestadas por decisión del usuario (ocupado, no contesta, rechazo, el llamante cuelga) no restan NER.',
+        impact: 'high',
+        recommendation: `Bajo ${nerWarn}%: revisar en CDRs las causas de red (timeout, congestión, destino caído, 503) y Trunk Health. Bajo ${nerCrit}%: incidente de red.`,
+        relatedMetrics: ['trunk_health', 'active_calls'],
       },
-      thresholds: [{ name: 'ASR', metric: 'success_rate', operator: '<', warning: 98, critical: 95, unit: '%', description: 'Answer-Seizure Ratio bajo', enabled: true }],
-      calculationMethod: { description: '200 OK / (200+4xx+5xx) de INVITE desde stats de Kamailio en ventana de 5 min.', formula: '100 * invite_200ok / (invite_200ok+invite_4xx+invite_5xx)', dataSources: ['kamcmd stats.get_statistics', 'acc table'], frequency: 'Cada 60s', latency: '< 2 min' },
+      thresholds: [{ name: 'NER', metric: 'ner', operator: '<', warning: nerWarn, critical: nerCrit, unit: '%', description: 'Network Effectiveness Ratio bajo (umbrales noc_ner_warn / noc_ner_crit, compartidos con el Dashboard NOC)', enabled: true }],
+      calculationMethod: {
+        description: `Network Effectiveness Ratio (ITU-T E.411/E.425) de los CDRs de los últimos ${nerWin} min, igual que el Dashboard NOC. El histórico usa intervalos de 15 min (hasta 6h) u horas, con el peor intervalo por punto; intervalos con menos de ${kamailio.ner_min_attempts ?? 20} intentos quedan vacíos.`,
+        formula: '100 × (intentos − fallas de red) / intentos; falla de red = no contestada con causa Q.850 de red (RECOVERY_ON_TIMER_EXPIRE, NORMAL_TEMPORARY_FAILURE, DESTINATION_OUT_OF_ORDER, *_CONGESTION, SERVICE_UNAVAILABLE, NO_ROUTE_*, GATEWAY_DOWN, MEDIA_TIMEOUT…)',
+        dataSources: ['cdrs (engine, al colgar)', 'system_settings noc_ner_*'],
+        frequency: 'Cada 30s', latency: 'Al colgar (CDR)',
+      },
     },
     {
       key: 'kamailio.shm', title: 'SHM Usage', value: kamailio.shm_usage_percent.toFixed(1), unit: '%',
@@ -368,7 +382,7 @@ const MonitoringDashboard: React.FC = () => {
             ))}
           </div>
         </div>
-        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución carrier-class: 1h/6h muestra cada minuto; 24h/7d/30d muestra el pico de cada hora (línea sólida), el promedio (punteada) y el rango mín–máx (sombra). Success Rate y Trunk Health muestran el peor valor (mínimo). La línea horizontal marca el pico del período.</p>
+        <p className="text-xs text-gray-500 mb-1">Click en las chips para añadir/quitar métricas. Resolución carrier-class: 1h/6h muestra cada minuto; 24h/7d/30d muestra el pico de cada hora (línea sólida), el promedio (punteada) y el rango mín–máx (sombra). NER y Trunk Health muestran el peor valor (mínimo); NER se calcula de los CDRs en intervalos de 15 min (1h/6h) u horas, y queda vacío si hay menos de 20 intentos. La línea horizontal marca el pico del período.</p>
         <p className="text-[11px] text-gray-400 mb-4">
           Histórico: raw 30 días · hourly 93 días · daily 400 días.
           {histStatus?.tiers?.raw?.tables?.kamailio?.oldest

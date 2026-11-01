@@ -11,7 +11,6 @@ import time
 import socket
 import re
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
@@ -39,7 +38,17 @@ DAILY_RETENTION_DAYS = 400
 # Trunk health probe (KamailioCollector._probe_trunks)
 KAMAILIO_CFG = "/etc/kamailio/kamailio.cfg"
 ONE_SIDED_MIN_AGE = 90          # s; younger sessions may still be ringing
-TRUNK_PROBE_TIMEOUT = 4          # seconds per SIP OPTIONS
+TRUNK_PROBE_TIMEOUT = 6          # seconds per SIP OPTIONS (Integratel p99 ~3.8 s at busy hour)
+# Carrier-class hysteresis (as Kamailio dispatcher's ds_probing_threshold): a
+# trunk is declared down only after this many consecutive failed probes; one
+# answered OPTIONS brings it back. A single lost OPTIONS is not an outage.
+TRUNK_DOWN_THRESHOLD = 3
+# Kamailio keepalive mode (config/kamailio/kamailio.cfg, htables ka_status/ka_ok):
+# Kamailio pings every KA_PING_INTERVAL s on its own; a trunk is down when no
+# reply proving it alive arrived for TRUNK_DOWN_THRESHOLD intervals (+ margin).
+KA_OWNER = "apolo"
+KA_PING_INTERVAL = 20            # = modparam("keepalive", "ping_interval")
+KA_DOWN_AFTER = TRUNK_DOWN_THRESHOLD * KA_PING_INTERVAL + 5
 TRUNK_LOG_RETENTION_DAYS = 7     # routing_sip_status_log: 1 row/trunk/minute
 RAW_JSON_STRIP_HOURS = 48
 
@@ -204,6 +213,136 @@ class KamailioCollector:
             "private": sock("INTERNAL_IP_ADDR", "FS_PORT", "KAM_PRIVATE_SOCKET"),
         }
 
+    def _kamcmd_out(self, *args: str) -> Optional[str]:
+        """kamcmd output, None on failure (kamcmd exits 0 on RPC errors)."""
+        try:
+            out = subprocess.run([self.kamcmd_path, *args], capture_output=True, text=True, timeout=5)
+        except Exception:
+            return None
+        txt = (out.stdout or "") + (out.stderr or "")
+        if out.returncode != 0 or re.match(r"\s*error:", txt, re.I):
+            return None
+        return out.stdout
+
+    def _kam_htable(self, name: str) -> Optional[Dict[str, str]]:
+        out = self._kamcmd_out("htable.dump", name)
+        if out is None:
+            return None
+        table, key = {}, None
+        for line in out.splitlines():
+            m = re.match(r"\s*(name|value):\s?(.*)$", line)
+            if not m:
+                continue
+            if m.group(1) == "name":
+                key = m.group(2).strip()
+            elif key is not None:
+                table[key] = m.group(2).strip()
+                key = None
+        return table
+
+    def _ka_list(self) -> Optional[Dict[str, str]]:
+        """keepalive destinations {uri: owner}."""
+        out = self._kamcmd_out("keepalive.list")
+        if out is None:
+            return None
+        dests, uri = {}, None
+        for line in out.splitlines():
+            m = re.match(r"\s*(uri|owner):\s*(.*)$", line)
+            if not m:
+                continue
+            if m.group(1) == "uri":
+                uri = m.group(2).strip()
+            elif uri is not None:
+                dests[uri] = m.group(2).strip()
+                uri = None
+        return dests
+
+    def _probe_trunks_keepalive(self, rows) -> Optional[List[Dict[str, Any]]]:
+        """Trunk status from Kamailio's own OPTIONS (keepalive + ka_* htables).
+        None when the running Kamailio has no ka_status htable (config not
+        deployed yet): the caller falls back to the kamcmd probe."""
+        status = self._kam_htable("ka_status")
+        if status is None:
+            return None
+        ok = self._kam_htable("ka_ok") or {}
+        ka = self._ka_list() or {}
+        now = time.time()
+
+        wanted = {}
+        results = []
+        for t in rows:
+            r = {
+                "id": str(t["id"]), "name": t["name"], "trunk_type": t["trunk_type"],
+                "host": t["host"], "port": t["port"], "sip_status": "unreachable",
+                "response_code": None, "latency_ms": None, "message": None,
+                "log_status": "timeout",
+            }
+            transport = (t.get("transport") or "udp").lower()
+            if transport != "udp":
+                r.update(sip_status="unknown", log_status="error",
+                         message=f"Transporte {transport} no soportado por la sonda")
+                results.append(r)
+                continue
+            uri = f"sip:{t['host']}:{t['port']}"
+            wanted[uri] = True
+            if uri not in ka:
+                self._kamcmd_out("keepalive.add", uri, KA_OWNER)
+            try:
+                ip = socket.gethostbyname(t["host"])
+            except OSError:
+                ip = t["host"]
+            key = f"{ip}:{t['port']}"
+
+            last = status.get(key)          # "code|epoch|latency_ms|reason"
+            ok_ts = float(ok[key]) if key in ok else None
+            code = ts = lat = None
+            reason = ""
+            if last:
+                parts = last.split("|", 3)
+                try:
+                    code, ts, lat = int(parts[0]), float(parts[1]), int(parts[2])
+                    reason = parts[3] if len(parts) > 3 else ""
+                except (ValueError, IndexError):
+                    code = None
+            if code is None and ok_ts is None:
+                if uri not in ka:
+                    # Just added: Kamailio hasn't pinged it yet; keep the stored state.
+                    r.update(sip_status=t.get("sip_status") or "unknown", skip=True)
+                    results.append(r)
+                    continue
+                r["message"] = "Sin respuesta a OPTIONS de Kamailio (keepalive)"
+                results.append(r)
+                continue
+
+            r["response_code"] = code
+            r["latency_ms"] = lat if lat is not None and lat >= 0 else None
+            alive = ok_ts is not None and now - ok_ts <= KA_DOWN_AFTER
+            last_ok = ok_ts is not None and (ts is None or ok_ts >= ts)
+            recent = ts is not None and now - ts <= KA_PING_INTERVAL * 1.5 + 5
+            # Log status = this interval's probe; sip_status = with hysteresis.
+            if last_ok and recent:
+                r["log_status"] = "success"
+            elif recent and code is not None:
+                r["log_status"] = "timeout" if code == 408 else "error"
+            if alive:
+                r["sip_status"] = "reachable"
+                if r["log_status"] == "success":
+                    r["message"] = f"{code} {reason} - Latencia: {r['latency_ms']}ms"
+                else:
+                    miss = f"{code} {reason}" if recent and code is not None else "sin respuesta"
+                    r["message"] = (f"Último OPTIONS: {miss}; respondió hace {int(now - ok_ts)}s "
+                                    f"(caído tras {KA_DOWN_AFTER}s sin respuesta, sigue en servicio)")
+            else:
+                since = datetime.fromtimestamp(ok_ts).strftime("%d/%m %H:%M:%S") if ok_ts else "nunca"
+                last_txt = f"{code} {reason}" if recent and code is not None else "sin respuesta"
+                r["message"] = f"{last_txt}; última respuesta válida: {since}"
+            results.append(r)
+
+        for uri, owner in ka.items():
+            if owner == KA_OWNER and uri not in wanted:
+                self._kamcmd_out("keepalive.del", uri, KA_OWNER)
+        return results
+
     def _probe_trunk(self, trunk: Dict[str, Any], sockets: Dict[str, str]) -> Dict[str, Any]:
         result = {
             "id": str(trunk["id"]), "name": trunk["name"],
@@ -255,21 +394,55 @@ class KamailioCollector:
                           message=f"{code} {reason}")
         return result
 
+    def _probe_trunks_kamcmd(self, db, rows) -> List[Dict[str, Any]]:
+        """Legacy probe (Kamailio without the ka_* htables): blocking
+        `kamcmd tm.t_uac_wait_block`, with failure-count hysteresis from the log."""
+        sockets = self._kamailio_sockets()
+        # Sequential on purpose: Kamailio serves kamcmd through ONE ctl
+        # process and tm.t_uac_wait_block holds it until the reply, so
+        # parallel probes only queue behind the slowest peer and time out
+        # together (all trunks "down" at once at busy hour, 2026-10).
+        results = [self._probe_trunk(dict(r), sockets) for r in rows]
+
+        for r in results:
+            if r["log_status"] == "success" or r["sip_status"] == "unknown":
+                continue
+            # Consecutive failures before this probe (log, newest first)
+            hist = db.execute(sa_text(
+                "SELECT status FROM routing_sip_status_log WHERE trunk_id = :id "
+                "ORDER BY check_timestamp DESC LIMIT :n"
+            ), {"id": r["id"], "n": TRUNK_DOWN_THRESHOLD - 1}).scalars().all()
+            fails = 1
+            for st in hist:
+                if st == "success":
+                    break
+                fails += 1
+            if fails < TRUNK_DOWN_THRESHOLD:
+                # Still in service: the miss is logged, the state doesn't flap.
+                r["sip_status"] = "reachable"
+                r["message"] = f"{r['message']} (fallo {fails}/{TRUNK_DOWN_THRESHOLD}, sigue en servicio)"
+            else:
+                r["message"] = f"{r['message']} ({fails} sondas seguidas sin respuesta)"
+
+        return results
+
     def _probe_trunks(self) -> Optional[List[Dict[str, Any]]]:
         db = SessionLocal()
         try:
             rows = db.execute(sa_text(
                 "SELECT id, name, COALESCE(trunk_type, 'public') AS trunk_type, host, "
-                "COALESCE(port, 5060) AS port, transport "
+                "COALESCE(port, 5060) AS port, transport, sip_status "
                 "FROM routing_trunks WHERE enabled = true ORDER BY name"
             )).mappings().all()
             if not rows:
                 return []
-            sockets = self._kamailio_sockets()
-            with ThreadPoolExecutor(max_workers=min(8, len(rows))) as pool:
-                results = list(pool.map(lambda r: self._probe_trunk(dict(r), sockets), rows))
+            results = self._probe_trunks_keepalive(rows)
+            if results is None:
+                results = self._probe_trunks_kamcmd(db, rows)
 
             for r in results:
+                if r.get("skip"):
+                    continue
                 db.execute(sa_text(
                     "UPDATE routing_trunks SET sip_status = :st, sip_status_message = :msg, "
                     "last_options_check = NOW(), last_options_latency_ms = :lat, "
@@ -282,13 +455,13 @@ class KamailioCollector:
                     "VALUES (:id, 'kamailio', :st, :code, :lat, :err)"
                 ), {"id": r["id"], "st": r["log_status"], "code": r["response_code"],
                     "lat": r["latency_ms"],
-                    "err": None if r["sip_status"] == "reachable" else r["message"]})
+                    "err": None if r["log_status"] == "success" else r["message"]})
             db.execute(sa_text(
                 "DELETE FROM routing_sip_status_log "
                 f"WHERE check_timestamp < NOW() - INTERVAL '{TRUNK_LOG_RETENTION_DAYS} days'"
             ))
             db.commit()
-            return [{k: v for k, v in r.items() if k != "log_status"} for r in results]
+            return [{k: v for k, v in r.items() if k not in ("log_status", "skip")} for r in results]
         except Exception as e:
             db.rollback()
             print(f"Trunk probe failed: {e}")

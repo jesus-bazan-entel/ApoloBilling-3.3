@@ -65,7 +65,17 @@ class KamailioSummary(BaseModel):
     """Summary for dashboard cards"""
     active_calls: int
     calls_per_second: float
-    success_rate: float  # 200ok / (200ok + 4xx + 5xx)
+    success_rate: float  # 200ok / (200ok + 4xx + 5xx) of INVITE, last 5 min (Kamailio counters)
+    # NER (ITU-T E.411/E.425) from CDRs over the last NER_WINDOW_MIN minutes:
+    # only network-caused failures count against it (same as the NOC dashboard).
+    ner: Optional[float] = None          # None = fewer attempts than ner_min_attempts
+    asr: Optional[float] = None
+    call_attempts: int = 0
+    network_failures: int = 0
+    ner_window_min: int = 15
+    ner_warn: float = 99.0
+    ner_crit: float = 97.0
+    ner_min_attempts: int = 20
     shm_usage_percent: float
     active_transactions: int
     dispatcher_health: str  # "healthy", "degraded", "critical"

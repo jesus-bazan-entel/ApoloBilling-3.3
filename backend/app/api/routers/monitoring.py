@@ -234,10 +234,61 @@ def _fetch_base_series(db, component, col, start, tier):
     return [(r[0], r[1]) for r in rows]
 
 
+# ==================== NER (ITU-T E.411 / E.425) ====================
+# Carrier-class call-completion KPI computed from CDRs: only failures caused by
+# the network count; busy, no answer, rejected or caller-cancelled calls are
+# the user's choice. MUST mirror NETWORK_FAILURE_CAUSES of the NOC dashboard
+# (rust-backend/crates/apolo-api/src/handlers/stats.rs) and its thresholds
+# (system_settings noc_ner_warn / noc_ner_crit / noc_min_range_attempts).
+NETWORK_FAILURE_CAUSES = [
+    "RECOVERY_ON_TIMER_EXPIRE", "NORMAL_TEMPORARY_FAILURE", "NETWORK_OUT_OF_ORDER",
+    "DESTINATION_OUT_OF_ORDER", "SWITCH_CONGESTION", "NORMAL_CIRCUIT_CONGESTION",
+    "REQUESTED_CHAN_UNAVAIL", "NO_ROUTE_DESTINATION", "NO_ROUTE_TRANSIT_NET",
+    "INCOMPATIBLE_DESTINATION", "MEDIA_TIMEOUT", "SERVICE_UNAVAILABLE",
+    "BEARERCAPABILITY_NOTAVAIL", "INTERWORKING", "PROTOCOL_ERROR", "GATEWAY_DOWN",
+    "MANDATORY_IE_MISSING", "INVALID_MSG_UNSPECIFIED",
+]
+NER_WINDOW_MIN = 15  # card window (ITU-T measurement interval)
+
+
+def _noc_thresholds(db) -> Dict[str, float]:
+    th = {"noc_ner_warn": 99.0, "noc_ner_crit": 97.0, "noc_min_range_attempts": 20}
+    try:
+        rows = db.execute(text(
+            "SELECT key, value FROM system_settings WHERE key = ANY(:k)"
+        ), {"k": list(th.keys())}).all()
+        for k, v in rows:
+            try:
+                th[k] = float(v)
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        db.rollback()
+    return th
+
+
+def _ner_series(db, start, bucket_seconds: int, min_attempts: int):
+    """[(ts_naive_utc, ner_pct | None)] per bucket of CDR start_time.
+    Buckets with fewer than min_attempts calls are None (sample too small)."""
+    rows = db.execute(text("""
+        SELECT to_timestamp(floor(extract(epoch FROM start_time) / :b) * :b)
+                 AT TIME ZONE 'UTC' AS bucket,
+               COUNT(*) AS attempts,
+               COUNT(*) FILTER (WHERE answer_time IS NULL AND hangup_cause = ANY(:nf)) AS nf
+        FROM cdrs
+        WHERE start_time >= :start
+        GROUP BY 1 ORDER BY 1
+    """), {"b": bucket_seconds, "nf": NETWORK_FAILURE_CAUSES,
+           "start": start.replace(tzinfo=timezone.utc)}).all()
+    return [(r[0], round(100.0 * (r[1] - r[2]) / r[1], 2) if r[1] >= min_attempts else None)
+            for r in rows]
+
+
 # Gauges where a LOW value is the bad one: their "peak" (agg=peak) is the
 # bucket minimum (worst hour), for every other gauge it is the maximum.
 LOWER_IS_WORSE = {
     ("kamailio", "success_rate"),
+    ("kamailio", "ner"),
     ("kamailio", "trunk_health"),
     ("kamailio", "dispatcher_health"),
 }
@@ -321,6 +372,18 @@ def query_timeseries(
 
     tier = _resolve_tier(hours, resolution)
     start = datetime.utcnow() - timedelta(hours=hours)
+
+    if (component, metric) == ("kamailio", "ner"):
+        # From CDRs: 15-min buckets up to 12 h (ITU-T interval), else hourly/daily.
+        bucket = 900 if tier == "raw" else 3600 if tier == "hourly" else 86400
+        th = _noc_thresholds(db)
+        data = [{"timestamp": ts.isoformat(), "value": v}
+                for ts, v in _ner_series(db, start, bucket, int(th["noc_min_range_attempts"]))]
+        if agg not in ("max", "min"):
+            agg = "avg"
+        if max_points and len(data) > max_points:
+            data = _downsample(data, max_points, agg)
+        return MetricsTimeSeries(metric=metric, component=component, unit="%", data=data)
 
     # Single-column gauges: (base column, scale factor)
     gauge = None
@@ -449,6 +512,21 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             )
         
         k = kamailio_latest
+        th = _noc_thresholds(db)
+        min_att = int(th["noc_min_range_attempts"])
+        win = db.execute(text("""
+            SELECT COUNT(*) AS attempts, COUNT(answer_time) AS answered,
+                   COUNT(*) FILTER (WHERE answer_time IS NULL AND hangup_cause = ANY(:nf)) AS nf
+            FROM cdrs WHERE start_time >= now() - make_interval(mins => :m)
+        """), {"nf": NETWORK_FAILURE_CAUSES, "m": NER_WINDOW_MIN}).one()
+        attempts, answered, nf = int(win[0]), int(win[1]), int(win[2])
+        ner = round(100.0 * (attempts - nf) / attempts, 2) if attempts >= min_att else None
+        asr = round(100.0 * answered / attempts, 2) if attempts >= min_att else None
+        ner_fields = dict(
+            ner=ner, asr=asr, call_attempts=attempts, network_failures=nf,
+            ner_window_min=NER_WINDOW_MIN, ner_warn=th["noc_ner_warn"],
+            ner_crit=th["noc_ner_crit"], ner_min_attempts=min_att,
+        )
         # Success rate over the last 5 min (deltas of Kamailio's cumulative
         # counters; their raw ratio would be the average since Kamailio started).
         success_rate = 100.0
@@ -488,6 +566,7 @@ def get_dashboard_overview(db: Session = Depends(get_db)):
             active_calls=k.active_calls,
             calls_per_second=round(cps, 2),
             success_rate=round(success_rate, 2),
+            **ner_fields,
             shm_usage_percent=round(shm_pct, 2),
             active_transactions=k.active_transactions,
             dispatcher_health=disp_health,
@@ -987,7 +1066,7 @@ def _get_unit(metric: str) -> str:
         "cpu_percent": "%", "memory_percent": "%", "disk_percent": "%",
         "port_usage_percent": "%", "connection_usage_percent": "%",
         "queries_per_second": "qps", "calls_per_second": "cps",
-        "success_rate": "%", "shm_usage_percent": "%",
+        "success_rate": "%", "ner": "%", "shm_usage_percent": "%",
         "packet_loss_percent": "%", "net_throughput_mbps": "Mbps",
         "dispatcher_health": "gateways",
         "trunk_health": "trunks",
