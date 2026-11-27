@@ -1085,6 +1085,24 @@ EOF
         log_success "rtpengine-kernel-check.timer enabled (every 5 min)"
     fi
 
+    # --- Services that write timestamps start after NTP sync ---
+    # 2026-11-26: the VM booted with its RTC ~5 h ahead and for ~35 s rows
+    # were stamped in the future. time-wait-sync is capped at 60 s so an
+    # unreachable NTP only delays the boot, never blocks it.
+    if [[ -f "$SRC/systemd/10-wait-ntp.conf" ]]; then
+        systemctl enable systemd-time-wait-sync.service 2>/dev/null || true
+        mkdir -p /etc/systemd/system/systemd-time-wait-sync.service.d
+        cp -a "$SRC/systemd/systemd-time-wait-sync-timeout.conf" \
+              /etc/systemd/system/systemd-time-wait-sync.service.d/10-timeout.conf
+        local u
+        for u in postgresql@ mariadb kamailio freeswitch apolo-backend apolo-billing-engine apolo-monitoring; do
+            mkdir -p "/etc/systemd/system/${u}.service.d"
+            cp -a "$SRC/systemd/10-wait-ntp.conf" "/etc/systemd/system/${u}.service.d/10-wait-ntp.conf"
+        done
+        systemctl daemon-reload
+        log_success "services ordered after time-sync.target (NTP wait capped at 60 s)"
+    fi
+
     # --- RTPEngine kernel mode needs the iptables-legacy backend ---
     # xt_RTPENGINE is an xtables extension: only the legacy backend can
     # create/inspect its `-j RTPENGINE` rule, while ngcp-rtpengine-iptables-setup
