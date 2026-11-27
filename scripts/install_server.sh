@@ -999,6 +999,10 @@ EOF
         mysql -u root <<EOF
 CREATE USER IF NOT EXISTS 'kamailio_sbc'@'localhost' IDENTIFIED BY '$kam_db_pw';
 ALTER USER 'kamailio_sbc'@'localhost' IDENTIFIED BY '$kam_db_pw';
+-- Cap (normal use ~23): on 2026-11-26 slow acc inserts + db_mysql
+-- timeout_interval=1 reconnects piled up to max_connections (1000) and
+-- starved every other MySQL user for an hour.
+ALTER USER 'kamailio_sbc'@'localhost' WITH MAX_USER_CONNECTIONS 200;
 GRANT ALL PRIVILEGES ON kamailio.* TO 'kamailio_sbc'@'localhost';
 FLUSH PRIVILEGES;
 EOF
@@ -1070,6 +1074,15 @@ EOF
         cp -a "$SRC/rtpengine/rtpengine-kernel-check.sh" /usr/local/sbin/rtpengine-kernel-check
         chmod 755 /usr/local/sbin/rtpengine-kernel-check
         log_success "rtpengine-kernel-check installed (post-start kernel self-check)"
+    fi
+    # Periodic check/self-heal of the kernel rule (firewalld/docker rewrite
+    # iptables at boot or on reload; the rule went missing on 2026-11-26).
+    if [[ -f "$SRC/rtpengine/systemd/rtpengine-kernel-check.timer" ]]; then
+        cp -a "$SRC/rtpengine/systemd/rtpengine-kernel-check.service" \
+              "$SRC/rtpengine/systemd/rtpengine-kernel-check.timer" /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl enable --now rtpengine-kernel-check.timer 2>/dev/null || true
+        log_success "rtpengine-kernel-check.timer enabled (every 5 min)"
     fi
 
     # --- RTPEngine kernel mode needs the iptables-legacy backend ---

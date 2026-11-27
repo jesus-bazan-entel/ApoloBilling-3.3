@@ -1,0 +1,9 @@
+[Unit]
+Description=Apolo: verify/restore the rtpengine kernel-forwarding iptables rule
+After=rtpengine.service
+Requisite=rtpengine.service
+
+[Service]
+Type=oneshot
+SyslogIdentifier=rtpengine-kernel-check
+ExecStart=/usr/local/sbin/rtpengine-kernel-check --quiet
